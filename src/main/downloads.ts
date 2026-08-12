@@ -149,7 +149,17 @@ export function initDownloads(getWindow: () => BrowserWindow | null): void {
 
     item.once("done", (_doneEvent, doneState) => {
       active.delete(pending.id);
-      const completed = doneState === "completed";
+      const mime = item.getMimeType().toLowerCase();
+      const invalidPayload =
+        mime.includes("dash+xml") || mime.includes("text/html") || mime.includes("application/json");
+      const completed = doneState === "completed" && !invalidPayload;
+      if (invalidPayload) {
+        try {
+          fs.rmSync(pending.savePath, { force: true });
+        } catch {
+          // The record below still explains why the unusable transfer was rejected.
+        }
+      }
       broadcast(
         upsert({
           ...pending,
@@ -159,6 +169,9 @@ export function initDownloads(getWindow: () => BrowserWindow | null): void {
           state: completed ? "completed" : doneState === "cancelled" ? "cancelled" : "interrupted",
           completedAt: completed ? Date.now() : null,
           fileExists: completed && fs.existsSync(pending.savePath),
+          failureReason: invalidPayload
+            ? "The server returned a manifest or error page instead of a playable video."
+            : undefined,
         }),
       );
     });
@@ -168,6 +181,9 @@ export function initDownloads(getWindow: () => BrowserWindow | null): void {
 export function startDownload(request: DownloadRequest): DownloadRecord {
   const window = resolveWindow();
   if (!window) throw new Error("No window is available to own the download.");
+  if (request.sourceKind === "dash" || /\.mpd(?:$|\?)/i.test(request.url)) {
+    throw new Error("Adaptive DASH manifests cannot be saved as videos. Choose an MP4 source.");
+  }
 
   const directory = app.getPath("downloads");
   const filename = buildFilename(request);

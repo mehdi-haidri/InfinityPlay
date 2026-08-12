@@ -53,7 +53,7 @@ export function Player() {
   const idleTimer = useRef<number>();
   const lastSaved = useRef(0);
 
-  const [sourceUrl, setSourceUrl] = useState(request?.url ?? "");
+  const [sourceUrl, setSourceUrl] = useState("");
   const [activeRelease, setActiveRelease] = useState<Release | null>(null);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
@@ -98,14 +98,44 @@ export function Player() {
   // object so an unrelated re-render can never restart playback mid-episode.
   useEffect(() => {
     if (!request) return;
-    setSourceUrl(request.url);
+    let cancelled = false;
+    setSourceUrl("");
+    setWaiting(true);
+    unwrap(api.media.prepareLive(request.url))
+      .then((prepared) => {
+        if (cancelled) return;
+        setSourceUrl(prepared.url);
+        if (prepared.warning) {
+          notify({
+            kind: "info",
+            title: prepared.transcoded ? "Compatibility playback" : "Video codec warning",
+            body: prepared.warning,
+          });
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setSourceUrl(request.url);
+        notify({
+          kind: "error",
+          title: "Could not inspect the video codec",
+          body: error instanceof Error ? error.message : undefined,
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setWaiting(false);
+      });
     setActiveRelease(releases.find((release) => release.url === request.url) ?? null);
     setSubtitle(null);
     setCurrent(request.startAt ?? 0);
     setDuration(0);
     lastSaved.current = 0;
+    return () => {
+      cancelled = true;
+    };
+    // Request identity is intentionally the media URL; metadata updates must not restart it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request?.url]);
+  }, [request?.url, notify]);
 
   /**
    * Turns on the requested subtitle once a new source is up. Declared after the reset
@@ -464,12 +494,28 @@ export function Player() {
     buttons[target]?.focus();
   };
 
-  const chooseRelease = (release: Release) => {
+  const chooseRelease = async (release: Release) => {
     const video = videoRef.current;
     const resumeAt = video?.currentTime ?? 0;
     setActiveRelease(release);
-    setSourceUrl(release.url);
     setMenu(null);
+    setWaiting(true);
+    try {
+      const prepared = await unwrap(api.media.prepareLive(release.url));
+      setSourceUrl(prepared.url);
+      if (prepared.warning) {
+        notify({ kind: "info", title: "Compatibility playback", body: prepared.warning });
+      }
+    } catch (error) {
+      notify({
+        kind: "error",
+        title: "Could not switch source",
+        body: error instanceof Error ? error.message : undefined,
+      });
+      return;
+    } finally {
+      setWaiting(false);
+    }
     // Restore the position once the new file reports metadata.
     const restore = () => {
       const next = videoRef.current;
@@ -663,7 +709,7 @@ export function Player() {
                     <button
                       key={release.url}
                       data-active={release.url === activeRelease?.url}
-                      onClick={() => chooseRelease(release)}
+                      onClick={() => void chooseRelease(release)}
                     >
                       {release.url === activeRelease?.url ? <Check size={14} /> : <span style={{ width: 14 }} />}
                       {release.kind === "dash"

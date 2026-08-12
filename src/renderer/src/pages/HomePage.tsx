@@ -48,10 +48,17 @@ export function HomePage() {
       }));
   }, [watchHistory]);
 
-  const progressOf = (item: CatalogItem) => {
-    const entry = watchHistory.find((candidate) => candidate.subjectId === item.id);
-    return entry && entry.duration > 0 ? entry.position / entry.duration : 0;
-  };
+  const progressBySubject = useMemo(() => {
+    const progress = new Map<string, number>();
+    for (const entry of watchHistory) {
+      if (entry.duration > 0 && !progress.has(entry.subjectId)) {
+        progress.set(entry.subjectId, entry.position / entry.duration);
+      }
+    }
+    return progress;
+  }, [watchHistory]);
+
+  const progressOf = (item: CatalogItem) => progressBySubject.get(item.id) ?? 0;
 
   if (error) return <div className="page"><ErrorState message={error} onRetry={reload} /></div>;
 

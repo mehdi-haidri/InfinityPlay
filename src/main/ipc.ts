@@ -12,6 +12,7 @@ import type {
   MediaType,
   Result,
   WatchHistoryItem,
+  PreparedLiveStream,
 } from "@shared/types";
 import { MovieBoxService } from "./providers/moviebox";
 import { fetchPlaylist } from "./providers/m3u";
@@ -41,6 +42,7 @@ import {
   installUpdate,
   isAutoUpdateSupported,
 } from "./updater";
+import { prepareLiveStream } from "./live";
 
 const moviebox = new MovieBoxService();
 
@@ -97,6 +99,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   handle("tv:playlist", (url: string, forceRefresh: boolean) =>
     fetchPlaylist(url, forceRefresh ?? false),
   );
+  handle("media:prepareLive", (url: string): Promise<PreparedLiveStream> => prepareLiveStream(url));
 
   handle("config:get", () => getConfig());
   handle("config:update", (patch: Partial<AppConfig>) => updateConfig(patch));

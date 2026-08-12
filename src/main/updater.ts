@@ -22,6 +22,20 @@ const DEVELOPMENT_UNSUPPORTED_MESSAGE =
 const UNSIGNED_MAC_UNSUPPORTED_MESSAGE =
   "Automatic updates require a signed macOS build. Download the newest DMG from GitHub Releases.";
 
+const LEGACY_LINUX_RELEASE_MESSAGE =
+  "This Linux release predates updater metadata. Download the latest AppImage, DEB, RPM, or Arch package from GitHub Releases.";
+
+function publishError(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  if (process.platform === "linux" && /latest-linux\.yml/i.test(message) && /404|cannot find/i.test(message)) {
+    publish({ state: "unsupported", message: LEGACY_LINUX_RELEASE_MESSAGE });
+    return;
+  }
+  // electron-updater includes full HTTP headers and its internal stack in some messages.
+  // The first line contains the useful reason and keeps About readable.
+  publish({ state: "error", message: message.split("\n")[0] || "The update check failed." });
+}
+
 function unsupportedMessage(): string | null {
   if (!app.isPackaged) return DEVELOPMENT_UNSUPPORTED_MESSAGE;
   // Squirrel.Mac rejects unsigned update bundles. Keep checks disabled until the release
@@ -54,10 +68,7 @@ function bindListeners(): void {
     publish({ state: "available", version: info.version });
     // Fetch straight away; the user is only asked before the restart.
     autoUpdater.downloadUpdate().catch((error: unknown) => {
-      publish({
-        state: "error",
-        message: error instanceof Error ? error.message : String(error),
-      });
+      publishError(error);
     });
   });
 
@@ -79,10 +90,7 @@ function bindListeners(): void {
   });
 
   autoUpdater.on("error", (error) => {
-    publish({
-      state: "error",
-      message: error instanceof Error ? error.message : String(error),
-    });
+    publishError(error);
   });
 }
 
@@ -113,10 +121,7 @@ export async function checkForUpdates(): Promise<UpdateStatus> {
   try {
     await autoUpdater.checkForUpdates();
   } catch (error) {
-    publish({
-      state: "error",
-      message: error instanceof Error ? error.message : String(error),
-    });
+    publishError(error);
   }
   return status;
 }

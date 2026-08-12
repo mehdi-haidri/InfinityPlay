@@ -10,6 +10,7 @@ import type {
   HomePage,
   MediaDetails,
   MediaType,
+  PreparedLiveStream,
   Release,
   Result,
   SubtitleOption,
@@ -41,6 +42,9 @@ const api = {
   tv: {
     playlist: (url: string, forceRefresh = false) =>
       invoke<Channel[]>("tv:playlist", url, forceRefresh),
+  },
+  media: {
+    prepareLive: (url: string) => invoke<PreparedLiveStream>("media:prepareLive", url),
   },
   config: {
     get: () => invoke<AppConfig>("config:get"),

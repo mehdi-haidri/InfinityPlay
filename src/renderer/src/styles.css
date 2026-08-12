@@ -423,6 +423,8 @@ button {
 
 .row {
   margin-bottom: 42px;
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
 }
 
 .row-header {
@@ -488,6 +490,7 @@ button {
   overflow: hidden;
   background: var(--bg-panel);
   box-shadow: var(--shadow-card);
+  contain: layout paint style;
 }
 
 .card-art img {

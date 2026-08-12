@@ -6,6 +6,7 @@ import { registerIpcHandlers } from "./ipc";
 import { initUpdater } from "./updater";
 import { initDownloads } from "./downloads";
 import { installStreamSigner } from "./streams";
+import { LIVE_TRANSCODE_SCHEME, registerLiveTranscodeProtocol } from "./live";
 
 const isDev = !app.isPackaged;
 
@@ -21,6 +22,10 @@ const LOCAL_MEDIA_SCHEME = "ipmedia";
 protocol.registerSchemesAsPrivileged([
   {
     scheme: LOCAL_MEDIA_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+  },
+  {
+    scheme: LIVE_TRANSCODE_SCHEME,
     privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
   },
 ]);
@@ -163,6 +168,7 @@ app.whenReady().then(() => {
   rewriteMediaRequestHeaders();
   installStreamSigner();
   registerLocalMediaProtocol();
+  registerLiveTranscodeProtocol();
   registerIpcHandlers(() => mainWindow);
   mainWindow = createWindow();
   initDownloads(() => mainWindow);

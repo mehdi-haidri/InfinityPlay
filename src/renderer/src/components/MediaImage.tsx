@@ -39,6 +39,7 @@ export function MediaImage({
       alt={alt}
       className={className}
       loading={loading}
+      decoding="async"
       onError={() => setFailedSrc(src ?? null)}
     />
   );

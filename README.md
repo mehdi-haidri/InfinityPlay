@@ -49,6 +49,10 @@ sudo pacman -U ./InfinityPlay-*-linux-x64.pkg.tar.zst
 Installed Windows and supported Linux packages can update from GitHub Releases through
 the About page.
 
+On Linux, InfinityPlay uses the system `ffprobe` and `ffmpeg` when a Live TV channel or
+download uses MPEG-2 or HEVC video that Chromium cannot decode directly. Install FFmpeg
+from your distribution when compatibility playback is needed.
+
 ## Development
 
 Requires **Node.js 20+**.

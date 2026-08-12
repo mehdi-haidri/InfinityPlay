@@ -38,7 +38,7 @@ function stateLabel(record: DownloadRecord): string {
     case "cancelled":
       return "Cancelled";
     default:
-      return "Interrupted — start it again from the title page";
+      return record.failureReason ?? "Interrupted — start it again from the title page";
   }
 }
 

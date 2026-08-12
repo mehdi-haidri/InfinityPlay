@@ -219,11 +219,30 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
 
   // The store owns the toast and the progress stream; this only supplies the metadata
   // the Downloads page needs to show a poster and play the file back.
-  const download = (release: Release) =>
+  const download = (release: Release) => {
+    const candidates = (releases.data ?? []).filter((item) => item.kind !== "dash");
+    const downloadable = release.kind === "dash"
+      ? candidates.find((item) => item.resolution <= release.resolution) ?? candidates[0]
+      : release;
+    if (!downloadable) {
+      notify({
+        kind: "error",
+        title: "No downloadable file",
+        body: "This title only provides an adaptive stream. A standalone MP4 is not available.",
+      });
+      return;
+    }
+    if (downloadable !== release) {
+      notify({
+        kind: "info",
+        title: `Downloading ${qualityLabel(downloadable.resolution)}`,
+        body: "The higher-quality option is adaptive, so InfinityPlay selected the best standalone MP4.",
+      });
+    }
     void beginDownload({
-      url: release.url,
+      url: downloadable.url,
       // Captions hang off a progressive release; the adaptive manifest has no caption id.
-      resourceId: captionSource?.resourceId ?? release.resourceId,
+      resourceId: captionSource?.resourceId ?? downloadable.resourceId,
       title: media.title,
       year: media.year,
       posterUrl: media.posterUrl,
@@ -231,8 +250,10 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
       mediaType: media.mediaType,
       season: isSeries ? season : 0,
       episode: isSeries ? episode : 0,
-      resolution: release.resolution,
+      resolution: downloadable.resolution,
+      sourceKind: downloadable.kind ?? "mp4",
     });
+  };
 
   return (
     <div className="page">

@@ -24,6 +24,13 @@ page, then offers **Restart & install** when a new version is ready.
   resilient image fallbacks.
 - Improved player slider and menu keyboard support, reduced-motion behavior, download
   announcements, empty states and package-specific update help.
+- Added FFmpeg compatibility playback for MPEG-2 and HEVC sources that otherwise played
+  audio over a black video surface on Linux.
+- Fixed adaptive DASH manifests being saved as tiny completed downloads; downloads now
+  select a real progressive file and reject non-media responses.
+- Reduced scrolling work with off-screen row containment, asynchronous image decoding,
+  indexed watch progress and narrower state subscriptions.
+- Replaced legacy Linux updater metadata 404 stacks with concise manual-update guidance.
 
 ---
 

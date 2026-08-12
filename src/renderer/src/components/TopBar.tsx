@@ -7,7 +7,13 @@ import { useApp } from "../store";
 import { MediaImage } from "./MediaImage";
 
 export function TopBar() {
-  const { route, navigate, goBack, goForward, history, future, notify } = useApp();
+  const route = useApp((state) => state.route);
+  const navigate = useApp((state) => state.navigate);
+  const goBack = useApp((state) => state.goBack);
+  const goForward = useApp((state) => state.goForward);
+  const historyLength = useApp((state) => state.history.length);
+  const futureLength = useApp((state) => state.future.length);
+  const notify = useApp((state) => state.notify);
 
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState<CatalogItem[]>([]);
@@ -115,7 +121,7 @@ export function TopBar() {
       <button
         className="icon-button"
         onClick={goBack}
-        disabled={history.length === 0}
+        disabled={historyLength === 0}
         aria-label="Back"
       >
         <ArrowLeft size={18} />
@@ -123,7 +129,7 @@ export function TopBar() {
       <button
         className="icon-button"
         onClick={goForward}
-        disabled={future.length === 0}
+        disabled={futureLength === 0}
         aria-label="Forward"
       >
         <ArrowRight size={18} />

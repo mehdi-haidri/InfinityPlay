@@ -41,6 +41,8 @@ export function LiveTvPage() {
   }, [data, group, debouncedQuery]);
 
   const watch = (channel: Channel) => {
+    // The player opens immediately with a spinner while the main process checks whether
+    // this codec needs FFmpeg compatibility mode.
     openPlayer({
       title: channel.name,
       subtitleLine: channel.group || "Live TV",

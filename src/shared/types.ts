@@ -255,6 +255,14 @@ export interface Channel {
   streamUrl: string;
 }
 
+export interface PreparedLiveStream {
+  /** Original HLS URL, or a private local stream when transcoding is required. */
+  url: string;
+  transcoded: boolean;
+  codec?: string;
+  warning?: string;
+}
+
 export interface PlaylistSource {
   name: string;
   url: string;
@@ -346,6 +354,8 @@ export interface DownloadRequest {
   season: number;
   episode: number;
   resolution: number;
+  /** DASH manifests cannot be saved as standalone playable files. */
+  sourceKind?: "mp4" | "dash";
 }
 
 export interface DownloadRecord extends DownloadRequest {
@@ -361,6 +371,8 @@ export interface DownloadRecord extends DownloadRequest {
   completedAt: number | null;
   /** False once the file has been moved or deleted outside the app. */
   fileExists: boolean;
+  /** Human-readable reason when a transfer did not produce playable media. */
+  failureReason?: string;
   /** Captions saved next to the video, as WebVTT, for offline playback. */
   subtitles: { name: string; nativeName: string; lang: string; path: string }[];
 }
