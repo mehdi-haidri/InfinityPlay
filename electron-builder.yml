@@ -10,6 +10,10 @@ publish:
   repo: InfinityPlay
   releaseType: release
 
+# RELEASES.md becomes the description of the GitHub release.
+releaseInfo:
+  releaseNotesFile: RELEASES.md
+
 directories:
   buildResources: build
   output: release

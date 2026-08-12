@@ -33,7 +33,24 @@ npm run dev
 | `npm start` | Production preview |
 | `npm run typecheck` | Type-checks main + preload and the renderer |
 | `npm run dist:win` | Packaged installer (also `dist:mac`, `dist:linux`) |
-| `npm run release` | Build and publish to GitHub Releases (needs `GH_TOKEN`) |
+| `npm run release` | Build the Windows installer and publish it to GitHub Releases |
+
+## Releasing
+
+Bump `version` in `package.json`, then:
+
+```bash
+npm run release
+```
+
+This type-checks, builds, packages the installer and creates the GitHub Release tagged
+`v<version>`, uploading the `.exe` along with the `latest.yml` feed the app updates from.
+The token is taken from your existing Git credential for github.com, or from `GH_TOKEN`
+if set.
+
+The release description is [RELEASES.md](RELEASES.md), so update it before releasing.
+GitHub only accepts a body when the release is first created — changing the notes for an
+already published version has to be done on GitHub.
 
 ## Project layout
 
