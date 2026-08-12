@@ -330,11 +330,34 @@ export function detailsToMediaDetails(payload: Json): MediaDetails | null {
     releaseDate: typeof payload.releaseDate === "string" ? payload.releaseDate : "",
     duration,
     country: typeof payload.countryName === "string" ? payload.countryName : "",
-    cast: (payload?.staffList ?? []).slice(0, 20).map((staff: Json) => ({
-      name: String(staff?.name ?? ""),
-      character: String(staff?.character ?? ""),
-      avatarUrl: typeof staff?.avatarUrl === "string" ? staff.avatarUrl : null,
-    })),
+    cast: [...(payload?.staffList ?? [])]
+      .reduce((members: Json[], staff: Json) => {
+        const id = String(staff?.staffId ?? "");
+        const name = String(staff?.name ?? "").trim();
+        if (!name) return members;
+        const existing = members.find(
+          (member) => String(member?.staffId ?? "") === id && String(member?.name ?? "") === name,
+        );
+        if (existing) {
+          const roles = new Set(
+            [existing.character, staff?.character]
+              .flatMap((value) => String(value ?? "").split(" / "))
+              .map((value) => value.trim())
+              .filter(Boolean),
+          );
+          existing.character = [...roles].join(" / ");
+        } else {
+          members.push({ ...staff, name });
+        }
+        return members;
+      }, [])
+      .slice(0, 20)
+      .map((staff: Json) => ({
+        id: String(staff?.staffId ?? staff?.name ?? ""),
+        name: String(staff?.name ?? ""),
+        character: String(staff?.character ?? ""),
+        avatarUrl: typeof staff?.avatarUrl === "string" ? staff.avatarUrl : null,
+      })),
     seasons,
     backdropUrl: imageUrl(payload?.stills) ?? base.posterUrl,
     trailerUrl: typeof payload?.trailer?.url === "string" ? payload.trailer.url : null,

@@ -42,7 +42,7 @@ import {
   installUpdate,
   isAutoUpdateSupported,
 } from "./updater";
-import { prepareLiveStream } from "./live";
+import { generateMediaPreview, prepareLiveStream } from "./live";
 
 const moviebox = new MovieBoxService();
 
@@ -80,6 +80,9 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   handle("catalog:search", (query: string, page: number) => moviebox.search(query, page ?? 1));
   handle("catalog:suggest", (query: string) => moviebox.suggest(query));
   handle("catalog:details", (subjectId: string) => moviebox.details(subjectId));
+  handle("catalog:person", (staffId: string, name: string, avatarUrl: string | null) =>
+    moviebox.person(staffId, name, avatarUrl),
+  );
   handle("catalog:audioVariants", (title: string, mediaType: MediaType) =>
     moviebox.audioVariants(title, mediaType),
   );
@@ -101,6 +104,9 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   );
   handle("media:prepareLive", (url: string, startAt: number, resolution: number): Promise<PreparedLiveStream> =>
     prepareLiveStream(url, startAt, resolution),
+  );
+  handle("media:preview", (url: string, position: number, resolution: number) =>
+    generateMediaPreview(url, position, resolution),
   );
 
   handle("config:get", () => getConfig());

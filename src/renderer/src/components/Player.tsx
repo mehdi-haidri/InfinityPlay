@@ -54,6 +54,8 @@ export function Player() {
   const idleTimer = useRef<number>();
   const lastSaved = useRef(0);
   const draggingScrub = useRef(false);
+  const previewRequest = useRef(0);
+  const previewCache = useRef(new Map<string, string | null>());
 
   const [sourceUrl, setSourceUrl] = useState("");
   const [selectedSourceUrl, setSelectedSourceUrl] = useState("");
@@ -79,6 +81,12 @@ export function Player() {
   const [playbackOffset, setPlaybackOffset] = useState(0);
   const [startPosition, setStartPosition] = useState<number | null>(0);
   const [scrubPreview, setScrubPreview] = useState<number | null>(null);
+  const [scrubHover, setScrubHover] = useState<{ position: number; left: number } | null>(null);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const previewBucket = scrubHover
+    ? Math.max(0, Math.round(scrubHover.position / 5) * 5)
+    : null;
 
   const releases = useMemo(() => request?.releases ?? [], [request]);
 
@@ -129,10 +137,57 @@ export function Player() {
     setCurrent(saved > 30 && config.resumeBehavior !== "restart" ? saved : 0);
     setDuration(0);
     setScrubPreview(null);
+    setScrubHover(null);
+    setPreviewImage(null);
+    previewCache.current.clear();
     lastSaved.current = 0;
     // Request identity is intentionally the media URL; metadata updates must not restart it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.url]);
+
+  // Netflix-style hover frames are generated lazily and bucketed every five seconds.
+  // The debounce prevents pointer movement from starting an FFmpeg process per pixel.
+  useEffect(() => {
+    if (!scrubHover || !selectedSourceUrl || request?.live) {
+      setPreviewImage(null);
+      setPreviewLoading(false);
+      return;
+    }
+    const bucket = previewBucket ?? 0;
+    const key = `${selectedSourceUrl}|${selectedResolution}|${bucket}`;
+    if (previewCache.current.has(key)) {
+      setPreviewImage(previewCache.current.get(key) ?? null);
+      setPreviewLoading(false);
+      return;
+    }
+
+    setPreviewImage(null);
+    const sequence = ++previewRequest.current;
+    const timer = window.setTimeout(() => {
+      setPreviewLoading(true);
+      unwrap(api.media.preview(selectedSourceUrl, bucket, selectedResolution))
+        .then((image) => {
+          if (previewRequest.current !== sequence) return;
+          previewCache.current.set(key, image);
+          while (previewCache.current.size > 48) {
+            const oldest = previewCache.current.keys().next().value;
+            if (oldest === undefined) break;
+            previewCache.current.delete(oldest);
+          }
+          setPreviewImage(image);
+        })
+        .catch(() => {
+          if (previewRequest.current === sequence) setPreviewImage(null);
+        })
+        .finally(() => {
+          if (previewRequest.current === sequence) setPreviewLoading(false);
+        });
+    }, 160);
+    return () => {
+      window.clearTimeout(timer);
+      previewRequest.current += 1;
+    };
+  }, [previewBucket, selectedSourceUrl, selectedResolution, request?.live]);
 
   // Probe the selected source. Unsupported x265/MPEG-2 streams become a private H.264
   // compatibility stream; its start offset makes that stream seekable from the UI.
@@ -516,12 +571,17 @@ export function Player() {
     if (duration <= 0) return;
     draggingScrub.current = true;
     event.currentTarget.setPointerCapture(event.pointerId);
-    setScrubPreview(scrubPosition(event.clientX, event.currentTarget));
+    const position = scrubPosition(event.clientX, event.currentTarget);
+    const rect = event.currentTarget.getBoundingClientRect();
+    setScrubPreview(position);
+    setScrubHover({ position, left: Math.min(Math.max(event.clientX - rect.left, 0), rect.width) });
   };
 
   const scrubPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!draggingScrub.current) return;
-    setScrubPreview(scrubPosition(event.clientX, event.currentTarget));
+    const position = scrubPosition(event.clientX, event.currentTarget);
+    const rect = event.currentTarget.getBoundingClientRect();
+    setScrubHover({ position, left: Math.min(Math.max(event.clientX - rect.left, 0), rect.width) });
+    if (draggingScrub.current) setScrubPreview(position);
   };
 
   const scrubPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -708,9 +768,29 @@ export function Player() {
             {!request.live && (
               <div className="scrub" onPointerDown={scrubPointerDown}
                    onPointerMove={scrubPointerMove} onPointerUp={scrubPointerUp}
-                   onPointerCancel={() => { draggingScrub.current = false; setScrubPreview(null); }}
+                   onPointerLeave={() => { if (!draggingScrub.current) setScrubHover(null); }}
+                   onPointerCancel={() => { draggingScrub.current = false; setScrubPreview(null); setScrubHover(null); }}
                    onKeyDown={scrubKeyDown} role="slider" tabIndex={0} aria-label="Seek"
-                   aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(displayedCurrent)}>
+                   aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(displayedCurrent)}
+                   aria-valuetext={formatTime(displayedCurrent)}>
+                {scrubHover && (
+                  <div
+                    className="scrub-thumbnail"
+                    style={{ left: `clamp(90px, ${scrubHover.left}px, calc(100% - 90px))` }}
+                    aria-hidden="true"
+                  >
+                    <div className="scrub-thumbnail-frame">
+                      {previewImage ? (
+                        <img src={previewImage} alt="" />
+                      ) : (
+                        <div className="scrub-thumbnail-placeholder">
+                          {previewLoading && <span className="spinner" />}
+                        </div>
+                      )}
+                    </div>
+                    <span>{formatTime(scrubHover.position)}</span>
+                  </div>
+                )}
                 <div className="scrub-track">
                   <div className="scrub-buffered" style={{ width: `${bufferedRatio * 100}%` }} />
                   <div className="scrub-played" style={{ width: `${playedRatio * 100}%` }} />

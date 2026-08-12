@@ -8,6 +8,7 @@ import type {
   HomePage,
   MediaDetails,
   MediaType,
+  PersonDetails,
   Release,
   SubtitleOption,
 } from "@shared/types";
@@ -208,6 +209,88 @@ export class MovieBoxService {
       const details = detailsToMediaDetails(payload);
       if (!details) throw new Error("This title returned no usable details.");
       return details;
+    });
+  }
+
+  async person(staffId: string, name: string, avatarUrl: string | null): Promise<PersonDetails> {
+    const trimmedName = name.trim();
+    if (!trimmedName) throw new Error("This cast member has no usable name.");
+    return this.cached(`person:${staffId}:${trimmedName.toLowerCase()}`, async () => {
+      await this.client.init();
+
+      const candidates: CatalogItem[] = [];
+      for (let page = 1; page <= 4 && candidates.length < 40; page++) {
+        const payload = await this.client.search(trimmedName, page);
+        candidates.push(...searchToCatalogItems(payload, this.preferredAudio));
+        if (!payload?.pager?.hasMore) break;
+      }
+
+      // Search is intentionally generous (it also matches words in titles), and its
+      // compact rows sometimes omit staff metadata. Verify each candidate against the
+      // full details payload in small batches so the page never attributes a namesake's
+      // work to the selected person or floods the provider with parallel requests.
+      const credits: CatalogItem[] = [];
+      const uniqueCandidates = [...new Map(candidates.map((item) => [item.id, item])).values()]
+        .slice(0, 40);
+      for (let index = 0; index < uniqueCandidates.length; index += 6) {
+        const batch = uniqueCandidates.slice(index, index + 6);
+        const verified = await Promise.all(
+          batch.map(async (item) => {
+            try {
+              const details = await this.details(item.id);
+              return details.cast.some((member) =>
+                staffId
+                  ? member.id === staffId
+                  : member.name.trim().toLowerCase() === trimmedName.toLowerCase(),
+              ) ? item : null;
+            } catch {
+              return null;
+            }
+          }),
+        );
+        credits.push(...verified.filter(Boolean) as CatalogItem[]);
+      }
+
+      const unique = this.screen(
+        [...new Map(credits.map((item) => [item.id, item])).values()].sort(
+          (a, b) => Number(b.year || 0) - Number(a.year || 0),
+        ),
+      );
+
+      let biography = "";
+      let biographySourceUrl: string | null = null;
+      let biographyAvatar: string | null = null;
+      try {
+        const slug = encodeURIComponent(trimmedName.replace(/\s+/g, "_"));
+        const response = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${slug}`, {
+          headers: { "user-agent": "InfinityPlay/0.2 (person biographies)" },
+          signal: AbortSignal.timeout(8_000),
+        });
+        if (response.ok) {
+          const summary = await response.json() as any;
+          if (summary?.type !== "disambiguation") {
+            biography = typeof summary?.extract === "string" ? summary.extract : "";
+            biographySourceUrl = typeof summary?.content_urls?.desktop?.page === "string"
+              ? summary.content_urls.desktop.page
+              : null;
+            biographyAvatar = typeof summary?.thumbnail?.source === "string"
+              ? summary.thumbnail.source
+              : null;
+          }
+        }
+      } catch {
+        // Filmography remains useful when the optional biography service is unavailable.
+      }
+
+      return {
+        id: staffId,
+        name: trimmedName,
+        avatarUrl: avatarUrl || biographyAvatar,
+        biography,
+        biographySourceUrl,
+        movies: unique.filter((item) => item.mediaType === "movie"),
+        series: unique.filter((item) => item.mediaType === "series"),
+      };
     });
   }
 

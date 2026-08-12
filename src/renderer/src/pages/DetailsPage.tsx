@@ -395,7 +395,19 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
               <h2 className="section-title">Cast</h2>
               <div className="cast-row">
                 {media.cast.map((member, index) => (
-                  <div className="cast" key={`${member.name}-${index}`}>
+                  <button
+                    className="cast"
+                    key={`${member.name}-${index}`}
+                    onClick={() =>
+                      navigate({
+                        name: "person",
+                        id: member.id,
+                        personName: member.name,
+                        avatarUrl: member.avatarUrl,
+                      })
+                    }
+                    aria-label={`View ${member.name}'s movies and series`}
+                  >
                     <MediaImage
                       src={member.avatarUrl}
                       label={member.name}
@@ -404,7 +416,7 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
                     />
                     <div className="cast-name">{member.name}</div>
                     <div className="cast-role">{member.character}</div>
-                  </div>
+                  </button>
                 ))}
               </div>
             </section>

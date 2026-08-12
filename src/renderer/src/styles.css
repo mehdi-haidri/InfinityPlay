@@ -999,6 +999,14 @@ button {
   width: 96px;
   flex: none;
   text-align: center;
+  padding: 4px;
+  border-radius: var(--radius);
+  transition: background 140ms var(--ease), transform 140ms var(--ease);
+}
+
+.cast:hover {
+  background: var(--bg-hover);
+  transform: translateY(-2px);
 }
 
 .cast img,
@@ -1021,6 +1029,77 @@ button {
 .cast-role {
   font-size: 11px;
   color: var(--text-faint);
+}
+
+/* ── Person profile ───────────────────────────────────────────────────────── */
+.person-page {
+  padding-top: 18px;
+}
+
+.person-hero {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 760px);
+  gap: 32px;
+  align-items: center;
+  padding: 28px;
+  margin-bottom: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background:
+    radial-gradient(circle at 10% 15%, var(--accent-soft), transparent 36%),
+    var(--bg-elevated);
+}
+
+.person-portrait {
+  width: 180px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  object-fit: cover;
+  background: var(--bg-hover);
+  box-shadow: var(--shadow-card);
+}
+
+.person-copy h1 {
+  margin: 4px 0 10px;
+  font-size: clamp(32px, 4vw, 52px);
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+}
+
+.person-biography {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1.7;
+}
+
+.person-biography-muted { color: var(--text-faint); }
+.person-bio-skeleton { width: min(620px, 100%); height: 72px; border-radius: var(--radius); }
+
+.person-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  align-items: center;
+  margin-top: 18px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.person-facts span,
+.person-facts button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.person-facts button { color: var(--accent); }
+.person-grid { margin-top: 12px; }
+
+@media (max-width: 760px) {
+  .person-hero { grid-template-columns: 112px minmax(0, 1fr); gap: 20px; padding: 20px; }
+  .person-portrait { width: 112px; }
 }
 
 .meta-list {
@@ -1195,6 +1274,57 @@ button {
   cursor: pointer;
   touch-action: none;
   user-select: none;
+}
+
+.scrub-thumbnail {
+  position: absolute;
+  bottom: 23px;
+  z-index: 2;
+  width: 180px;
+  transform: translateX(-50%);
+  pointer-events: none;
+  text-align: center;
+  filter: drop-shadow(0 10px 24px rgba(0, 0, 0, 0.7));
+}
+
+.scrub-thumbnail-frame {
+  width: 180px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  border-radius: 6px;
+  background: #11141c;
+}
+
+.scrub-thumbnail-frame img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+}
+
+.scrub-thumbnail-placeholder {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(135deg, #161922, #0b0d12);
+}
+
+.scrub-thumbnail-placeholder .spinner {
+  width: 20px;
+  height: 20px;
+}
+
+.scrub-thumbnail > span {
+  display: inline-block;
+  margin-top: 5px;
+  padding: 2px 7px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.78);
+  color: #fff;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
 }
 
 .scrub-track {

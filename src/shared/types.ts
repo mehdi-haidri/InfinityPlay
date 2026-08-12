@@ -132,10 +132,27 @@ export interface MediaDetails extends CatalogItem {
   releaseDate: string;
   duration: string;
   country: string;
-  cast: { name: string; character: string; avatarUrl: string | null }[];
+  cast: CastMember[];
   seasons: Season[];
   backdropUrl: string | null;
   trailerUrl: string | null;
+}
+
+export interface CastMember {
+  id: string;
+  name: string;
+  character: string;
+  avatarUrl: string | null;
+}
+
+export interface PersonDetails {
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  biography: string;
+  biographySourceUrl: string | null;
+  movies: CatalogItem[];
+  series: CatalogItem[];
 }
 
 export interface Release {

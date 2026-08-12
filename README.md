@@ -53,6 +53,11 @@ On Linux, InfinityPlay uses the system `ffprobe` and `ffmpeg` when a Live TV cha
 download uses MPEG-2 or HEVC video that Chromium cannot decode directly. Install FFmpeg
 from your distribution when compatibility playback is needed.
 
+FFmpeg is also used for the on-demand thumbnail shown while hovering over the player
+timeline. Thumbnails are cached in memory and are never generated while simply scrolling.
+Cast profiles use the MovieBox catalog for verified credits and may request an optional
+English biography from Wikipedia; movies and series still appear if that service is offline.
+
 Settings can enable or disable hardware acceleration for Electron and FFmpeg. InfinityPlay
 uses the installed NVIDIA, AMD, or Intel driver when available and shows Chromium's detected
 video-decode status; changing this setting requires an app restart.

@@ -12,6 +12,7 @@ import { HistoryPage } from "./pages/HistoryPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { AboutPage } from "./pages/AboutPage";
 import { DownloadsPage } from "./pages/DownloadsPage";
+import { PersonPage } from "./pages/PersonPage";
 import { formatBytes } from "./lib/format";
 import { useApp } from "./store";
 
@@ -31,6 +32,15 @@ function Routes() {
           initialSeason={route.season}
           initialEpisode={route.episode}
           audioLocked={route.audioLocked}
+        />
+      );
+    case "person":
+      return (
+        <PersonPage
+          key={route.id}
+          id={route.id}
+          name={route.personName}
+          avatarUrl={route.avatarUrl}
         />
       );
     case "livetv":

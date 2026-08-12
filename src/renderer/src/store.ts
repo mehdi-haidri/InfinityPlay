@@ -21,6 +21,7 @@ export type Route =
    * from bouncing straight back to the preferred language.
    */
   | { name: "details"; id: string; season?: number; episode?: number; audioLocked?: boolean }
+  | { name: "person"; id: string; personName: string; avatarUrl: string | null }
   | { name: "livetv" }
   | { name: "history" }
   | { name: "settings" }

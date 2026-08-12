@@ -39,6 +39,12 @@ page, then offers **Restart & install** when a new version is ready.
   pages, Continue Watching cards, or the history library.
 - Added Ocean, Forest and Plum themes, reduced-motion controls, and restart-aware
   NVIDIA/AMD/Intel hardware acceleration with detected GPU status.
+- Made Linux adaptive HEVC playback deterministic by isolating the selected DASH
+  representation and retrying software decode when a GPU driver produces no video.
+- Added cached thumbnail previews above the player timeline, generated on demand so
+  ordinary playback and scrolling do not pay a storyboard-generation cost.
+- Cast portraits now open profiles with an optional biography plus provider-verified,
+  separately grouped movie and series credits.
 
 ---
 
