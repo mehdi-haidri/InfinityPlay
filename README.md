@@ -77,7 +77,7 @@ npm run dev
 ## Releases
 
 The full release is built by `.github/workflows/release.yml`. Push a tag that exactly
-matches the package version, for example `v0.1.0`. GitHub Actions type-checks and builds
+matches the package version, for example `v0.2.0`. GitHub Actions type-checks and builds
 the app, packages it on native Windows, macOS and Linux runners, then creates or updates
 one public GitHub Release with all installers and updater metadata.
 
@@ -94,8 +94,6 @@ Unsigned mode is explicit in `electron-builder.yml`. To enable trusted distribut
    `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`) as GitHub Actions secrets.
 4. Remove the unsigned-macOS guard in `src/main/updater.ts` only after a signed and
    notarized update has been verified end to end.
-
-See [docs/UI_AUDIT.md](docs/UI_AUDIT.md) for the prioritized renderer design and UX audit.
 
 ## Project layout
 

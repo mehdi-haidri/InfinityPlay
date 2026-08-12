@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
-import { Play, Radio, RotateCw, Search } from "lucide-react";
+import { Radio, RotateCw, Search } from "lucide-react";
 import type { Channel } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { useAsync, useDebounced } from "../hooks/useAsync";
 import { EmptyState, ErrorState, LoadingState } from "../components/States";
 import { useApp } from "../store";
+import { PageHeader } from "../components/PageHeader";
+import { MediaImage } from "../components/MediaImage";
 
 export function LiveTvPage() {
   const playlists = useApp((state) => state.config.playlists);
@@ -51,7 +53,11 @@ export function LiveTvPage() {
   if (!source) {
     return (
       <div className="page">
-        <h1 className="page-title">Live TV</h1>
+        <PageHeader
+          eyebrow="Live"
+          title="Live TV"
+          description="Watch channels from your own M3U playlists."
+        />
         <EmptyState title="No playlists yet" body="Add an M3U playlist in Settings to watch live channels." />
         <div style={{ display: "grid", placeItems: "center" }}>
           <button className="btn" onClick={() => navigate({ name: "settings" })}>Open settings</button>
@@ -62,7 +68,11 @@ export function LiveTvPage() {
 
   return (
     <div className="page">
-      <h1 className="page-title">Live TV</h1>
+      <PageHeader
+        eyebrow="Live"
+        title="Live TV"
+        description={`Browse ${source.name} by channel group or search.`}
+      />
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
         <select
@@ -133,18 +143,12 @@ export function LiveTvPage() {
                     onClick={() => watch(channel)}
                     title={channel.name}
                   >
-                    {channel.logo ? (
-                      <img
-                        src={channel.logo}
-                        alt=""
-                        loading="lazy"
-                        style={{ width: 40, height: 40, objectFit: "contain", borderRadius: 6, flex: "none" }}
-                      />
-                    ) : (
-                      <span className="play-bubble" style={{ width: 40, height: 40 }}>
-                        <Play size={16} fill="currentColor" />
-                      </span>
-                    )}
+                    <MediaImage
+                      src={channel.logo}
+                      label={channel.name}
+                      alt=""
+                      className="channel-art"
+                    />
                     <span style={{ minWidth: 0 }}>
                       <span className="card-title" style={{ display: "block" }}>{channel.name}</span>
                       <span className="card-sub">{channel.group || "Uncategorized"}</span>

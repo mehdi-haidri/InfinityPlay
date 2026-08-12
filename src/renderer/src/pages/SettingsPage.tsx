@@ -11,6 +11,7 @@ import {
 } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { useApp } from "../store";
+import { PageHeader } from "../components/PageHeader";
 
 const THEMES: { value: AppConfig["theme"]; label: string }[] = [
   { value: "midnight", label: "Midnight (rose accent)" },
@@ -56,10 +57,14 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="page" style={{ maxWidth: 780 }}>
-      <h1 className="page-title">Settings</h1>
+    <div className="page page-narrow">
+      <PageHeader
+        eyebrow="Preferences"
+        title="Settings"
+        description="Control catalog, playback, subtitles, downloads, and live TV sources."
+      />
 
-      <section className="panel" style={{ marginBottom: 20 }}>
+      <section className="panel panel-section">
         <div className="panel-title">Appearance & playback</div>
 
         <div className="setting">

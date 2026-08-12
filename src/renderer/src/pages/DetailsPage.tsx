@@ -12,6 +12,7 @@ import { api, unwrap } from "../lib/api";
 import { useAsync } from "../hooks/useAsync";
 import { formatBytes, qualityLabel } from "../lib/format";
 import { EmptyState, ErrorState, LoadingState, Spinner } from "../components/States";
+import { MediaImage } from "../components/MediaImage";
 import { findProgress, useApp } from "../store";
 
 interface Props {
@@ -358,11 +359,12 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
               <div className="cast-row">
                 {media.cast.map((member, index) => (
                   <div className="cast" key={`${member.name}-${index}`}>
-                    {member.avatarUrl ? (
-                      <img src={member.avatarUrl} alt="" loading="lazy" />
-                    ) : (
-                      <div className="skeleton" style={{ width: 72, height: 72, borderRadius: "50%", margin: "0 auto 8px" }} />
-                    )}
+                    <MediaImage
+                      src={member.avatarUrl}
+                      label={member.name}
+                      alt={`Portrait of ${member.name}`}
+                      className="cast-avatar"
+                    />
                     <div className="cast-name">{member.name}</div>
                     <div className="cast-role">{member.character}</div>
                   </div>

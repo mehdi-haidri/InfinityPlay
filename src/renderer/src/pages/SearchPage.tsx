@@ -5,6 +5,7 @@ import { useAsync } from "../hooks/useAsync";
 import { PosterCard } from "../components/PosterCard";
 import { EmptyState, ErrorState, SkeletonGrid } from "../components/States";
 import { useApp } from "../store";
+import { PageHeader } from "../components/PageHeader";
 
 type Filter = "all" | "movie" | "series";
 
@@ -26,6 +27,11 @@ export function SearchPage({ query }: { query: string }) {
   if (!query.trim()) {
     return (
       <div className="page">
+        <PageHeader
+          eyebrow="Discovery"
+          title="Search"
+          description="Find movies and series across the full catalog."
+        />
         <EmptyState title="Search the catalog" body="Type a title above, or press Ctrl+K from anywhere." />
       </div>
     );
@@ -33,9 +39,13 @@ export function SearchPage({ query }: { query: string }) {
 
   return (
     <div className="page">
-      <h1 className="page-title">Results for “{query}”</h1>
+      <PageHeader
+        eyebrow="Discovery"
+        title={`Results for “${query}”`}
+        description={`${results.length} matching ${results.length === 1 ? "title" : "titles"}`}
+      />
 
-      <div className="chip-row" style={{ marginBottom: 22 }}>
+      <div className="chip-row page-filters">
         {(["all", "movie", "series"] as Filter[]).map((value) => (
           <button
             key={value}

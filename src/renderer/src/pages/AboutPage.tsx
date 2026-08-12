@@ -4,6 +4,7 @@ import { AUTHOR, type AppInfo, type UpdateStatus } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { formatBytes } from "../lib/format";
 import { Spinner } from "../components/States";
+import { PageHeader } from "../components/PageHeader";
 import { useApp } from "../store";
 
 const RELEASES_URL = "https://github.com/ELhadratiOth/InfinityPlay/releases";
@@ -30,6 +31,20 @@ function statusLine(status: UpdateStatus): { text: string; busy: boolean } {
     default:
       return { text: "No update check has run yet.", busy: false };
   }
+}
+
+function packageHelp(info: AppInfo | null): string {
+  if (!info) return "Release notes and installers are available on GitHub Releases.";
+  if (info.packageType.includes("macOS")) {
+    return "This unsigned macOS build cannot update itself. Download the next DMG from GitHub Releases and replace the app manually.";
+  }
+  if (info.packageType === "AppImage") {
+    return "Updates replace the current AppImage after download; keep the file executable.";
+  }
+  if (info.packageType.includes("DEB") || info.packageType.includes("RPM") || info.packageType === "pacman") {
+    return "For system packages, download the matching installer from GitHub Releases and install it with your package manager.";
+  }
+  return "Updates are downloaded from GitHub Releases and installed after restart.";
 }
 
 export function AboutPage() {
@@ -71,22 +86,26 @@ export function AboutPage() {
   const line = statusLine(status);
 
   return (
-    <div className="page" style={{ maxWidth: 780 }}>
-      <h1 className="page-title">About</h1>
+    <div className="page page-narrow">
+      <PageHeader
+        eyebrow="InfinityPlay"
+        title="About"
+        description="Version, release help, and project credits."
+      />
 
       <section className="panel about-hero">
         <img
           className="about-avatar"
           src={`${AUTHOR.github}.png?size=200`}
-          alt=""
+          alt={`Portrait of ${AUTHOR.name}`}
           referrerPolicy="no-referrer"
         />
-        <div style={{ minWidth: 0 }}>
+        <div className="min-width-zero">
           <div className="about-name">{AUTHOR.name}</div>
-          <div className="setting-hint" style={{ marginBottom: 14 }}>
+          <div className="setting-hint about-role">
             Developer of InfinityPlay
           </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <div className="inline-actions inline-actions-wrap">
             <button className="btn btn-sm" onClick={() => open(AUTHOR.github)}>
               <Github size={15} /> {AUTHOR.githubHandle}
             </button>
@@ -97,15 +116,15 @@ export function AboutPage() {
         </div>
       </section>
 
-      <section className="panel" style={{ marginTop: 20 }}>
+      <section className="panel panel-spaced">
         <div className="panel-title">Updates</div>
 
         <div className="setting">
-          <div style={{ minWidth: 0 }}>
+          <div className="min-width-zero">
             <div className="setting-label">
               InfinityPlay {info ? `v${info.version}` : ""}
             </div>
-            <div className="setting-hint" style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div className="setting-hint status-line">
               {line.busy && <Spinner />}
               <span>{line.text}</span>
             </div>
@@ -130,14 +149,13 @@ export function AboutPage() {
           )}
         </div>
 
-        <div className="setting-hint" style={{ paddingTop: 4 }}>
-          Updates are downloaded from the project's GitHub releases and installed on
-          restart.
+        <div className="setting-hint update-help">
+          {packageHelp(info)}
         </div>
       </section>
 
       {info && (
-        <section className="panel" style={{ marginTop: 20 }}>
+        <section className="panel panel-spaced">
           <div className="panel-title">Build</div>
           <dl className="meta-list">
             <div><dt>Version</dt><dd>{info.version}</dd></div>
@@ -145,6 +163,7 @@ export function AboutPage() {
             <div><dt>Chromium</dt><dd>{info.chrome}</dd></div>
             <div><dt>Node</dt><dd>{info.node}</dd></div>
             <div><dt>Platform</dt><dd>{info.platform}</dd></div>
+            <div><dt>Package</dt><dd>{info.packageType}</dd></div>
           </dl>
         </section>
       )}

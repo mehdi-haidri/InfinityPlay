@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Download as DownloadIcon, Info, X } from "lucide-react";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
@@ -66,7 +66,7 @@ function Toasts() {
             : 0;
 
         return (
-          <div className="toast" key={toast.id} data-kind={toast.kind} role="status">
+          <div className="toast" key={toast.id} data-kind={toast.kind}>
             {toast.kind === "error" ? (
               <AlertTriangle size={16} color="var(--accent)" />
             ) : toast.kind === "progress" ? (
@@ -75,7 +75,7 @@ function Toasts() {
               <Info size={16} color="var(--text-muted)" />
             )}
 
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div className="toast-content">
               <div className="toast-title">{toast.title}</div>
               {toast.body && <div className="toast-body">{toast.body}</div>}
 
@@ -84,7 +84,7 @@ function Toasts() {
                   <div className="toast-bar">
                     <span style={{ width: `${percent * 100}%` }} />
                   </div>
-                  <div className="toast-body" style={{ display: "flex", gap: 8 }}>
+                  <div className="toast-body toast-progress-copy">
                     <span>
                       {record.totalBytes > 0
                         ? `${Math.round(percent * 100)}% · ${formatBytes(record.receivedBytes)} of ${formatBytes(record.totalBytes)}`
@@ -108,6 +108,41 @@ function Toasts() {
         );
       })}
     </div>
+  );
+}
+
+function LiveAnnouncements() {
+  const toasts = useApp((state) => state.toasts);
+  const downloads = useApp((state) => state.downloads);
+  const [polite, setPolite] = useState("");
+  const [assertive, setAssertive] = useState("");
+  const lastToast = useRef<number>();
+  const progressBuckets = useRef(new Map<string, number>());
+
+  useEffect(() => {
+    const toast = toasts.at(-1);
+    if (!toast || toast.id === lastToast.current || toast.kind === "progress") return;
+    lastToast.current = toast.id;
+    const message = [toast.title, toast.body].filter(Boolean).join(". ");
+    if (toast.kind === "error" || toast.title === "Download complete") setAssertive(message);
+    else setPolite(message);
+  }, [toasts]);
+
+  useEffect(() => {
+    for (const record of downloads) {
+      if (record.state !== "progressing" || record.totalBytes <= 0) continue;
+      const bucket = Math.floor((record.receivedBytes / record.totalBytes) * 10) * 10;
+      if (progressBuckets.current.get(record.id) === bucket) continue;
+      progressBuckets.current.set(record.id, bucket);
+      setPolite(`${record.title} download ${Math.min(bucket, 100)} percent complete.`);
+    }
+  }, [downloads]);
+
+  return (
+    <>
+      <div className="visually-hidden" aria-live="polite" aria-atomic="true">{polite}</div>
+      <div className="visually-hidden" aria-live="assertive" aria-atomic="true">{assertive}</div>
+    </>
   );
 }
 
@@ -138,13 +173,15 @@ export function App() {
 
   return (
     <div className="app">
+      <a className="skip-link" href="#main-content">Skip to content</a>
       <Sidebar />
-      <div className="main">
+      <main className="main" id="main-content" tabIndex={-1}>
         <TopBar />
         <Routes />
-      </div>
+      </main>
       {player && <Player />}
       <Toasts />
+      <LiveAnnouncements />
       <Splash ready={booted} />
     </div>
   );

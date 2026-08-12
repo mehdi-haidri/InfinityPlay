@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import iconUrl from "../assets/icon-square.png";
+import { BrandMark } from "./BrandMark";
 
 /** Held long enough that the animation reads as intentional rather than a flash. */
 const MINIMUM_MS = 1100;
@@ -33,7 +33,7 @@ export function Splash({ ready }: { ready: boolean }) {
       <div className="splash-glow" />
 
       <div className="splash-mark">
-        <img src={iconUrl} alt="" className="splash-icon" />
+        <BrandMark className="splash-icon" />
         {/*
           The travelling highlight is an SVG stroke rather than a rotating CSS border: a
           rotated border traces a square path and drifts away from the tile's rounded

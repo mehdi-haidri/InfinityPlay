@@ -4,6 +4,7 @@ import type { CatalogItem } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { useDebounced } from "../hooks/useAsync";
 import { useApp } from "../store";
+import { MediaImage } from "./MediaImage";
 
 export function TopBar() {
   const { route, navigate, goBack, goForward, history, future, notify } = useApp();
@@ -143,6 +144,10 @@ export function TopBar() {
             onBlur={() => setTimeout(() => setOpen(false), 140)}
             onKeyDown={onKeyDown}
             aria-label="Search"
+            role="combobox"
+            aria-expanded={open && suggestions.length > 0}
+            aria-controls="search-suggestions"
+            aria-activedescendant={highlight >= 0 ? `search-suggestion-${suggestions[highlight]?.id}` : undefined}
           />
           {query && (
             <button className="icon-button" onClick={() => setQuery("")} aria-label="Clear search">
@@ -152,11 +157,14 @@ export function TopBar() {
         </div>
 
         {open && suggestions.length > 0 && (
-          <div className="suggestions">
+          <div id="search-suggestions" className="suggestions" role="listbox" aria-label="Search suggestions">
             {suggestions.map((item, index) => (
               <button
                 key={item.id}
                 className="suggestion"
+                role="option"
+                id={`search-suggestion-${item.id}`}
+                aria-selected={index === highlight}
                 data-active={index === highlight}
                 onMouseEnter={() => setHighlight(index)}
                 onMouseDown={(event) => event.preventDefault()}
@@ -165,7 +173,7 @@ export function TopBar() {
                   navigate({ name: "details", id: item.id });
                 }}
               >
-                {item.posterUrl ? <img src={item.posterUrl} alt="" /> : <span className="skeleton" style={{ width: 30, height: 44 }} />}
+                <MediaImage src={item.posterUrl} label={item.title} alt="" className="suggestion-art" />
                 <span>{item.title}</span>
                 <span className="suggestion-meta">
                   {[item.year, item.mediaType === "series" ? "Series" : "Movie"]

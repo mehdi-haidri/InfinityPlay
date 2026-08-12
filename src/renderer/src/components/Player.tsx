@@ -49,6 +49,7 @@ export function Player() {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const dashRef = useRef<MediaPlayerClass | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const idleTimer = useRef<number>();
   const lastSaved = useRef(0);
 
@@ -314,7 +315,7 @@ export function Player() {
 
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target && ["INPUT", "TEXTAREA"].includes(target.tagName)) return;
+      if (target && ["INPUT", "TEXTAREA", "BUTTON", "SELECT"].includes(target.tagName)) return;
 
       switch (event.key) {
         case " ":
@@ -355,6 +356,11 @@ export function Player() {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [request, togglePlay, seekBy, toggleFullscreen, close, wake]);
+
+  useEffect(() => {
+    if (!menu) return;
+    window.requestAnimationFrame(() => menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus());
+  }, [menu]);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -412,6 +418,50 @@ export function Player() {
     const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
     video.currentTime = ratio * video.duration;
     setCurrent(video.currentTime);
+  };
+
+  const seekTo = (position: number) => {
+    const video = videoRef.current;
+    if (!video || !Number.isFinite(video.duration)) return;
+    video.currentTime = Math.min(Math.max(position, 0), video.duration);
+    setCurrent(video.currentTime);
+  };
+
+  const scrubKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    let next = current;
+    switch (event.key) {
+      case "ArrowLeft": next -= 5; break;
+      case "ArrowRight": next += 5; break;
+      case "PageDown": next -= 30; break;
+      case "PageUp": next += 30; break;
+      case "Home": next = 0; break;
+      case "End": next = duration; break;
+      default: return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    seekTo(next);
+  };
+
+  const menuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const buttons = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"),
+    );
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    let target = index;
+    if (event.key === "ArrowDown") target = (index + 1) % buttons.length;
+    else if (event.key === "ArrowUp") target = (index - 1 + buttons.length) % buttons.length;
+    else if (event.key === "Home") target = 0;
+    else if (event.key === "End") target = buttons.length - 1;
+    else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setMenu(null);
+      return;
+    } else return;
+    event.preventDefault();
+    event.stopPropagation();
+    buttons[target]?.focus();
   };
 
   const chooseRelease = (release: Release) => {
@@ -529,7 +579,7 @@ export function Player() {
 
           <div className="player-bottom" onClick={(event) => event.stopPropagation()}>
             {!request.live && (
-              <div className="scrub" onClick={scrub} role="slider" aria-label="Seek"
+              <div className="scrub" onClick={scrub} onKeyDown={scrubKeyDown} role="slider" tabIndex={0} aria-label="Seek"
                    aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(current)}>
                 <div className="scrub-track">
                   <div className="scrub-buffered" style={{ width: `${bufferedRatio * 100}%` }} />
@@ -540,23 +590,23 @@ export function Player() {
             )}
 
             <div className="player-controls">
-              <button className="icon-button" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"}>
+              <button className="icon-button" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"} title={playing ? "Pause (K)" : "Play (K)"}>
                 {playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
               </button>
 
               {!request.live && (
                 <>
-                  <button className="icon-button" onClick={() => seekBy(-SEEK_STEP)} aria-label="Back 10 seconds">
+                  <button className="icon-button" onClick={() => seekBy(-SEEK_STEP)} aria-label="Back 10 seconds" title="Back 10 seconds (Left arrow)">
                     <RotateCcw size={18} />
                   </button>
-                  <button className="icon-button" onClick={() => seekBy(SEEK_STEP)} aria-label="Forward 10 seconds">
+                  <button className="icon-button" onClick={() => seekBy(SEEK_STEP)} aria-label="Forward 10 seconds" title="Forward 10 seconds (Right arrow)">
                     <RotateCw size={18} />
                   </button>
                 </>
               )}
 
               <div className="volume">
-                <button className="icon-button" onClick={() => setMuted((value) => !value)} aria-label="Mute">
+                <button className="icon-button" onClick={() => setMuted((value) => !value)} aria-label={muted ? "Unmute" : "Mute"} title={muted ? "Unmute (M)" : "Mute (M)"}>
                   <VolumeIcon size={19} />
                 </button>
                 <input
@@ -583,6 +633,7 @@ export function Player() {
                     className="icon-button"
                     onClick={() => setMenu((value) => (value === "subtitles" ? null : "subtitles"))}
                     aria-label="Subtitles"
+                    title="Subtitles"
                     style={{ color: subtitle ? "var(--accent)" : undefined }}
                   >
                     <Captions size={19} />
@@ -592,10 +643,11 @@ export function Player() {
                   className="icon-button"
                   onClick={() => setMenu((value) => (value === "quality" ? null : "quality"))}
                   aria-label="Quality and speed"
+                  title="Quality and speed"
                 >
                   <Settings2 size={19} />
                 </button>
-                <button className="icon-button" onClick={() => void toggleFullscreen()} aria-label="Fullscreen">
+                <button className="icon-button" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"} title={fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}>
                   {fullscreen ? <Minimize size={19} /> : <Maximize size={19} />}
                 </button>
               </div>
@@ -603,7 +655,7 @@ export function Player() {
           </div>
 
           {menu === "quality" && (
-            <div className="player-menu">
+            <div ref={menuRef} className="player-menu" role="dialog" aria-label="Quality and playback speed" onKeyDown={menuKeyDown}>
               {releases.length > 0 && (
                 <>
                   <div className="player-menu-label">Quality</div>
@@ -638,7 +690,7 @@ export function Player() {
           )}
 
           {menu === "subtitle-style" && (
-            <div className="player-menu player-menu-wide">
+            <div ref={menuRef} className="player-menu player-menu-wide" role="dialog" aria-label="Subtitle appearance" onKeyDown={menuKeyDown}>
               <button className="player-menu-back" onClick={() => setMenu("subtitles")}>
                 <ChevronLeft size={15} />
                 Subtitle appearance
@@ -731,7 +783,7 @@ export function Player() {
           )}
 
           {menu === "subtitles" && (
-            <div className="player-menu">
+            <div ref={menuRef} className="player-menu" role="dialog" aria-label="Subtitles" onKeyDown={menuKeyDown}>
               <div className="player-menu-head">
                 <span className="player-menu-label">Subtitles</span>
                 <button

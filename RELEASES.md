@@ -5,7 +5,7 @@ page, then offers **Restart & install** when a new version is ready.
 
 ---
 
-## Unreleased
+## 0.2.0
 
 ### Packages
 
@@ -15,6 +15,15 @@ page, then offers **Restart & install** when a new version is ready.
 - Unsigned macOS builds direct users to GitHub Releases instead of attempting an update
   that macOS would reject.
 - Added Tajeddine Bourhim to the project contributor metadata.
+
+### Interface
+
+- Bundled Outfit for consistent typography and introduced a single-accent brand mark.
+- Reworked featured artwork so portrait posters are composed beside a blurred backdrop.
+- Added collapsible navigation, clearer page context, stronger content hierarchy and
+  resilient image fallbacks.
+- Improved player slider and menu keyboard support, reduced-motion behavior, download
+  announcements, empty states and package-specific update help.
 
 ---
 

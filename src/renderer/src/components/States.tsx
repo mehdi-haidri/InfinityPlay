@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { AlertTriangle, Inbox, RotateCw } from "lucide-react";
 
 export const Spinner = () => <div className="spinner" role="status" aria-label="Loading" />;
@@ -11,14 +12,23 @@ export function LoadingState({ label = "Loading…" }: { label?: string }) {
   );
 }
 
-export function EmptyState({ title, body }: { title: string; body?: string }) {
+export function EmptyState({
+  title,
+  body,
+  action,
+}: {
+  title: string;
+  body?: string;
+  action?: ReactNode;
+}) {
   return (
     <div className="state">
       <Inbox size={34} strokeWidth={1.4} />
       <div>
-        <div style={{ fontWeight: 600, color: "var(--text)" }}>{title}</div>
-        {body && <div style={{ marginTop: 4 }}>{body}</div>}
+        <div className="state-title">{title}</div>
+        {body && <div className="state-body">{body}</div>}
       </div>
+      {action}
     </div>
   );
 }
@@ -28,8 +38,8 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
     <div className="state">
       <AlertTriangle size={34} strokeWidth={1.4} />
       <div>
-        <div style={{ fontWeight: 600, color: "var(--text)" }}>Something went wrong</div>
-        <div style={{ marginTop: 4, maxWidth: 460 }}>{message}</div>
+        <div className="state-title">Something went wrong</div>
+        <div className="state-body state-body-constrained">{message}</div>
       </div>
       {onRetry && (
         <button className="btn btn-sm" onClick={onRetry}>

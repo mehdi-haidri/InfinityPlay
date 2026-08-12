@@ -2,6 +2,8 @@ import { Trash2 } from "lucide-react";
 import { relativeTime, formatTime } from "../lib/format";
 import { EmptyState } from "../components/States";
 import { useApp } from "../store";
+import { PageHeader } from "../components/PageHeader";
+import { MediaImage } from "../components/MediaImage";
 
 export function HistoryPage() {
   const watchHistory = useApp((state) => state.watchHistory);
@@ -12,7 +14,11 @@ export function HistoryPage() {
   if (watchHistory.length === 0) {
     return (
       <div className="page">
-        <h1 className="page-title">Continue watching</h1>
+        <PageHeader
+          eyebrow="Your library"
+          title="Continue watching"
+          description="Resume films and episodes from where you stopped."
+        />
         <EmptyState title="Nothing watched yet" body="Titles you start show up here with their resume point." />
       </div>
     );
@@ -20,16 +26,17 @@ export function HistoryPage() {
 
   return (
     <div className="page">
-      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-        <h1 className="page-title">Continue watching</h1>
-        <button
+      <PageHeader
+        eyebrow="Your library"
+        title="Continue watching"
+        description="Resume films and episodes from where you stopped."
+        action={<button
           className="btn btn-sm btn-ghost"
-          style={{ marginLeft: "auto" }}
           onClick={() => void clearWatchHistory()}
         >
           <Trash2 size={14} /> Clear all
-        </button>
-      </div>
+        </button>}
+      />
 
       <div className="grid">
         {watchHistory.map((entry) => {
@@ -41,7 +48,7 @@ export function HistoryPage() {
                 onClick={() => navigate({ name: "details", id: entry.subjectId })}
               >
                 <div className="card-art">
-                  {entry.posterUrl && <img src={entry.posterUrl} alt="" loading="lazy" />}
+                  <MediaImage src={entry.posterUrl} label={entry.title} alt="" />
                   <span className="badge">
                     {entry.season > 0 ? `S${entry.season}E${entry.episode}` : "Movie"}
                   </span>
@@ -61,8 +68,7 @@ export function HistoryPage() {
                 </div>
               </button>
               <button
-                className="btn btn-sm btn-ghost"
-                style={{ marginTop: 6, width: "100%" }}
+                className="btn btn-sm btn-ghost card-secondary-action"
                 onClick={() => void forgetTitle(entry.subjectId)}
               >
                 <Trash2 size={13} /> Remove

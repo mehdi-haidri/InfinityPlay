@@ -3,6 +3,8 @@
  * what lets the requests carry `user-agent` / `x-forwarded-for` and sidesteps CORS.
  */
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type {
   AppConfig,
   AppInfo,
@@ -41,6 +43,17 @@ import {
 } from "./updater";
 
 const moviebox = new MovieBoxService();
+
+function packageType(): string {
+  if (!app.isPackaged) return "development";
+  if (process.platform === "darwin") return "macOS DMG (unsigned)";
+  if (process.platform === "win32") return "Windows NSIS";
+  if (process.env.APPIMAGE) return "AppImage";
+
+  const marker = join(process.resourcesPath, "package-type");
+  if (existsSync(marker)) return readFileSync(marker, "utf8").trim() || "Linux package";
+  return "DEB/RPM package";
+}
 
 /** Wraps a handler so the renderer always receives a Result instead of a rejected promise. */
 function handle<A extends unknown[], R>(
@@ -112,6 +125,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     chrome: process.versions.chrome,
     node: process.versions.node,
     platform: `${process.platform}-${process.arch}`,
+    packageType: packageType(),
     updatable: isAutoUpdateSupported(),
   }));
 

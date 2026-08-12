@@ -1,6 +1,8 @@
-import { Play, Star } from "lucide-react";
+import { Star } from "lucide-react";
 import type { CatalogItem } from "@shared/types";
 import { useApp } from "../store";
+import { MediaImage } from "./MediaImage";
+import { WatchIcon } from "./CoreIcons";
 
 interface Props {
   item: CatalogItem;
@@ -16,11 +18,7 @@ export function PosterCard({ item, progress = 0, onOpen }: Props) {
   return (
     <button className="card" onClick={open} title={item.title}>
       <div className="card-art">
-        {item.posterUrl ? (
-          <img src={item.posterUrl} alt="" loading="lazy" draggable={false} />
-        ) : (
-          <div style={{ width: "100%", height: "100%", background: "var(--bg-hover)" }} />
-        )}
+        <MediaImage src={item.posterUrl} label={item.title} alt="" />
 
         <span className="badge">
           {item.isCam ? "CAM" : item.mediaType === "series" ? "Series" : "Movie"}
@@ -33,7 +31,7 @@ export function PosterCard({ item, progress = 0, onOpen }: Props) {
 
         <span className="card-overlay">
           <span className="play-bubble">
-            <Play size={20} fill="currentColor" />
+            <WatchIcon size={20} />
           </span>
         </span>
 

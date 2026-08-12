@@ -1,34 +1,72 @@
 import { useEffect, useState } from "react";
-import { Info, Play, Star } from "lucide-react";
+import { Info, Star } from "lucide-react";
 import type { CatalogItem } from "@shared/types";
 import { useApp } from "../store";
+import { MediaImage } from "./MediaImage";
+import { WatchIcon } from "./CoreIcons";
 
 const ROTATE_MS = 9000;
 
 export function Hero({ items }: { items: CatalogItem[] }) {
   const navigate = useApp((state) => state.navigate);
   const [index, setIndex] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [visibilityPaused, setVisibilityPaused] = useState(document.hidden);
+  const [motionAllowed, setMotionAllowed] = useState(true);
 
   const slides = items.slice(0, 6);
 
   useEffect(() => {
-    if (slides.length < 2) return;
+    if (slides.length < 2 || paused || visibilityPaused || !motionAllowed) return;
     const timer = setInterval(() => setIndex((value) => (value + 1) % slides.length), ROTATE_MS);
     return () => clearInterval(timer);
-  }, [slides.length]);
+  }, [slides.length, paused, visibilityPaused, motionAllowed]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sync = () => setMotionAllowed(!media.matches);
+    sync();
+    media.addEventListener("change", sync);
+    const visibility = () => setVisibilityPaused(document.hidden);
+    document.addEventListener("visibilitychange", visibility);
+    return () => {
+      media.removeEventListener("change", sync);
+      document.removeEventListener("visibilitychange", visibility);
+    };
+  }, []);
 
   if (slides.length === 0) return null;
   const active = slides[Math.min(index, slides.length - 1)];
 
   return (
-    <section className="hero">
+    <section
+      className="hero hero-featured"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      onFocusCapture={() => setPaused(true)}
+      onBlurCapture={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setPaused(false);
+      }}
+      aria-roledescription="carousel"
+      aria-label="Featured titles"
+    >
       {active.posterUrl && (
         <div
-          className="hero-bg"
+          className="hero-bg hero-bg-poster"
           style={{ backgroundImage: `url("${active.posterUrl}")` }}
           key={active.id}
         />
       )}
+
+      <div className="hero-poster-wrap" key={`poster-${active.id}`}>
+        <MediaImage
+          src={active.posterUrl}
+          label={active.title}
+          alt=""
+          className="hero-poster"
+          loading="eager"
+        />
+      </div>
 
       <div className="hero-content">
         <h1 className="hero-title">{active.title}</h1>
@@ -36,19 +74,19 @@ export function Hero({ items }: { items: CatalogItem[] }) {
           <span>{active.mediaType === "series" ? "Series" : "Movie"}</span>
           {active.year && <span>· {active.year}</span>}
           {active.imdbRating && (
-            <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+            <span className="hero-rating">
               · <Star size={13} fill="#ffd166" color="#ffd166" /> {active.imdbRating}
             </span>
           )}
         </div>
         {active.description && <p className="hero-desc">{active.description}</p>}
 
-        <div style={{ display: "flex", gap: 10 }}>
+        <div className="inline-actions">
           <button
             className="btn btn-primary"
             onClick={() => navigate({ name: "details", id: active.id })}
           >
-            <Play size={17} fill="currentColor" /> Watch now
+            <WatchIcon size={17} /> Watch now
           </button>
           <button
             className="btn"

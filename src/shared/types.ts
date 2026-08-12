@@ -372,6 +372,8 @@ export interface AppInfo {
   chrome: string;
   node: string;
   platform: string;
+  /** Installer/runtime format used to give package-specific update guidance. */
+  packageType: string;
   /** False in dev, unpacked builds, and intentionally unsigned macOS builds. */
   updatable: boolean;
 }
