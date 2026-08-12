@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
-import { Download, Github, Mail, RefreshCw, RotateCw } from "lucide-react";
+import { Download, ExternalLink, Github, Mail, RefreshCw, RotateCw } from "lucide-react";
 import { AUTHOR, type AppInfo, type UpdateStatus } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { formatBytes } from "../lib/format";
 import { Spinner } from "../components/States";
 import { useApp } from "../store";
+
+const RELEASES_URL = "https://github.com/ELhadratiOth/InfinityPlay/releases";
 
 function statusLine(status: UpdateStatus): { text: string; busy: boolean } {
   switch (status.state) {
@@ -113,11 +115,15 @@ export function AboutPage() {
             <button className="btn btn-sm btn-primary" onClick={() => void install()}>
               <Download size={14} /> Restart & install
             </button>
+          ) : status.state === "unsupported" ? (
+            <button className="btn btn-sm" onClick={() => open(RELEASES_URL)}>
+              <ExternalLink size={14} /> View releases
+            </button>
           ) : (
             <button
               className="btn btn-sm"
               onClick={() => void check()}
-              disabled={line.busy || status.state === "unsupported"}
+              disabled={line.busy}
             >
               {line.busy ? <RefreshCw size={14} /> : <RotateCw size={14} />} Check now
             </button>

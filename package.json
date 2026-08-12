@@ -8,6 +8,13 @@
     "email": "othmanelhadrati@gmail.com",
     "url": "https://github.com/ELhadratiOth"
   },
+  "contributors": [
+    {
+      "name": "Tajeddine Bourhim",
+      "email": "bourhimtajeddine@gmail.com",
+      "url": "https://github.com/Scorpiontaj"
+    }
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/ELhadratiOth/InfinityPlay.git"
@@ -21,10 +28,10 @@
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "dist": "electron-vite build && electron-builder",
-    "dist:win": "electron-vite build && electron-builder --win",
-    "dist:mac": "electron-vite build && electron-builder --mac",
-    "dist:linux": "electron-vite build && electron-builder --linux",
-    "release": "electron-vite build && electron-builder --win --publish always",
+    "dist:win": "electron-vite build && electron-builder --win nsis --x64 --publish never",
+    "dist:mac": "electron-vite build && electron-builder --mac dmg zip --x64 --arm64 --publish never",
+    "dist:linux": "electron-vite build && electron-builder --linux AppImage deb rpm pacman --x64 --publish never",
+    "release:current": "electron-vite build && electron-builder --publish always",
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {

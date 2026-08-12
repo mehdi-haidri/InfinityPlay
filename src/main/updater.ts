@@ -16,8 +16,23 @@ let status: UpdateStatus = { state: "idle" };
 let listenersBound = false;
 let getWindow: () => BrowserWindow | null = () => null;
 
-const UNSUPPORTED_MESSAGE =
+const DEVELOPMENT_UNSUPPORTED_MESSAGE =
   "Updates are only available in an installed build. This looks like a development run.";
+
+const UNSIGNED_MAC_UNSUPPORTED_MESSAGE =
+  "Automatic updates require a signed macOS build. Download the newest DMG from GitHub Releases.";
+
+function unsupportedMessage(): string | null {
+  if (!app.isPackaged) return DEVELOPMENT_UNSUPPORTED_MESSAGE;
+  // Squirrel.Mac rejects unsigned update bundles. Keep checks disabled until the release
+  // workflow is supplied with a Developer ID certificate and notarization credentials.
+  if (process.platform === "darwin") return UNSIGNED_MAC_UNSUPPORTED_MESSAGE;
+  return null;
+}
+
+export function isAutoUpdateSupported(): boolean {
+  return unsupportedMessage() === null;
+}
 
 function publish(next: UpdateStatus): void {
   status = next;
@@ -73,8 +88,9 @@ function bindListeners(): void {
 
 export function initUpdater(resolveWindow: () => BrowserWindow | null): void {
   getWindow = resolveWindow;
-  if (!app.isPackaged) {
-    status = { state: "unsupported", message: UNSUPPORTED_MESSAGE };
+  const message = unsupportedMessage();
+  if (message) {
+    status = { state: "unsupported", message };
     return;
   }
   bindListeners();
@@ -88,8 +104,9 @@ export function getUpdateStatus(): UpdateStatus {
 }
 
 export async function checkForUpdates(): Promise<UpdateStatus> {
-  if (!app.isPackaged) {
-    publish({ state: "unsupported", message: UNSUPPORTED_MESSAGE });
+  const message = unsupportedMessage();
+  if (message) {
+    publish({ state: "unsupported", message });
     return status;
   }
   bindListeners();

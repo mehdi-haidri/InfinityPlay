@@ -5,6 +5,19 @@ page, then offers **Restart & install** when a new version is ready.
 
 ---
 
+## Unreleased
+
+### Packages
+
+- Added Intel and Apple Silicon macOS DMGs, with ZIP companions for future signed updates.
+- Added AppImage, DEB, RPM and Arch Linux packages for x64 systems.
+- Added tagged GitHub Actions releases for Windows, macOS and Linux.
+- Unsigned macOS builds direct users to GitHub Releases instead of attempting an update
+  that macOS would reject.
+- Added Tajeddine Bourhim to the project contributor metadata.
+
+---
+
 ## 0.1.0
 
 First release.

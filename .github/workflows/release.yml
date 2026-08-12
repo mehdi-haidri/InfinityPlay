@@ -1,0 +1,217 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    name: Validate source and version
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Require tag to match package version
+        run: >-
+          node -e "const p=require('./package.json');
+          const expected='v'+p.version;
+          const actual=process.env.GITHUB_REF_NAME;
+          if(actual!==expected){console.error('Expected tag '+expected+', received '+actual);process.exit(1)}"
+
+      - name: Type-check
+        run: npm run typecheck
+
+      - name: Build application
+        run: npm run build
+
+  windows:
+    name: Package Windows x64
+    needs: validate
+    runs-on: windows-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build NSIS installer
+        run: npm run dist:win
+
+      - name: Upload Windows release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-windows
+          if-no-files-found: error
+          path: |
+            release/*.exe
+            release/*.exe.blockmap
+            release/latest.yml
+
+  macos:
+    name: Package macOS x64 and arm64
+    needs: validate
+    runs-on: macos-14
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build unsigned DMG and ZIP packages
+        run: npm run dist:mac
+
+      - name: Verify DMG containers and architectures
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(node -p "require('./package.json').version")
+          for dmg in release/*.dmg; do
+            hdiutil verify "$dmg"
+          done
+          for arch in x64 arm64; do
+            test -f "release/InfinityPlay-${version}-mac-${arch}.dmg"
+            test -f "release/InfinityPlay-${version}-mac-${arch}.zip"
+            grep -F "InfinityPlay-${version}-mac-${arch}.zip" release/latest-mac.yml
+          done
+          find release -path "*/InfinityPlay.app/Contents/MacOS/InfinityPlay" -exec file {} \;
+
+      - name: Confirm app bundles are intentionally unsigned
+        shell: bash
+        run: |
+          set -euo pipefail
+          found=0
+          while IFS= read -r -d '' app; do
+            found=1
+            if codesign --verify --deep --strict "$app"; then
+              echo "Unexpected signed bundle: $app" >&2
+              exit 1
+            fi
+          done < <(find release -name "InfinityPlay.app" -print0)
+          test "$found" -eq 1
+
+      - name: Upload macOS release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-macos
+          if-no-files-found: error
+          path: |
+            release/*.dmg
+            release/*.dmg.blockmap
+            release/*.zip
+            release/*.zip.blockmap
+            release/latest-mac.yml
+
+  linux:
+    name: Package Linux x64
+    needs: validate
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install package inspection tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes libarchive-tools rpm xz-utils zstd
+
+      - name: Build AppImage, DEB, RPM, and Arch packages
+        run: npm run dist:linux
+
+      - name: Inspect package metadata and contents
+        shell: bash
+        run: |
+          set -euo pipefail
+          appimage=$(find release -maxdepth 1 -name "*.AppImage" -print -quit)
+          deb=$(find release -maxdepth 1 -name "*.deb" -print -quit)
+          rpm_package=$(find release -maxdepth 1 -name "*.rpm" -print -quit)
+          arch_package=$(find release -maxdepth 1 -name "*.pkg.tar.zst" -print -quit)
+          test -n "$appimage" && test -n "$deb" && test -n "$rpm_package" && test -n "$arch_package"
+          dpkg-deb --info "$deb"
+          rpm --query --package --info "$rpm_package"
+          tar --list --file "$arch_package" >/dev/null
+          test "$(tar --extract --to-stdout --file "$arch_package" opt/InfinityPlay/resources/package-type)" = "pacman"
+          grep -F ".AppImage" release/latest-linux.yml
+          grep -F ".deb" release/latest-linux.yml
+          grep -F ".rpm" release/latest-linux.yml
+          grep -F ".pkg.tar.zst" release/latest-linux.yml
+          chmod +x "$appimage"
+          "$appimage" --appimage-extract >/dev/null
+
+      - name: Upload Linux release files
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-linux
+          if-no-files-found: error
+          path: |
+            release/*.AppImage
+            release/*.AppImage.blockmap
+            release/*.deb
+            release/*.rpm
+            release/*.pkg.tar.zst
+            release/latest-linux.yml
+
+  publish:
+    name: Publish GitHub Release
+    needs: [windows, macos, linux]
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ github.ref_name }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Download packaged release files
+        uses: actions/download-artifact@v4
+        with:
+          pattern: release-*
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create or update the release
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            gh release create "$TAG" --verify-tag --title "InfinityPlay $TAG" --generate-notes
+          fi
+          gh release upload "$TAG" release-assets/* --clobber

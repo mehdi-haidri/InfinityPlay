@@ -33,7 +33,12 @@ import {
   revealDownload,
   startDownload,
 } from "./downloads";
-import { checkForUpdates, getUpdateStatus, installUpdate } from "./updater";
+import {
+  checkForUpdates,
+  getUpdateStatus,
+  installUpdate,
+  isAutoUpdateSupported,
+} from "./updater";
 
 const moviebox = new MovieBoxService();
 
@@ -107,7 +112,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     chrome: process.versions.chrome,
     node: process.versions.node,
     platform: `${process.platform}-${process.arch}`,
-    updatable: app.isPackaged,
+    updatable: isAutoUpdateSupported(),
   }));
 
   handle("update:status", () => getUpdateStatus());

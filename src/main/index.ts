@@ -103,7 +103,9 @@ function createWindow(): BrowserWindow {
     autoHideMenuBar: true,
     backgroundColor: "#08090d",
     icon: path.join(__dirname, "../../build/icon.png"),
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    // Keep the native macOS title bar. The previous hidden inset placed the traffic-light
+    // controls over the sidebar brand and left no reliable drag region.
+    titleBarStyle: "default",
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,

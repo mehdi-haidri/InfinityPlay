@@ -20,6 +20,11 @@ files:
 
 asar: true
 
+# electron-builder 25's pacman target emits an XZ stream. Recompress that one artifact
+# to real Zstandard before electron-builder reports it as complete.
+artifactBuildStarted: build/prepare-linux-target.cjs
+artifactBuildCompleted: build/repack-pacman.cjs
+
 win:
   target:
     - target: nsis
@@ -33,15 +38,60 @@ nsis:
   createDesktopShortcut: true
 
 mac:
+  # Direct-download builds are intentionally unsigned until Apple Developer credentials
+  # are configured. Hardened runtime without a real signature can prevent the app from
+  # launching, so all three settings must change together when signing is enabled.
+  identity: null
+  hardenedRuntime: false
+  notarize: false
   target:
     - target: dmg
+      arch: [x64, arm64]
+    # Squirrel.Mac/electron-updater requires the ZIP and latest-mac.yml alongside the DMG.
+    - target: zip
       arch: [x64, arm64]
   category: public.app-category.entertainment
   artifactName: ${productName}-${version}-mac-${arch}.${ext}
 
 linux:
   target:
-    - AppImage
-    - deb
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+    - target: rpm
+      arch: [x64]
+    - target: pacman
+      arch: [x64]
   category: AudioVideo
+  synopsis: Stream movies, series, anime and live TV
+  description: Desktop app for finding and streaming movies, TV shows, anime and live TV.
+  maintainer: EL HADRATI Othman <othmanelhadrati@gmail.com>
+  vendor: EL HADRATI Othman
+  executableName: infinityplay
+  icon: icon.png
+  desktop:
+    Name: InfinityPlay
+    Comment: Stream movies, series, anime and live TV
+    Categories: AudioVideo;Video;
+    Keywords: movies;series;anime;television;streaming;
+    StartupWMClass: InfinityPlay
+    Terminal: false
+    Type: Application
   artifactName: ${productName}-${version}-linux-${arch}.${ext}
+
+# electron-builder 25 otherwise uses `.pacman` as the artifact extension. Keep the
+# standard Arch Linux package suffix so `pacman -U` and release tooling recognise it.
+pacman:
+  artifactName: ${productName}-${version}-linux-${arch}.pkg.tar.zst
+
+# Use one architecture label in user-facing filenames even though package managers call
+# x64 `amd64` or `x86_64` internally.
+appImage:
+  artifactName: ${productName}-${version}-linux-x64.${ext}
+
+deb:
+  artifactName: ${productName}-${version}-linux-x64.${ext}
+
+rpm:
+  artifactName: ${productName}-${version}-linux-x64.${ext}

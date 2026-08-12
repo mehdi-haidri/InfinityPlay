@@ -372,7 +372,7 @@ export interface AppInfo {
   chrome: string;
   node: string;
   platform: string;
-  /** False in dev and for unpacked builds, where updating is not possible. */
+  /** False in dev, unpacked builds, and intentionally unsigned macOS builds. */
   updatable: boolean;
 }
 
