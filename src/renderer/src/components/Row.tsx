@@ -8,9 +8,10 @@ interface Props {
   items: CatalogItem[];
   progressOf?: (item: CatalogItem) => number;
   onOpen?: (item: CatalogItem) => void;
+  onRemove?: (item: CatalogItem) => void;
 }
 
-export function Row({ title, items, progressOf, onOpen }: Props) {
+export function Row({ title, items, progressOf, onOpen, onRemove }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
 
   const scrollBy = (direction: 1 | -1) => {
@@ -25,11 +26,11 @@ export function Row({ title, items, progressOf, onOpen }: Props) {
     <section className="row">
       <header className="row-header">
         <h2 className="row-title">{title}</h2>
-        <div style={{ display: "flex", gap: 4 }}>
-          <button className="icon-button" onClick={() => scrollBy(-1)} aria-label="Scroll left">
+        <div className="row-actions">
+          <button className="icon-button" onClick={() => scrollBy(-1)} aria-label={`Scroll ${title} left`} title="Scroll left">
             <ChevronLeft size={18} />
           </button>
-          <button className="icon-button" onClick={() => scrollBy(1)} aria-label="Scroll right">
+          <button className="icon-button" onClick={() => scrollBy(1)} aria-label={`Scroll ${title} right`} title="Scroll right">
             <ChevronRight size={18} />
           </button>
         </div>
@@ -42,6 +43,7 @@ export function Row({ title, items, progressOf, onOpen }: Props) {
             item={item}
             progress={progressOf?.(item) ?? 0}
             onOpen={onOpen}
+            onRemove={onRemove}
           />
         ))}
       </div>

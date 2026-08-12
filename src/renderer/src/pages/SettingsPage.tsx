@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { FolderOpen, Plus, Trash2 } from "lucide-react";
+import { useEffect, useState } from "react";
+import { FolderOpen, Plus, RotateCw, Trash2 } from "lucide-react";
 import {
   AUDIO_PREFERENCES,
   CATALOG_COUNTRIES,
@@ -8,14 +8,19 @@ import {
   SUBTITLE_LANGUAGES,
   SUBTITLE_OFF,
   type AppConfig,
+  type AppInfo,
 } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { useApp } from "../store";
+import { PageHeader } from "../components/PageHeader";
 
 const THEMES: { value: AppConfig["theme"]; label: string }[] = [
   { value: "midnight", label: "Midnight (rose accent)" },
   { value: "noir", label: "Noir (monochrome)" },
   { value: "ember", label: "Ember (amber accent)" },
+  { value: "ocean", label: "Ocean (teal accent)" },
+  { value: "forest", label: "Forest (green accent)" },
+  { value: "plum", label: "Plum (violet accent)" },
 ];
 
 const RESOLUTIONS = [0, 2160, 1080, 720, 480, 360];
@@ -27,6 +32,12 @@ export function SettingsPage() {
 
   const [playlistName, setPlaylistName] = useState("");
   const [playlistUrl, setPlaylistUrl] = useState("");
+  const [restartNeeded, setRestartNeeded] = useState(false);
+  const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
+
+  useEffect(() => {
+    unwrap(api.app.info()).then(setAppInfo).catch(() => undefined);
+  }, []);
 
   const addPlaylist = (name: string, url: string) => {
     const trimmedUrl = url.trim();
@@ -56,10 +67,14 @@ export function SettingsPage() {
   };
 
   return (
-    <div className="page" style={{ maxWidth: 780 }}>
-      <h1 className="page-title">Settings</h1>
+    <div className="page page-narrow">
+      <PageHeader
+        eyebrow="Preferences"
+        title="Settings"
+        description="Control catalog, playback, subtitles, downloads, and live TV sources."
+      />
 
-      <section className="panel" style={{ marginBottom: 20 }}>
+      <section className="panel panel-section">
         <div className="panel-title">Appearance & playback</div>
 
         <div className="setting">
@@ -76,6 +91,65 @@ export function SettingsPage() {
               <option key={theme.value} value={theme.value}>{theme.label}</option>
             ))}
           </select>
+        </div>
+
+        <div className="setting">
+          <div>
+            <div className="setting-label">Resume playback</div>
+            <div className="setting-hint">Ask each time, always continue, or always start from the beginning.</div>
+          </div>
+          <select
+            className="input"
+            value={config.resumeBehavior}
+            onChange={(event) => void patchConfig({ resumeBehavior: event.target.value as AppConfig["resumeBehavior"] })}
+          >
+            <option value="ask">Ask me</option>
+            <option value="resume">Always continue</option>
+            <option value="restart">Always start over</option>
+          </select>
+        </div>
+
+        <div className="setting">
+          <div>
+            <div className="setting-label">Hardware acceleration</div>
+            <div className="setting-hint">
+              Uses NVIDIA, AMD, or Intel decoding through Electron and FFmpeg when the installed driver supports it. Restart required.
+              {appInfo?.gpu ? ` Detected: ${appInfo.gpu}.` : ""}
+            </div>
+          </div>
+          <button
+            className="switch"
+            data-on={config.hardwareAcceleration}
+            aria-pressed={config.hardwareAcceleration}
+            aria-label="Hardware acceleration"
+            onClick={async () => {
+              await patchConfig({ hardwareAcceleration: !config.hardwareAcceleration });
+              setRestartNeeded(true);
+            }}
+          />
+        </div>
+
+        {restartNeeded && (
+          <div className="setting-restart" role="status">
+            <span>The acceleration change takes effect after restart.</span>
+            <button className="btn btn-sm" onClick={() => void api.system.restart()}>
+              <RotateCw size={14} /> Restart now
+            </button>
+          </div>
+        )}
+
+        <div className="setting">
+          <div>
+            <div className="setting-label">Reduce motion</div>
+            <div className="setting-hint">Disables interface animation and smooth scrolling without changing the theme.</div>
+          </div>
+          <button
+            className="switch"
+            data-on={config.reducedMotion}
+            aria-pressed={config.reducedMotion}
+            aria-label="Reduce motion"
+            onClick={() => void patchConfig({ reducedMotion: !config.reducedMotion })}
+          />
         </div>
 
         <div className="setting">

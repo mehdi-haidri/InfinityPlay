@@ -13,6 +13,7 @@ export function HomePage() {
   const preferredAudio = useApp((state) => state.config.preferredAudio);
   const catalogCountry = useApp((state) => state.config.catalogCountry);
   const hideAdultContent = useApp((state) => state.config.hideAdultContent);
+  const forgetTitle = useApp((state) => state.forgetTitle);
   const { data, loading, error, reload } = useAsync<HomePayload>(
     () => unwrap(api.catalog.home()),
     [preferredAudio, catalogCountry, hideAdultContent],
@@ -48,10 +49,17 @@ export function HomePage() {
       }));
   }, [watchHistory]);
 
-  const progressOf = (item: CatalogItem) => {
-    const entry = watchHistory.find((candidate) => candidate.subjectId === item.id);
-    return entry && entry.duration > 0 ? entry.position / entry.duration : 0;
-  };
+  const progressBySubject = useMemo(() => {
+    const progress = new Map<string, number>();
+    for (const entry of watchHistory) {
+      if (entry.duration > 0 && !progress.has(entry.subjectId)) {
+        progress.set(entry.subjectId, entry.position / entry.duration);
+      }
+    }
+    return progress;
+  }, [watchHistory]);
+
+  const progressOf = (item: CatalogItem) => progressBySubject.get(item.id) ?? 0;
 
   if (error) return <div className="page"><ErrorState message={error} onRetry={reload} /></div>;
 
@@ -77,6 +85,7 @@ export function HomePage() {
             (findProgress(watchHistory, item.id, item.season, 0)?.position ?? 0) /
             Math.max(findProgress(watchHistory, item.id, item.season, 0)?.duration ?? 1, 1)
           }
+          onRemove={(item) => void forgetTitle(item.id)}
         />
       )}
 

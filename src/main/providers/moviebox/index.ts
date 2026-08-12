@@ -8,6 +8,7 @@ import type {
   HomePage,
   MediaDetails,
   MediaType,
+  PersonDetails,
   Release,
   SubtitleOption,
 } from "@shared/types";
@@ -211,6 +212,88 @@ export class MovieBoxService {
     });
   }
 
+  async person(staffId: string, name: string, avatarUrl: string | null): Promise<PersonDetails> {
+    const trimmedName = name.trim();
+    if (!trimmedName) throw new Error("This cast member has no usable name.");
+    return this.cached(`person:${staffId}:${trimmedName.toLowerCase()}`, async () => {
+      await this.client.init();
+
+      const candidates: CatalogItem[] = [];
+      for (let page = 1; page <= 4 && candidates.length < 40; page++) {
+        const payload = await this.client.search(trimmedName, page);
+        candidates.push(...searchToCatalogItems(payload, this.preferredAudio));
+        if (!payload?.pager?.hasMore) break;
+      }
+
+      // Search is intentionally generous (it also matches words in titles), and its
+      // compact rows sometimes omit staff metadata. Verify each candidate against the
+      // full details payload in small batches so the page never attributes a namesake's
+      // work to the selected person or floods the provider with parallel requests.
+      const credits: CatalogItem[] = [];
+      const uniqueCandidates = [...new Map(candidates.map((item) => [item.id, item])).values()]
+        .slice(0, 40);
+      for (let index = 0; index < uniqueCandidates.length; index += 6) {
+        const batch = uniqueCandidates.slice(index, index + 6);
+        const verified = await Promise.all(
+          batch.map(async (item) => {
+            try {
+              const details = await this.details(item.id);
+              return details.cast.some((member) =>
+                staffId
+                  ? member.id === staffId
+                  : member.name.trim().toLowerCase() === trimmedName.toLowerCase(),
+              ) ? item : null;
+            } catch {
+              return null;
+            }
+          }),
+        );
+        credits.push(...verified.filter(Boolean) as CatalogItem[]);
+      }
+
+      const unique = this.screen(
+        [...new Map(credits.map((item) => [item.id, item])).values()].sort(
+          (a, b) => Number(b.year || 0) - Number(a.year || 0),
+        ),
+      );
+
+      let biography = "";
+      let biographySourceUrl: string | null = null;
+      let biographyAvatar: string | null = null;
+      try {
+        const slug = encodeURIComponent(trimmedName.replace(/\s+/g, "_"));
+        const response = await fetch(`https://en.wikipedia.org/api/rest_v1/page/summary/${slug}`, {
+          headers: { "user-agent": "InfinityPlay/0.2 (person biographies)" },
+          signal: AbortSignal.timeout(8_000),
+        });
+        if (response.ok) {
+          const summary = await response.json() as any;
+          if (summary?.type !== "disambiguation") {
+            biography = typeof summary?.extract === "string" ? summary.extract : "";
+            biographySourceUrl = typeof summary?.content_urls?.desktop?.page === "string"
+              ? summary.content_urls.desktop.page
+              : null;
+            biographyAvatar = typeof summary?.thumbnail?.source === "string"
+              ? summary.thumbnail.source
+              : null;
+          }
+        }
+      } catch {
+        // Filmography remains useful when the optional biography service is unavailable.
+      }
+
+      return {
+        id: staffId,
+        name: trimmedName,
+        avatarUrl: avatarUrl || biographyAvatar,
+        biography,
+        biographySourceUrl,
+        movies: unique.filter((item) => item.mediaType === "movie"),
+        series: unique.filter((item) => item.mediaType === "series"),
+      };
+    });
+  }
+
   /**
    * Playable releases for a movie (season/episode 0) or one episode.
    *
@@ -226,13 +309,13 @@ export class MovieBoxService {
     subjectId: string,
     season: number,
     episode: number,
-  ): Promise<Release | null> {
+  ): Promise<Release[]> {
     try {
       const info = await this.client.getPlayInfo(subjectId, season, episode);
       const stream = (info?.streams ?? []).find(
         (entry: any) => typeof entry?.url === "string" && entry.url.includes(".mpd"),
       );
-      if (!stream) return null;
+      if (!stream) return [];
 
       const signedUrl = registerSignedStream(stream.url, String(stream.signCookie ?? ""));
 
@@ -258,13 +341,12 @@ export class MovieBoxService {
         const claimed = Number(String(stream.resolutions ?? "").split(",")[0]);
         ladder = Number.isFinite(claimed) && claimed > 0 ? [claimed] : [];
       }
-      if (ladder.length === 0) return null;
+      if (ladder.length === 0) return [];
 
-      return {
+      const base = {
         url: signedUrl,
         resourceId: String(stream.id ?? ""),
         filename: "",
-        resolution: ladder[0],
         sizeBytes: Number(stream.size ?? 0) || 0,
         format: String(stream.codecName ?? "dash"),
         headers: {},
@@ -272,9 +354,10 @@ export class MovieBoxService {
         language: "",
         kind: "dash",
         ladder,
-      };
+      } satisfies Omit<Release, "resolution">;
+      return ladder.map((resolution) => ({ ...base, resolution }));
     } catch {
-      return null;
+      return [];
     }
   }
 
@@ -303,9 +386,9 @@ export class MovieBoxService {
       ]);
 
       // The adaptive stream leads: it carries the qualities the progressive rows lost.
-      return adaptive
-        ? [adaptive, ...sortReleases(progressive)]
-        : sortReleases(progressive);
+      return [...adaptive, ...sortReleases(progressive)].sort(
+        (a, b) => b.resolution - a.resolution || (a.kind === "dash" ? -1 : 1),
+      );
     });
   }
 

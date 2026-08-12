@@ -11,6 +11,8 @@ import type { DownloadRecord } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { formatBytes, qualityLabel, relativeTime } from "../lib/format";
 import { EmptyState } from "../components/States";
+import { MediaImage } from "../components/MediaImage";
+import { PageHeader } from "../components/PageHeader";
 import { useApp } from "../store";
 
 const isRunning = (record: DownloadRecord) =>
@@ -36,7 +38,7 @@ function stateLabel(record: DownloadRecord): string {
     case "cancelled":
       return "Cancelled";
     default:
-      return "Interrupted — start it again from the title page";
+      return record.failureReason ?? "Interrupted — start it again from the title page";
   }
 }
 
@@ -47,6 +49,7 @@ export function DownloadsPage() {
   const cancelDownload = useApp((state) => state.cancelDownload);
   const openPlayer = useApp((state) => state.openPlayer);
   const notify = useApp((state) => state.notify);
+  const navigate = useApp((state) => state.navigate);
 
   useEffect(() => {
     void loadDownloads();
@@ -78,6 +81,7 @@ export function DownloadsPage() {
           ? `Season ${record.season} · Episode ${record.episode} · ${qualityLabel(record.resolution)} · Offline`
           : `${qualityLabel(record.resolution)} · Offline`,
       url: record.fileUrl,
+      resolution: record.resolution,
       live: false,
       posterUrl: record.posterUrl,
       subjectId: record.subjectId,
@@ -114,11 +118,7 @@ export function DownloadsPage() {
     return (
       <div className="download-row" key={record.id}>
         <div className="download-art">
-          {record.posterUrl ? (
-            <img src={record.posterUrl} alt="" loading="lazy" />
-          ) : (
-            <div style={{ width: "100%", height: "100%", background: "var(--bg-hover)" }} />
-          )}
+          <MediaImage src={record.posterUrl} label={record.title} alt="" />
         </div>
 
         <div className="download-body">
@@ -218,31 +218,41 @@ export function DownloadsPage() {
   if (downloads.length === 0) {
     return (
       <div className="page">
-        <h1 className="page-title">Downloads</h1>
+        <PageHeader
+          eyebrow="Offline library"
+          title="Downloads"
+          description="Save films and episodes locally, then watch without a connection."
+        />
         <EmptyState
           title="Nothing downloaded yet"
-          body="Use the download button on any title to save it for offline viewing."
+          body="Open a title and choose Download. You select the destination folder when the download begins."
+          action={
+            <button className="btn btn-primary" onClick={() => navigate({ name: "home" })}>
+              Browse titles
+            </button>
+          }
         />
       </div>
     );
   }
 
   return (
-    <div className="page" style={{ maxWidth: 940 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
-        <h1 className="page-title">Downloads</h1>
-        {finished.length > 0 && (
+    <div className="page page-medium">
+      <PageHeader
+        eyebrow="Offline library"
+        title="Downloads"
+        description="Track active transfers and play files stored on this device."
+        action={finished.length > 0 ? (
           <button
             className="btn btn-sm btn-ghost"
-            style={{ marginLeft: "auto" }}
             onClick={async () => {
               useApp.setState({ downloads: await unwrap(api.downloads.clearFinished()) });
             }}
           >
             <Trash2 size={14} /> Clear finished
           </button>
-        )}
-      </div>
+        ) : undefined}
+      />
 
       {running.length > 0 && (
         <section className="section">

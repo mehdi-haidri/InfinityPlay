@@ -24,6 +24,7 @@ import {
   SUBTITLE_COLORS,
   SUBTITLE_OFF,
   type Release,
+  type PreparedLiveStream,
   type SubtitleOption,
 } from "@shared/types";
 import { api, unwrap } from "../lib/api";
@@ -49,10 +50,16 @@ export function Player() {
   const surfaceRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const dashRef = useRef<MediaPlayerClass | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
   const idleTimer = useRef<number>();
   const lastSaved = useRef(0);
+  const draggingScrub = useRef(false);
+  const previewRequest = useRef(0);
+  const previewCache = useRef(new Map<string, string | null>());
 
-  const [sourceUrl, setSourceUrl] = useState(request?.url ?? "");
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [selectedSourceUrl, setSelectedSourceUrl] = useState("");
+  const [selectedResolution, setSelectedResolution] = useState(0);
   const [activeRelease, setActiveRelease] = useState<Release | null>(null);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
@@ -70,6 +77,16 @@ export function Player() {
   const [fullscreen, setFullscreen] = useState(false);
   const [hint, setHint] = useState<{ id: number; icon: "play" | "pause" } | null>(null);
   const [waiting, setWaiting] = useState(false);
+  const [prepared, setPrepared] = useState<PreparedLiveStream | null>(null);
+  const [playbackOffset, setPlaybackOffset] = useState(0);
+  const [startPosition, setStartPosition] = useState<number | null>(0);
+  const [scrubPreview, setScrubPreview] = useState<number | null>(null);
+  const [scrubHover, setScrubHover] = useState<{ position: number; left: number } | null>(null);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const previewBucket = scrubHover
+    ? Math.max(0, Math.round(scrubHover.position / 5) * 5)
+    : null;
 
   const releases = useMemo(() => request?.releases ?? [], [request]);
 
@@ -93,18 +110,125 @@ export function Player() {
   }, [config.subtitleSize, config.subtitleColor, config.subtitleBackground]);
   const subtitles = useMemo(() => request?.subtitles ?? [], [request]);
 
-  // A new source resets the whole surface. Keyed on the URL rather than the request
-  // object so an unrelated re-render can never restart playback mid-episode.
+  // Reset the player before resolving a source. A saved position is handled inside the
+  // player, so the user can choose without a browser-style alert interrupting the app.
   useEffect(() => {
     if (!request) return;
-    setSourceUrl(request.url);
-    setActiveRelease(releases.find((release) => release.url === request.url) ?? null);
+    setSourceUrl("");
+    setSelectedSourceUrl(request.url);
+    setSelectedResolution(request.resolution ?? 0);
+    setPrepared(null);
+    setPlaybackOffset(0);
+    const saved = request.startAt ?? 0;
+    setStartPosition(
+      saved > 30 && config.resumeBehavior === "ask"
+        ? null
+        : config.resumeBehavior === "restart"
+          ? 0
+          : saved,
+    );
+    setWaiting(false);
+    setActiveRelease(
+      releases.find(
+        (release) => release.url === request.url && (!request.resolution || release.resolution === request.resolution),
+      ) ?? null,
+    );
     setSubtitle(null);
-    setCurrent(request.startAt ?? 0);
+    setCurrent(saved > 30 && config.resumeBehavior !== "restart" ? saved : 0);
     setDuration(0);
+    setScrubPreview(null);
+    setScrubHover(null);
+    setPreviewImage(null);
+    previewCache.current.clear();
     lastSaved.current = 0;
+    // Request identity is intentionally the media URL; metadata updates must not restart it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.url]);
+
+  // Netflix-style hover frames are generated lazily and bucketed every five seconds.
+  // The debounce prevents pointer movement from starting an FFmpeg process per pixel.
+  useEffect(() => {
+    if (!scrubHover || !selectedSourceUrl || request?.live) {
+      setPreviewImage(null);
+      setPreviewLoading(false);
+      return;
+    }
+    const bucket = previewBucket ?? 0;
+    const key = `${selectedSourceUrl}|${selectedResolution}|${bucket}`;
+    if (previewCache.current.has(key)) {
+      setPreviewImage(previewCache.current.get(key) ?? null);
+      setPreviewLoading(false);
+      return;
+    }
+
+    setPreviewImage(null);
+    const sequence = ++previewRequest.current;
+    const timer = window.setTimeout(() => {
+      setPreviewLoading(true);
+      unwrap(api.media.preview(selectedSourceUrl, bucket, selectedResolution))
+        .then((image) => {
+          if (previewRequest.current !== sequence) return;
+          previewCache.current.set(key, image);
+          while (previewCache.current.size > 48) {
+            const oldest = previewCache.current.keys().next().value;
+            if (oldest === undefined) break;
+            previewCache.current.delete(oldest);
+          }
+          setPreviewImage(image);
+        })
+        .catch(() => {
+          if (previewRequest.current === sequence) setPreviewImage(null);
+        })
+        .finally(() => {
+          if (previewRequest.current === sequence) setPreviewLoading(false);
+        });
+    }, 160);
+    return () => {
+      window.clearTimeout(timer);
+      previewRequest.current += 1;
+    };
+  }, [previewBucket, selectedSourceUrl, selectedResolution, request?.live]);
+
+  // Probe the selected source. Unsupported x265/MPEG-2 streams become a private H.264
+  // compatibility stream; its start offset makes that stream seekable from the UI.
+  useEffect(() => {
+    if (!request || !selectedSourceUrl || startPosition === null) return;
+    let cancelled = false;
+    setWaiting(true);
+    unwrap(api.media.prepareLive(selectedSourceUrl, startPosition, selectedResolution))
+      .then((prepared) => {
+        if (cancelled) return;
+        setPrepared(prepared);
+        setPlaybackOffset(prepared.transcoded ? startPosition : 0);
+        setDuration(prepared.duration ?? 0);
+        setCurrent(startPosition);
+        setSourceUrl(prepared.url);
+        if (prepared.warning) {
+          notify({
+            kind: "info",
+            title: prepared.transcoded ? "Compatibility playback" : "Video codec warning",
+            body: prepared.warning,
+          });
+        }
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setPrepared({ url: selectedSourceUrl, transcoded: false });
+        setPlaybackOffset(0);
+        setSourceUrl(selectedSourceUrl);
+        notify({
+          kind: "error",
+          title: "Could not inspect the video codec",
+          body: error instanceof Error ? error.message : undefined,
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setWaiting(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [request, selectedSourceUrl, selectedResolution, startPosition, notify]);
 
   /**
    * Turns on the requested subtitle once a new source is up. Declared after the reset
@@ -170,12 +294,20 @@ export function Player() {
     } else if (isDash) {
       const player = MediaPlayer().create();
       dashRef.current = player;
+      const requestedHeight = activeRelease?.kind === "dash" ? activeRelease.resolution : 0;
       player.updateSettings({
         streaming: {
-          abr: { autoSwitchBitrate: { video: true } },
+          abr: { autoSwitchBitrate: { video: requestedHeight === 0 } },
           buffer: { fastSwitchEnabled: true },
         },
       });
+      if (requestedHeight > 0) {
+        player.on(MediaPlayer.events.STREAM_INITIALIZED, () => {
+          const choices = player.getBitrateInfoListFor("video");
+          const exact = choices.find((choice) => choice.height === requestedHeight);
+          if (exact) player.setQualityFor("video", exact.qualityIndex, true);
+        });
+      }
       player.on(MediaPlayer.events.ERROR, (event: any) => {
         notify({
           kind: "error",
@@ -196,7 +328,7 @@ export function Player() {
       dashRef.current?.destroy();
       dashRef.current = null;
     };
-  }, [sourceUrl, notify]);
+  }, [sourceUrl, notify, activeRelease?.kind, activeRelease?.resolution]);
 
   const persistProgress = useCallback(
     (position: number, total: number, force = false) => {
@@ -219,6 +351,22 @@ export function Player() {
     },
     [request, saveProgress],
   );
+
+  const seekTo = useCallback(async (position: number) => {
+    const video = videoRef.current;
+    if (!video || !request || duration <= 0) return;
+    const target = Math.min(Math.max(position, 0), duration);
+    setCurrent(target);
+    setScrubPreview(null);
+
+    if (!prepared?.transcoded) {
+      video.currentTime = target;
+      return;
+    }
+
+    setWaiting(true);
+    setStartPosition(target);
+  }, [duration, prepared?.transcoded, request]);
 
   /**
    * Rolls the player straight into the next episode of the same season when the
@@ -246,6 +394,7 @@ export function Player() {
         ...request,
         subtitleLine: `Season ${currentSeason} · Episode ${nextEpisode} · ${qualityLabel(chosen.resolution)}`,
         url: chosen.url,
+        resolution: chosen.resolution,
         resourceId: chosen.resourceId,
         episode: nextEpisode,
         startAt: 0,
@@ -263,10 +412,10 @@ export function Player() {
 
   const close = useCallback(() => {
     const video = videoRef.current;
-    if (video && video.duration > 0) persistProgress(video.currentTime, video.duration, true);
+    if (video && duration > 0) persistProgress(playbackOffset + video.currentTime, duration, true);
     if (document.fullscreenElement) void document.exitFullscreen();
     closePlayer();
-  }, [closePlayer, persistProgress]);
+  }, [closePlayer, duration, persistProgress, playbackOffset]);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
@@ -282,9 +431,9 @@ export function Player() {
 
   const seekBy = useCallback((delta: number) => {
     const video = videoRef.current;
-    if (!video || !Number.isFinite(video.duration)) return;
-    video.currentTime = Math.min(Math.max(video.currentTime + delta, 0), video.duration);
-  }, []);
+    if (!video || duration <= 0) return;
+    void seekTo((prepared?.transcoded ? playbackOffset + video.currentTime : video.currentTime) + delta);
+  }, [duration, playbackOffset, prepared?.transcoded, seekTo]);
 
   const toggleFullscreen = useCallback(async () => {
     if (document.fullscreenElement) {
@@ -314,7 +463,7 @@ export function Player() {
 
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target && ["INPUT", "TEXTAREA"].includes(target.tagName)) return;
+      if (target && ["INPUT", "TEXTAREA", "BUTTON", "SELECT"].includes(target.tagName)) return;
 
       switch (event.key) {
         case " ":
@@ -357,6 +506,11 @@ export function Player() {
   }, [request, togglePlay, seekBy, toggleFullscreen, close, wake]);
 
   useEffect(() => {
+    if (!menu) return;
+    window.requestAnimationFrame(() => menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus());
+  }, [menu]);
+
+  useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
     video.volume = volume;
@@ -389,44 +543,108 @@ export function Player() {
   const onLoadedMetadata = () => {
     const video = videoRef.current;
     if (!video) return;
-    setDuration(video.duration || 0);
-    const resumeAt = request.startAt ?? 0;
-    // Ignore a resume point that sits in the last 30 s — that title was finished.
-    if (resumeAt > 0 && video.duration - resumeAt > 30) video.currentTime = resumeAt;
+    const fullDuration = prepared?.duration || video.duration || 0;
+    setDuration(fullDuration);
+    if (!prepared?.transcoded && (startPosition ?? 0) > 0 && fullDuration - (startPosition ?? 0) > 30) {
+      video.currentTime = startPosition ?? 0;
+    }
   };
 
   const onTimeUpdate = () => {
     const video = videoRef.current;
     if (!video) return;
-    setCurrent(video.currentTime);
+    setCurrent(playbackOffset + video.currentTime);
     if (video.buffered.length > 0) {
-      setBuffered(video.buffered.end(video.buffered.length - 1));
+      setBuffered(playbackOffset + video.buffered.end(video.buffered.length - 1));
     }
-    persistProgress(video.currentTime, video.duration || 0);
+    persistProgress(playbackOffset + video.currentTime, duration || prepared?.duration || video.duration || 0);
   };
 
-  const scrub = (event: React.MouseEvent<HTMLDivElement>) => {
-    const video = videoRef.current;
-    if (!video || !Number.isFinite(video.duration)) return;
+  const scrubPosition = (clientX: number, element: HTMLDivElement): number => {
+    if (duration <= 0) return 0;
+    const rect = element.getBoundingClientRect();
+    const ratio = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
+    return ratio * duration;
+  };
+
+  const scrubPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (duration <= 0) return;
+    draggingScrub.current = true;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const position = scrubPosition(event.clientX, event.currentTarget);
     const rect = event.currentTarget.getBoundingClientRect();
-    const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
-    video.currentTime = ratio * video.duration;
-    setCurrent(video.currentTime);
+    setScrubPreview(position);
+    setScrubHover({ position, left: Math.min(Math.max(event.clientX - rect.left, 0), rect.width) });
   };
 
-  const chooseRelease = (release: Release) => {
-    const video = videoRef.current;
-    const resumeAt = video?.currentTime ?? 0;
+  const scrubPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const position = scrubPosition(event.clientX, event.currentTarget);
+    const rect = event.currentTarget.getBoundingClientRect();
+    setScrubHover({ position, left: Math.min(Math.max(event.clientX - rect.left, 0), rect.width) });
+    if (draggingScrub.current) setScrubPreview(position);
+  };
+
+  const scrubPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingScrub.current) return;
+    draggingScrub.current = false;
+    const position = scrubPosition(event.clientX, event.currentTarget);
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    void seekTo(position);
+  };
+
+  const scrubKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    let next = current;
+    switch (event.key) {
+      case "ArrowLeft": next -= 5; break;
+      case "ArrowRight": next += 5; break;
+      case "PageDown": next -= 30; break;
+      case "PageUp": next += 30; break;
+      case "Home": next = 0; break;
+      case "End": next = duration; break;
+      default: return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    void seekTo(next);
+  };
+
+  const menuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    const buttons = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"),
+    );
+    const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    let target = index;
+    if (event.key === "ArrowDown") target = (index + 1) % buttons.length;
+    else if (event.key === "ArrowUp") target = (index - 1 + buttons.length) % buttons.length;
+    else if (event.key === "Home") target = 0;
+    else if (event.key === "End") target = buttons.length - 1;
+    else if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      setMenu(null);
+      return;
+    } else return;
+    event.preventDefault();
+    event.stopPropagation();
+    buttons[target]?.focus();
+  };
+
+  const chooseRelease = async (release: Release) => {
+    const resumeAt = current;
     setActiveRelease(release);
-    setSourceUrl(release.url);
+    setSelectedResolution(release.resolution);
     setMenu(null);
-    // Restore the position once the new file reports metadata.
-    const restore = () => {
-      const next = videoRef.current;
-      if (next && Number.isFinite(next.duration) && resumeAt > 0) next.currentTime = resumeAt;
-      videoRef.current?.removeEventListener("loadedmetadata", restore);
-    };
-    videoRef.current?.addEventListener("loadedmetadata", restore);
+    setWaiting(true);
+    if (release.kind === "dash" && release.url === selectedSourceUrl && dashRef.current) {
+      const choices = dashRef.current.getBitrateInfoListFor("video");
+      const exact = choices.find((choice) => choice.height === release.resolution);
+      dashRef.current.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } });
+      if (exact) dashRef.current.setQualityFor("video", exact.qualityIndex, true);
+      setWaiting(false);
+      return;
+    }
+    setSelectedSourceUrl(release.url);
+    setStartPosition(resumeAt);
   };
 
   const chooseSubtitle = async (option: SubtitleOption | null) => {
@@ -447,7 +665,8 @@ export function Player() {
     }
   };
 
-  const playedRatio = duration > 0 ? current / duration : 0;
+  const displayedCurrent = scrubPreview ?? current;
+  const playedRatio = duration > 0 ? displayedCurrent / duration : 0;
   const bufferedRatio = duration > 0 ? buffered / duration : 0;
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
 
@@ -500,6 +719,24 @@ export function Player() {
           )}
         </video>
 
+        {startPosition === null && !request.live && (
+          <div className="resume-prompt" role="dialog" aria-modal="true" aria-label="Resume playback">
+            <div className="resume-prompt-card">
+              <span className="resume-eyebrow">Continue watching</span>
+              <h3>Pick up where you stopped?</h3>
+              <p>Resume at {formatTime(request.startAt ?? 0)}, or start this title over.</p>
+              <div className="resume-actions">
+                <button autoFocus className="btn btn-primary" onClick={() => setStartPosition(request.startAt ?? 0)}>
+                  <Play size={16} fill="currentColor" /> Continue
+                </button>
+                <button className="btn" onClick={() => setStartPosition(0)}>
+                  <RotateCcw size={16} /> Start over
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {waiting && (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
             <div className="spinner" />
@@ -529,8 +766,31 @@ export function Player() {
 
           <div className="player-bottom" onClick={(event) => event.stopPropagation()}>
             {!request.live && (
-              <div className="scrub" onClick={scrub} role="slider" aria-label="Seek"
-                   aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(current)}>
+              <div className="scrub" onPointerDown={scrubPointerDown}
+                   onPointerMove={scrubPointerMove} onPointerUp={scrubPointerUp}
+                   onPointerLeave={() => { if (!draggingScrub.current) setScrubHover(null); }}
+                   onPointerCancel={() => { draggingScrub.current = false; setScrubPreview(null); setScrubHover(null); }}
+                   onKeyDown={scrubKeyDown} role="slider" tabIndex={0} aria-label="Seek"
+                   aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(displayedCurrent)}
+                   aria-valuetext={formatTime(displayedCurrent)}>
+                {scrubHover && (
+                  <div
+                    className="scrub-thumbnail"
+                    style={{ left: `clamp(90px, ${scrubHover.left}px, calc(100% - 90px))` }}
+                    aria-hidden="true"
+                  >
+                    <div className="scrub-thumbnail-frame">
+                      {previewImage ? (
+                        <img src={previewImage} alt="" />
+                      ) : (
+                        <div className="scrub-thumbnail-placeholder">
+                          {previewLoading && <span className="spinner" />}
+                        </div>
+                      )}
+                    </div>
+                    <span>{formatTime(scrubHover.position)}</span>
+                  </div>
+                )}
                 <div className="scrub-track">
                   <div className="scrub-buffered" style={{ width: `${bufferedRatio * 100}%` }} />
                   <div className="scrub-played" style={{ width: `${playedRatio * 100}%` }} />
@@ -540,23 +800,23 @@ export function Player() {
             )}
 
             <div className="player-controls">
-              <button className="icon-button" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"}>
+              <button className="icon-button" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"} title={playing ? "Pause (K)" : "Play (K)"}>
                 {playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
               </button>
 
               {!request.live && (
                 <>
-                  <button className="icon-button" onClick={() => seekBy(-SEEK_STEP)} aria-label="Back 10 seconds">
+                  <button className="icon-button" onClick={() => seekBy(-SEEK_STEP)} aria-label="Back 10 seconds" title="Back 10 seconds (Left arrow)">
                     <RotateCcw size={18} />
                   </button>
-                  <button className="icon-button" onClick={() => seekBy(SEEK_STEP)} aria-label="Forward 10 seconds">
+                  <button className="icon-button" onClick={() => seekBy(SEEK_STEP)} aria-label="Forward 10 seconds" title="Forward 10 seconds (Right arrow)">
                     <RotateCw size={18} />
                   </button>
                 </>
               )}
 
               <div className="volume">
-                <button className="icon-button" onClick={() => setMuted((value) => !value)} aria-label="Mute">
+                <button className="icon-button" onClick={() => setMuted((value) => !value)} aria-label={muted ? "Unmute" : "Mute"} title={muted ? "Unmute (M)" : "Mute (M)"}>
                   <VolumeIcon size={19} />
                 </button>
                 <input
@@ -574,7 +834,7 @@ export function Player() {
               </div>
 
               <span className="player-time">
-                {request.live ? "LIVE" : `${formatTime(current)} / ${formatTime(duration)}`}
+                {request.live ? "LIVE" : `${formatTime(displayedCurrent)} / ${formatTime(duration)}`}
               </span>
 
               <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
@@ -583,6 +843,7 @@ export function Player() {
                     className="icon-button"
                     onClick={() => setMenu((value) => (value === "subtitles" ? null : "subtitles"))}
                     aria-label="Subtitles"
+                    title="Subtitles"
                     style={{ color: subtitle ? "var(--accent)" : undefined }}
                   >
                     <Captions size={19} />
@@ -592,10 +853,11 @@ export function Player() {
                   className="icon-button"
                   onClick={() => setMenu((value) => (value === "quality" ? null : "quality"))}
                   aria-label="Quality and speed"
+                  title="Quality and speed"
                 >
                   <Settings2 size={19} />
                 </button>
-                <button className="icon-button" onClick={() => void toggleFullscreen()} aria-label="Fullscreen">
+                <button className="icon-button" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"} title={fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}>
                   {fullscreen ? <Minimize size={19} /> : <Maximize size={19} />}
                 </button>
               </div>
@@ -603,19 +865,19 @@ export function Player() {
           </div>
 
           {menu === "quality" && (
-            <div className="player-menu">
+            <div ref={menuRef} className="player-menu" role="dialog" aria-label="Quality and playback speed" onKeyDown={menuKeyDown}>
               {releases.length > 0 && (
                 <>
                   <div className="player-menu-label">Quality</div>
                   {releases.map((release) => (
                     <button
-                      key={release.url}
-                      data-active={release.url === activeRelease?.url}
-                      onClick={() => chooseRelease(release)}
+                      key={`${release.url}-${release.resolution}`}
+                      data-active={release.url === activeRelease?.url && release.resolution === activeRelease.resolution}
+                      onClick={() => void chooseRelease(release)}
                     >
-                      {release.url === activeRelease?.url ? <Check size={14} /> : <span style={{ width: 14 }} />}
+                      {release.url === activeRelease?.url && release.resolution === activeRelease.resolution ? <Check size={14} /> : <span style={{ width: 14 }} />}
                       {release.kind === "dash"
-                        ? `Auto · up to ${qualityLabel(release.resolution)}`
+                        ? `${qualityLabel(release.resolution)} · adaptive`
                         : qualityLabel(release.resolution)}
                       <span style={{ marginLeft: "auto", color: "var(--text-faint)", fontSize: 12 }}>
                         {release.kind === "dash"
@@ -638,7 +900,7 @@ export function Player() {
           )}
 
           {menu === "subtitle-style" && (
-            <div className="player-menu player-menu-wide">
+            <div ref={menuRef} className="player-menu player-menu-wide" role="dialog" aria-label="Subtitle appearance" onKeyDown={menuKeyDown}>
               <button className="player-menu-back" onClick={() => setMenu("subtitles")}>
                 <ChevronLeft size={15} />
                 Subtitle appearance
@@ -731,7 +993,7 @@ export function Player() {
           )}
 
           {menu === "subtitles" && (
-            <div className="player-menu">
+            <div ref={menuRef} className="player-menu" role="dialog" aria-label="Subtitles" onKeyDown={menuKeyDown}>
               <div className="player-menu-head">
                 <span className="player-menu-label">Subtitles</span>
                 <button

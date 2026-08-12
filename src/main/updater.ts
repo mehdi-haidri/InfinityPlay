@@ -16,8 +16,37 @@ let status: UpdateStatus = { state: "idle" };
 let listenersBound = false;
 let getWindow: () => BrowserWindow | null = () => null;
 
-const UNSUPPORTED_MESSAGE =
+const DEVELOPMENT_UNSUPPORTED_MESSAGE =
   "Updates are only available in an installed build. This looks like a development run.";
+
+const UNSIGNED_MAC_UNSUPPORTED_MESSAGE =
+  "Automatic updates require a signed macOS build. Download the newest DMG from GitHub Releases.";
+
+const LEGACY_LINUX_RELEASE_MESSAGE =
+  "This Linux release predates updater metadata. Download the latest AppImage, DEB, RPM, or Arch package from GitHub Releases.";
+
+function publishError(error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  if (process.platform === "linux" && /latest-linux\.yml/i.test(message) && /404|cannot find/i.test(message)) {
+    publish({ state: "unsupported", message: LEGACY_LINUX_RELEASE_MESSAGE });
+    return;
+  }
+  // electron-updater includes full HTTP headers and its internal stack in some messages.
+  // The first line contains the useful reason and keeps About readable.
+  publish({ state: "error", message: message.split("\n")[0] || "The update check failed." });
+}
+
+function unsupportedMessage(): string | null {
+  if (!app.isPackaged) return DEVELOPMENT_UNSUPPORTED_MESSAGE;
+  // Squirrel.Mac rejects unsigned update bundles. Keep checks disabled until the release
+  // workflow is supplied with a Developer ID certificate and notarization credentials.
+  if (process.platform === "darwin") return UNSIGNED_MAC_UNSUPPORTED_MESSAGE;
+  return null;
+}
+
+export function isAutoUpdateSupported(): boolean {
+  return unsupportedMessage() === null;
+}
 
 function publish(next: UpdateStatus): void {
   status = next;
@@ -39,10 +68,7 @@ function bindListeners(): void {
     publish({ state: "available", version: info.version });
     // Fetch straight away; the user is only asked before the restart.
     autoUpdater.downloadUpdate().catch((error: unknown) => {
-      publish({
-        state: "error",
-        message: error instanceof Error ? error.message : String(error),
-      });
+      publishError(error);
     });
   });
 
@@ -64,17 +90,15 @@ function bindListeners(): void {
   });
 
   autoUpdater.on("error", (error) => {
-    publish({
-      state: "error",
-      message: error instanceof Error ? error.message : String(error),
-    });
+    publishError(error);
   });
 }
 
 export function initUpdater(resolveWindow: () => BrowserWindow | null): void {
   getWindow = resolveWindow;
-  if (!app.isPackaged) {
-    status = { state: "unsupported", message: UNSUPPORTED_MESSAGE };
+  const message = unsupportedMessage();
+  if (message) {
+    status = { state: "unsupported", message };
     return;
   }
   bindListeners();
@@ -88,18 +112,16 @@ export function getUpdateStatus(): UpdateStatus {
 }
 
 export async function checkForUpdates(): Promise<UpdateStatus> {
-  if (!app.isPackaged) {
-    publish({ state: "unsupported", message: UNSUPPORTED_MESSAGE });
+  const message = unsupportedMessage();
+  if (message) {
+    publish({ state: "unsupported", message });
     return status;
   }
   bindListeners();
   try {
     await autoUpdater.checkForUpdates();
   } catch (error) {
-    publish({
-      state: "error",
-      message: error instanceof Error ? error.message : String(error),
-    });
+    publishError(error);
   }
   return status;
 }

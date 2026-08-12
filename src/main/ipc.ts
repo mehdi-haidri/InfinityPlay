@@ -3,6 +3,8 @@
  * what lets the requests carry `user-agent` / `x-forwarded-for` and sidesteps CORS.
  */
 import { app, BrowserWindow, dialog, ipcMain, shell } from "electron";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type {
   AppConfig,
   AppInfo,
@@ -10,6 +12,7 @@ import type {
   MediaType,
   Result,
   WatchHistoryItem,
+  PreparedLiveStream,
 } from "@shared/types";
 import { MovieBoxService } from "./providers/moviebox";
 import { fetchPlaylist } from "./providers/m3u";
@@ -33,9 +36,26 @@ import {
   revealDownload,
   startDownload,
 } from "./downloads";
-import { checkForUpdates, getUpdateStatus, installUpdate } from "./updater";
+import {
+  checkForUpdates,
+  getUpdateStatus,
+  installUpdate,
+  isAutoUpdateSupported,
+} from "./updater";
+import { generateMediaPreview, prepareLiveStream } from "./live";
 
 const moviebox = new MovieBoxService();
+
+function packageType(): string {
+  if (!app.isPackaged) return "development";
+  if (process.platform === "darwin") return "macOS DMG (unsigned)";
+  if (process.platform === "win32") return "Windows NSIS";
+  if (process.env.APPIMAGE) return "AppImage";
+
+  const marker = join(process.resourcesPath, "package-type");
+  if (existsSync(marker)) return readFileSync(marker, "utf8").trim() || "Linux package";
+  return "DEB/RPM package";
+}
 
 /** Wraps a handler so the renderer always receives a Result instead of a rejected promise. */
 function handle<A extends unknown[], R>(
@@ -60,6 +80,9 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   handle("catalog:search", (query: string, page: number) => moviebox.search(query, page ?? 1));
   handle("catalog:suggest", (query: string) => moviebox.suggest(query));
   handle("catalog:details", (subjectId: string) => moviebox.details(subjectId));
+  handle("catalog:person", (staffId: string, name: string, avatarUrl: string | null) =>
+    moviebox.person(staffId, name, avatarUrl),
+  );
   handle("catalog:audioVariants", (title: string, mediaType: MediaType) =>
     moviebox.audioVariants(title, mediaType),
   );
@@ -78,6 +101,12 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   handle("tv:playlist", (url: string, forceRefresh: boolean) =>
     fetchPlaylist(url, forceRefresh ?? false),
+  );
+  handle("media:prepareLive", (url: string, startAt: number, resolution: number): Promise<PreparedLiveStream> =>
+    prepareLiveStream(url, startAt, resolution),
+  );
+  handle("media:preview", (url: string, position: number, resolution: number) =>
+    generateMediaPreview(url, position, resolution),
   );
 
   handle("config:get", () => getConfig());
@@ -100,15 +129,33 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   handle("download:open", (id: string) => openDownload(id));
   handle("download:reveal", (id: string) => revealDownload(id));
 
-  handle("app:info", (): AppInfo => ({
-    name: app.getName(),
-    version: app.getVersion(),
-    electron: process.versions.electron,
-    chrome: process.versions.chrome,
-    node: process.versions.node,
-    platform: `${process.platform}-${process.arch}`,
-    updatable: app.isPackaged,
-  }));
+  handle("app:info", async (): Promise<AppInfo> => {
+    const gpuInfo = await app.getGPUInfo("basic").catch(() => null) as {
+      gpuDevice?: { vendorId?: number }[];
+    } | null;
+    const vendorId = Number(gpuInfo?.gpuDevice?.[0]?.vendorId ?? 0);
+    const vendor = vendorId === 0x10de
+      ? "NVIDIA"
+      : vendorId === 0x1002 || vendorId === 0x1022
+        ? "AMD"
+        : vendorId === 0x8086
+          ? "Intel"
+          : vendorId
+            ? `GPU vendor 0x${vendorId.toString(16)}`
+            : "GPU not detected";
+    const decode = app.getGPUFeatureStatus().video_decode;
+    return {
+      name: app.getName(),
+      version: app.getVersion(),
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      platform: `${process.platform}-${process.arch}`,
+      packageType: packageType(),
+      updatable: isAutoUpdateSupported(),
+      gpu: `${vendor} · video decode ${decode}`,
+    };
+  });
 
   handle("update:status", () => getUpdateStatus());
   handle("update:check", () => checkForUpdates());
@@ -121,6 +168,12 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     if (!window) return false;
     window.setFullScreen(value);
     return window.isFullScreen();
+  });
+
+  handle("app:restart", () => {
+    app.relaunch();
+    app.quit();
+    return true;
   });
 
   handle("dialog:pickPlaylistFile", async () => {

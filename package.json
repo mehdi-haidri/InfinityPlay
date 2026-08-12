@@ -1,6 +1,6 @@
 {
   "name": "infinityplay",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Desktop app for finding and streaming movies, TV shows, anime and live TV.",
   "main": "./out/main/index.js",
   "author": {
@@ -8,6 +8,13 @@
     "email": "othmanelhadrati@gmail.com",
     "url": "https://github.com/ELhadratiOth"
   },
+  "contributors": [
+    {
+      "name": "Tajeddine Bourhim",
+      "email": "bourhimtajeddine@gmail.com",
+      "url": "https://github.com/Scorpiontaj"
+    }
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/ELhadratiOth/InfinityPlay.git"
@@ -28,6 +35,7 @@
     "postinstall": "electron-builder install-app-deps"
   },
   "dependencies": {
+    "@fontsource-variable/outfit": "5.2.8",
     "dashjs": "^4.7.4",
     "electron-updater": "^6.3.9"
   },

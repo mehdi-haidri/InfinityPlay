@@ -10,6 +10,8 @@ import type {
   HomePage,
   MediaDetails,
   MediaType,
+  PersonDetails,
+  PreparedLiveStream,
   Release,
   Result,
   SubtitleOption,
@@ -27,6 +29,8 @@ const api = {
     search: (query: string, page = 1) => invoke<CatalogItem[]>("catalog:search", query, page),
     suggest: (query: string) => invoke<CatalogItem[]>("catalog:suggest", query),
     details: (subjectId: string) => invoke<MediaDetails>("catalog:details", subjectId),
+    person: (staffId: string, name: string, avatarUrl: string | null) =>
+      invoke<PersonDetails>("catalog:person", staffId, name, avatarUrl),
     audioVariants: (title: string, mediaType: MediaType) =>
       invoke<AudioVariant[]>("catalog:audioVariants", title, mediaType),
     releases: (subjectId: string, season = 0, episode = 0) =>
@@ -41,6 +45,12 @@ const api = {
   tv: {
     playlist: (url: string, forceRefresh = false) =>
       invoke<Channel[]>("tv:playlist", url, forceRefresh),
+  },
+  media: {
+    prepareLive: (url: string, startAt = 0, resolution = 0) =>
+      invoke<PreparedLiveStream>("media:prepareLive", url, startAt, resolution),
+    preview: (url: string, position: number, resolution = 0) =>
+      invoke<string | null>("media:preview", url, position, resolution),
   },
   config: {
     get: () => invoke<AppConfig>("config:get"),
@@ -90,6 +100,7 @@ const api = {
     openExternal: (url: string) => invoke<void>("shell:openExternal", url),
     setFullScreen: (value: boolean) => invoke<boolean>("window:toggleFullScreen", value),
     pickPlaylistFile: () => invoke<string | null>("dialog:pickPlaylistFile"),
+    restart: () => invoke<boolean>("app:restart"),
   },
 };
 

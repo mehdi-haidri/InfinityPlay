@@ -6,8 +6,14 @@ import { registerIpcHandlers } from "./ipc";
 import { initUpdater } from "./updater";
 import { initDownloads } from "./downloads";
 import { installStreamSigner } from "./streams";
+import { LIVE_TRANSCODE_SCHEME, registerLiveTranscodeProtocol } from "./live";
+import { getConfig } from "./store";
 
 const isDev = !app.isPackaged;
+
+// Electron must receive this before `ready`. FFmpeg reads the same preference when it
+// starts compatibility playback. Changing it in Settings therefore offers a restart.
+if (!getConfig().hardwareAcceleration) app.disableHardwareAcceleration();
 
 /**
  * The renderer is served from `file://`, and Chromium refuses to load `file://`
@@ -21,6 +27,10 @@ const LOCAL_MEDIA_SCHEME = "ipmedia";
 protocol.registerSchemesAsPrivileged([
   {
     scheme: LOCAL_MEDIA_SCHEME,
+    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+  },
+  {
+    scheme: LIVE_TRANSCODE_SCHEME,
     privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
   },
 ]);
@@ -103,7 +113,9 @@ function createWindow(): BrowserWindow {
     autoHideMenuBar: true,
     backgroundColor: "#08090d",
     icon: path.join(__dirname, "../../build/icon.png"),
-    titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
+    // Keep the native macOS title bar. The previous hidden inset placed the traffic-light
+    // controls over the sidebar brand and left no reliable drag region.
+    titleBarStyle: "default",
     webPreferences: {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
@@ -161,6 +173,7 @@ app.whenReady().then(() => {
   rewriteMediaRequestHeaders();
   installStreamSigner();
   registerLocalMediaProtocol();
+  registerLiveTranscodeProtocol();
   registerIpcHandlers(() => mainWindow);
   mainWindow = createWindow();
   initDownloads(() => mainWindow);
