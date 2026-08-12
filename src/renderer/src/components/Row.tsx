@@ -8,9 +8,10 @@ interface Props {
   items: CatalogItem[];
   progressOf?: (item: CatalogItem) => number;
   onOpen?: (item: CatalogItem) => void;
+  onRemove?: (item: CatalogItem) => void;
 }
 
-export function Row({ title, items, progressOf, onOpen }: Props) {
+export function Row({ title, items, progressOf, onOpen, onRemove }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
 
   const scrollBy = (direction: 1 | -1) => {
@@ -42,6 +43,7 @@ export function Row({ title, items, progressOf, onOpen }: Props) {
             item={item}
             progress={progressOf?.(item) ?? 0}
             onOpen={onOpen}
+            onRemove={onRemove}
           />
         ))}
       </div>

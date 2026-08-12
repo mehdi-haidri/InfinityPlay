@@ -81,6 +81,7 @@ export function DownloadsPage() {
           ? `Season ${record.season} · Episode ${record.episode} · ${qualityLabel(record.resolution)} · Offline`
           : `${qualityLabel(record.resolution)} · Offline`,
       url: record.fileUrl,
+      resolution: record.resolution,
       live: false,
       posterUrl: record.posterUrl,
       subjectId: record.subjectId,

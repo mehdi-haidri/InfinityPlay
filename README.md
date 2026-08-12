@@ -53,6 +53,10 @@ On Linux, InfinityPlay uses the system `ffprobe` and `ffmpeg` when a Live TV cha
 download uses MPEG-2 or HEVC video that Chromium cannot decode directly. Install FFmpeg
 from your distribution when compatibility playback is needed.
 
+Settings can enable or disable hardware acceleration for Electron and FFmpeg. InfinityPlay
+uses the installed NVIDIA, AMD, or Intel driver when available and shows Chromium's detected
+video-decode status; changing this setting requires an app restart.
+
 ## Development
 
 Requires **Node.js 20+**.

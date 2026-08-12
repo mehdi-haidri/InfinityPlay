@@ -44,7 +44,8 @@ const api = {
       invoke<Channel[]>("tv:playlist", url, forceRefresh),
   },
   media: {
-    prepareLive: (url: string) => invoke<PreparedLiveStream>("media:prepareLive", url),
+    prepareLive: (url: string, startAt = 0, resolution = 0) =>
+      invoke<PreparedLiveStream>("media:prepareLive", url, startAt, resolution),
   },
   config: {
     get: () => invoke<AppConfig>("config:get"),
@@ -94,6 +95,7 @@ const api = {
     openExternal: (url: string) => invoke<void>("shell:openExternal", url),
     setFullScreen: (value: boolean) => invoke<boolean>("window:toggleFullScreen", value),
     pickPlaylistFile: () => invoke<string | null>("dialog:pickPlaylistFile"),
+    restart: () => invoke<boolean>("app:restart"),
   },
 };
 

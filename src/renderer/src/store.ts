@@ -41,6 +41,8 @@ export interface PlayerRequest {
   mediaType?: "movie" | "series";
   year?: string;
   startAt?: number;
+  /** Exact selected source height, needed when one DASH URL carries several qualities. */
+  resolution?: number;
   releases?: Release[];
   subtitles?: SubtitleOption[];
   /** Episodes in the current season; lets the player advance when one ends. */
@@ -143,6 +145,7 @@ export const useApp = create<AppState>((set, get) => ({
       const config = await unwrap(api.config.get());
       set({ config });
       document.documentElement.dataset.theme = config.theme;
+      document.documentElement.dataset.reducedMotion = String(config.reducedMotion);
     } catch {
       // Fall back to the built-in defaults; the app stays usable without a config file.
     }
@@ -153,6 +156,9 @@ export const useApp = create<AppState>((set, get) => ({
     const next = { ...get().config, ...patch };
     set({ config: next });
     if (patch.theme) document.documentElement.dataset.theme = patch.theme;
+    if (patch.reducedMotion !== undefined) {
+      document.documentElement.dataset.reducedMotion = String(patch.reducedMotion);
+    }
     try {
       set({ config: await unwrap(api.config.update(patch)) });
     } catch (error) {

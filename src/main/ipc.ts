@@ -99,7 +99,9 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   handle("tv:playlist", (url: string, forceRefresh: boolean) =>
     fetchPlaylist(url, forceRefresh ?? false),
   );
-  handle("media:prepareLive", (url: string): Promise<PreparedLiveStream> => prepareLiveStream(url));
+  handle("media:prepareLive", (url: string, startAt: number, resolution: number): Promise<PreparedLiveStream> =>
+    prepareLiveStream(url, startAt, resolution),
+  );
 
   handle("config:get", () => getConfig());
   handle("config:update", (patch: Partial<AppConfig>) => updateConfig(patch));
@@ -121,16 +123,33 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   handle("download:open", (id: string) => openDownload(id));
   handle("download:reveal", (id: string) => revealDownload(id));
 
-  handle("app:info", (): AppInfo => ({
-    name: app.getName(),
-    version: app.getVersion(),
-    electron: process.versions.electron,
-    chrome: process.versions.chrome,
-    node: process.versions.node,
-    platform: `${process.platform}-${process.arch}`,
-    packageType: packageType(),
-    updatable: isAutoUpdateSupported(),
-  }));
+  handle("app:info", async (): Promise<AppInfo> => {
+    const gpuInfo = await app.getGPUInfo("basic").catch(() => null) as {
+      gpuDevice?: { vendorId?: number }[];
+    } | null;
+    const vendorId = Number(gpuInfo?.gpuDevice?.[0]?.vendorId ?? 0);
+    const vendor = vendorId === 0x10de
+      ? "NVIDIA"
+      : vendorId === 0x1002 || vendorId === 0x1022
+        ? "AMD"
+        : vendorId === 0x8086
+          ? "Intel"
+          : vendorId
+            ? `GPU vendor 0x${vendorId.toString(16)}`
+            : "GPU not detected";
+    const decode = app.getGPUFeatureStatus().video_decode;
+    return {
+      name: app.getName(),
+      version: app.getVersion(),
+      electron: process.versions.electron,
+      chrome: process.versions.chrome,
+      node: process.versions.node,
+      platform: `${process.platform}-${process.arch}`,
+      packageType: packageType(),
+      updatable: isAutoUpdateSupported(),
+      gpu: `${vendor} · video decode ${decode}`,
+    };
+  });
 
   handle("update:status", () => getUpdateStatus());
   handle("update:check", () => checkForUpdates());
@@ -143,6 +162,12 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     if (!window) return false;
     window.setFullScreen(value);
     return window.isFullScreen();
+  });
+
+  handle("app:restart", () => {
+    app.relaunch();
+    app.quit();
+    return true;
   });
 
   handle("dialog:pickPlaylistFile", async () => {

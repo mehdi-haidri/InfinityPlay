@@ -24,6 +24,7 @@ import {
   SUBTITLE_COLORS,
   SUBTITLE_OFF,
   type Release,
+  type PreparedLiveStream,
   type SubtitleOption,
 } from "@shared/types";
 import { api, unwrap } from "../lib/api";
@@ -52,8 +53,11 @@ export function Player() {
   const menuRef = useRef<HTMLDivElement>(null);
   const idleTimer = useRef<number>();
   const lastSaved = useRef(0);
+  const draggingScrub = useRef(false);
 
   const [sourceUrl, setSourceUrl] = useState("");
+  const [selectedSourceUrl, setSelectedSourceUrl] = useState("");
+  const [selectedResolution, setSelectedResolution] = useState(0);
   const [activeRelease, setActiveRelease] = useState<Release | null>(null);
   const [playing, setPlaying] = useState(false);
   const [current, setCurrent] = useState(0);
@@ -71,6 +75,10 @@ export function Player() {
   const [fullscreen, setFullscreen] = useState(false);
   const [hint, setHint] = useState<{ id: number; icon: "play" | "pause" } | null>(null);
   const [waiting, setWaiting] = useState(false);
+  const [prepared, setPrepared] = useState<PreparedLiveStream | null>(null);
+  const [playbackOffset, setPlaybackOffset] = useState(0);
+  const [startPosition, setStartPosition] = useState<number | null>(0);
+  const [scrubPreview, setScrubPreview] = useState<number | null>(null);
 
   const releases = useMemo(() => request?.releases ?? [], [request]);
 
@@ -94,16 +102,51 @@ export function Player() {
   }, [config.subtitleSize, config.subtitleColor, config.subtitleBackground]);
   const subtitles = useMemo(() => request?.subtitles ?? [], [request]);
 
-  // A new source resets the whole surface. Keyed on the URL rather than the request
-  // object so an unrelated re-render can never restart playback mid-episode.
+  // Reset the player before resolving a source. A saved position is handled inside the
+  // player, so the user can choose without a browser-style alert interrupting the app.
   useEffect(() => {
     if (!request) return;
-    let cancelled = false;
     setSourceUrl("");
+    setSelectedSourceUrl(request.url);
+    setSelectedResolution(request.resolution ?? 0);
+    setPrepared(null);
+    setPlaybackOffset(0);
+    const saved = request.startAt ?? 0;
+    setStartPosition(
+      saved > 30 && config.resumeBehavior === "ask"
+        ? null
+        : config.resumeBehavior === "restart"
+          ? 0
+          : saved,
+    );
+    setWaiting(false);
+    setActiveRelease(
+      releases.find(
+        (release) => release.url === request.url && (!request.resolution || release.resolution === request.resolution),
+      ) ?? null,
+    );
+    setSubtitle(null);
+    setCurrent(saved > 30 && config.resumeBehavior !== "restart" ? saved : 0);
+    setDuration(0);
+    setScrubPreview(null);
+    lastSaved.current = 0;
+    // Request identity is intentionally the media URL; metadata updates must not restart it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request?.url]);
+
+  // Probe the selected source. Unsupported x265/MPEG-2 streams become a private H.264
+  // compatibility stream; its start offset makes that stream seekable from the UI.
+  useEffect(() => {
+    if (!request || !selectedSourceUrl || startPosition === null) return;
+    let cancelled = false;
     setWaiting(true);
-    unwrap(api.media.prepareLive(request.url))
+    unwrap(api.media.prepareLive(selectedSourceUrl, startPosition, selectedResolution))
       .then((prepared) => {
         if (cancelled) return;
+        setPrepared(prepared);
+        setPlaybackOffset(prepared.transcoded ? startPosition : 0);
+        setDuration(prepared.duration ?? 0);
+        setCurrent(startPosition);
         setSourceUrl(prepared.url);
         if (prepared.warning) {
           notify({
@@ -115,7 +158,9 @@ export function Player() {
       })
       .catch((error) => {
         if (cancelled) return;
-        setSourceUrl(request.url);
+        setPrepared({ url: selectedSourceUrl, transcoded: false });
+        setPlaybackOffset(0);
+        setSourceUrl(selectedSourceUrl);
         notify({
           kind: "error",
           title: "Could not inspect the video codec",
@@ -125,17 +170,10 @@ export function Player() {
       .finally(() => {
         if (!cancelled) setWaiting(false);
       });
-    setActiveRelease(releases.find((release) => release.url === request.url) ?? null);
-    setSubtitle(null);
-    setCurrent(request.startAt ?? 0);
-    setDuration(0);
-    lastSaved.current = 0;
     return () => {
       cancelled = true;
     };
-    // Request identity is intentionally the media URL; metadata updates must not restart it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request?.url, notify]);
+  }, [request, selectedSourceUrl, selectedResolution, startPosition, notify]);
 
   /**
    * Turns on the requested subtitle once a new source is up. Declared after the reset
@@ -201,12 +239,20 @@ export function Player() {
     } else if (isDash) {
       const player = MediaPlayer().create();
       dashRef.current = player;
+      const requestedHeight = activeRelease?.kind === "dash" ? activeRelease.resolution : 0;
       player.updateSettings({
         streaming: {
-          abr: { autoSwitchBitrate: { video: true } },
+          abr: { autoSwitchBitrate: { video: requestedHeight === 0 } },
           buffer: { fastSwitchEnabled: true },
         },
       });
+      if (requestedHeight > 0) {
+        player.on(MediaPlayer.events.STREAM_INITIALIZED, () => {
+          const choices = player.getBitrateInfoListFor("video");
+          const exact = choices.find((choice) => choice.height === requestedHeight);
+          if (exact) player.setQualityFor("video", exact.qualityIndex, true);
+        });
+      }
       player.on(MediaPlayer.events.ERROR, (event: any) => {
         notify({
           kind: "error",
@@ -227,7 +273,7 @@ export function Player() {
       dashRef.current?.destroy();
       dashRef.current = null;
     };
-  }, [sourceUrl, notify]);
+  }, [sourceUrl, notify, activeRelease?.kind, activeRelease?.resolution]);
 
   const persistProgress = useCallback(
     (position: number, total: number, force = false) => {
@@ -250,6 +296,22 @@ export function Player() {
     },
     [request, saveProgress],
   );
+
+  const seekTo = useCallback(async (position: number) => {
+    const video = videoRef.current;
+    if (!video || !request || duration <= 0) return;
+    const target = Math.min(Math.max(position, 0), duration);
+    setCurrent(target);
+    setScrubPreview(null);
+
+    if (!prepared?.transcoded) {
+      video.currentTime = target;
+      return;
+    }
+
+    setWaiting(true);
+    setStartPosition(target);
+  }, [duration, prepared?.transcoded, request]);
 
   /**
    * Rolls the player straight into the next episode of the same season when the
@@ -277,6 +339,7 @@ export function Player() {
         ...request,
         subtitleLine: `Season ${currentSeason} · Episode ${nextEpisode} · ${qualityLabel(chosen.resolution)}`,
         url: chosen.url,
+        resolution: chosen.resolution,
         resourceId: chosen.resourceId,
         episode: nextEpisode,
         startAt: 0,
@@ -294,10 +357,10 @@ export function Player() {
 
   const close = useCallback(() => {
     const video = videoRef.current;
-    if (video && video.duration > 0) persistProgress(video.currentTime, video.duration, true);
+    if (video && duration > 0) persistProgress(playbackOffset + video.currentTime, duration, true);
     if (document.fullscreenElement) void document.exitFullscreen();
     closePlayer();
-  }, [closePlayer, persistProgress]);
+  }, [closePlayer, duration, persistProgress, playbackOffset]);
 
   const togglePlay = useCallback(() => {
     const video = videoRef.current;
@@ -313,9 +376,9 @@ export function Player() {
 
   const seekBy = useCallback((delta: number) => {
     const video = videoRef.current;
-    if (!video || !Number.isFinite(video.duration)) return;
-    video.currentTime = Math.min(Math.max(video.currentTime + delta, 0), video.duration);
-  }, []);
+    if (!video || duration <= 0) return;
+    void seekTo((prepared?.transcoded ? playbackOffset + video.currentTime : video.currentTime) + delta);
+  }, [duration, playbackOffset, prepared?.transcoded, seekTo]);
 
   const toggleFullscreen = useCallback(async () => {
     if (document.fullscreenElement) {
@@ -425,36 +488,48 @@ export function Player() {
   const onLoadedMetadata = () => {
     const video = videoRef.current;
     if (!video) return;
-    setDuration(video.duration || 0);
-    const resumeAt = request.startAt ?? 0;
-    // Ignore a resume point that sits in the last 30 s — that title was finished.
-    if (resumeAt > 0 && video.duration - resumeAt > 30) video.currentTime = resumeAt;
+    const fullDuration = prepared?.duration || video.duration || 0;
+    setDuration(fullDuration);
+    if (!prepared?.transcoded && (startPosition ?? 0) > 0 && fullDuration - (startPosition ?? 0) > 30) {
+      video.currentTime = startPosition ?? 0;
+    }
   };
 
   const onTimeUpdate = () => {
     const video = videoRef.current;
     if (!video) return;
-    setCurrent(video.currentTime);
+    setCurrent(playbackOffset + video.currentTime);
     if (video.buffered.length > 0) {
-      setBuffered(video.buffered.end(video.buffered.length - 1));
+      setBuffered(playbackOffset + video.buffered.end(video.buffered.length - 1));
     }
-    persistProgress(video.currentTime, video.duration || 0);
+    persistProgress(playbackOffset + video.currentTime, duration || prepared?.duration || video.duration || 0);
   };
 
-  const scrub = (event: React.MouseEvent<HTMLDivElement>) => {
-    const video = videoRef.current;
-    if (!video || !Number.isFinite(video.duration)) return;
-    const rect = event.currentTarget.getBoundingClientRect();
-    const ratio = Math.min(Math.max((event.clientX - rect.left) / rect.width, 0), 1);
-    video.currentTime = ratio * video.duration;
-    setCurrent(video.currentTime);
+  const scrubPosition = (clientX: number, element: HTMLDivElement): number => {
+    if (duration <= 0) return 0;
+    const rect = element.getBoundingClientRect();
+    const ratio = Math.min(Math.max((clientX - rect.left) / rect.width, 0), 1);
+    return ratio * duration;
   };
 
-  const seekTo = (position: number) => {
-    const video = videoRef.current;
-    if (!video || !Number.isFinite(video.duration)) return;
-    video.currentTime = Math.min(Math.max(position, 0), video.duration);
-    setCurrent(video.currentTime);
+  const scrubPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (duration <= 0) return;
+    draggingScrub.current = true;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setScrubPreview(scrubPosition(event.clientX, event.currentTarget));
+  };
+
+  const scrubPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingScrub.current) return;
+    setScrubPreview(scrubPosition(event.clientX, event.currentTarget));
+  };
+
+  const scrubPointerUp = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!draggingScrub.current) return;
+    draggingScrub.current = false;
+    const position = scrubPosition(event.clientX, event.currentTarget);
+    event.currentTarget.releasePointerCapture(event.pointerId);
+    void seekTo(position);
   };
 
   const scrubKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -470,7 +545,7 @@ export function Player() {
     }
     event.preventDefault();
     event.stopPropagation();
-    seekTo(next);
+    void seekTo(next);
   };
 
   const menuKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -495,34 +570,21 @@ export function Player() {
   };
 
   const chooseRelease = async (release: Release) => {
-    const video = videoRef.current;
-    const resumeAt = video?.currentTime ?? 0;
+    const resumeAt = current;
     setActiveRelease(release);
+    setSelectedResolution(release.resolution);
     setMenu(null);
     setWaiting(true);
-    try {
-      const prepared = await unwrap(api.media.prepareLive(release.url));
-      setSourceUrl(prepared.url);
-      if (prepared.warning) {
-        notify({ kind: "info", title: "Compatibility playback", body: prepared.warning });
-      }
-    } catch (error) {
-      notify({
-        kind: "error",
-        title: "Could not switch source",
-        body: error instanceof Error ? error.message : undefined,
-      });
-      return;
-    } finally {
+    if (release.kind === "dash" && release.url === selectedSourceUrl && dashRef.current) {
+      const choices = dashRef.current.getBitrateInfoListFor("video");
+      const exact = choices.find((choice) => choice.height === release.resolution);
+      dashRef.current.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } });
+      if (exact) dashRef.current.setQualityFor("video", exact.qualityIndex, true);
       setWaiting(false);
+      return;
     }
-    // Restore the position once the new file reports metadata.
-    const restore = () => {
-      const next = videoRef.current;
-      if (next && Number.isFinite(next.duration) && resumeAt > 0) next.currentTime = resumeAt;
-      videoRef.current?.removeEventListener("loadedmetadata", restore);
-    };
-    videoRef.current?.addEventListener("loadedmetadata", restore);
+    setSelectedSourceUrl(release.url);
+    setStartPosition(resumeAt);
   };
 
   const chooseSubtitle = async (option: SubtitleOption | null) => {
@@ -543,7 +605,8 @@ export function Player() {
     }
   };
 
-  const playedRatio = duration > 0 ? current / duration : 0;
+  const displayedCurrent = scrubPreview ?? current;
+  const playedRatio = duration > 0 ? displayedCurrent / duration : 0;
   const bufferedRatio = duration > 0 ? buffered / duration : 0;
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
 
@@ -596,6 +659,24 @@ export function Player() {
           )}
         </video>
 
+        {startPosition === null && !request.live && (
+          <div className="resume-prompt" role="dialog" aria-modal="true" aria-label="Resume playback">
+            <div className="resume-prompt-card">
+              <span className="resume-eyebrow">Continue watching</span>
+              <h3>Pick up where you stopped?</h3>
+              <p>Resume at {formatTime(request.startAt ?? 0)}, or start this title over.</p>
+              <div className="resume-actions">
+                <button autoFocus className="btn btn-primary" onClick={() => setStartPosition(request.startAt ?? 0)}>
+                  <Play size={16} fill="currentColor" /> Continue
+                </button>
+                <button className="btn" onClick={() => setStartPosition(0)}>
+                  <RotateCcw size={16} /> Start over
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {waiting && (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
             <div className="spinner" />
@@ -625,8 +706,11 @@ export function Player() {
 
           <div className="player-bottom" onClick={(event) => event.stopPropagation()}>
             {!request.live && (
-              <div className="scrub" onClick={scrub} onKeyDown={scrubKeyDown} role="slider" tabIndex={0} aria-label="Seek"
-                   aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(current)}>
+              <div className="scrub" onPointerDown={scrubPointerDown}
+                   onPointerMove={scrubPointerMove} onPointerUp={scrubPointerUp}
+                   onPointerCancel={() => { draggingScrub.current = false; setScrubPreview(null); }}
+                   onKeyDown={scrubKeyDown} role="slider" tabIndex={0} aria-label="Seek"
+                   aria-valuemin={0} aria-valuemax={Math.round(duration)} aria-valuenow={Math.round(displayedCurrent)}>
                 <div className="scrub-track">
                   <div className="scrub-buffered" style={{ width: `${bufferedRatio * 100}%` }} />
                   <div className="scrub-played" style={{ width: `${playedRatio * 100}%` }} />
@@ -670,7 +754,7 @@ export function Player() {
               </div>
 
               <span className="player-time">
-                {request.live ? "LIVE" : `${formatTime(current)} / ${formatTime(duration)}`}
+                {request.live ? "LIVE" : `${formatTime(displayedCurrent)} / ${formatTime(duration)}`}
               </span>
 
               <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
@@ -707,13 +791,13 @@ export function Player() {
                   <div className="player-menu-label">Quality</div>
                   {releases.map((release) => (
                     <button
-                      key={release.url}
-                      data-active={release.url === activeRelease?.url}
+                      key={`${release.url}-${release.resolution}`}
+                      data-active={release.url === activeRelease?.url && release.resolution === activeRelease.resolution}
                       onClick={() => void chooseRelease(release)}
                     >
-                      {release.url === activeRelease?.url ? <Check size={14} /> : <span style={{ width: 14 }} />}
+                      {release.url === activeRelease?.url && release.resolution === activeRelease.resolution ? <Check size={14} /> : <span style={{ width: 14 }} />}
                       {release.kind === "dash"
-                        ? `Auto · up to ${qualityLabel(release.resolution)}`
+                        ? `${qualityLabel(release.resolution)} · adaptive`
                         : qualityLabel(release.resolution)}
                       <span style={{ marginLeft: "auto", color: "var(--text-faint)", fontSize: 12 }}>
                         {release.kind === "dash"

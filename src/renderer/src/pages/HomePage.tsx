@@ -13,6 +13,7 @@ export function HomePage() {
   const preferredAudio = useApp((state) => state.config.preferredAudio);
   const catalogCountry = useApp((state) => state.config.catalogCountry);
   const hideAdultContent = useApp((state) => state.config.hideAdultContent);
+  const forgetTitle = useApp((state) => state.forgetTitle);
   const { data, loading, error, reload } = useAsync<HomePayload>(
     () => unwrap(api.catalog.home()),
     [preferredAudio, catalogCountry, hideAdultContent],
@@ -84,6 +85,7 @@ export function HomePage() {
             (findProgress(watchHistory, item.id, item.season, 0)?.position ?? 0) /
             Math.max(findProgress(watchHistory, item.id, item.season, 0)?.duration ?? 1, 1)
           }
+          onRemove={(item) => void forgetTitle(item.id)}
         />
       )}
 

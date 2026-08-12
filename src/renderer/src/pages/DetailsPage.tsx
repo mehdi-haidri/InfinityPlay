@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AudioLines, Captions, Download, Play, Star } from "lucide-react";
+import { AudioLines, Captions, Download, Play, Star, Trash2 } from "lucide-react";
 import {
   ORIGINAL_AUDIO,
   SUBTITLE_OFF,
@@ -31,6 +31,7 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
   const navigate = useApp((state) => state.navigate);
   const openPlayer = useApp((state) => state.openPlayer);
   const watchHistory = useApp((state) => state.watchHistory);
+  const forgetTitle = useApp((state) => state.forgetTitle);
   const defaultResolution = useApp((state) => state.config.defaultResolution);
 
   const preferredSubtitle = useApp((state) => state.config.preferredSubtitle);
@@ -39,6 +40,7 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
   const [episode, setEpisode] = useState(initialEpisode ?? 1);
   const [subtitles, setSubtitles] = useState<SubtitleOption[]>([]);
   const [subtitleChoice, setSubtitleChoice] = useState(preferredSubtitle);
+  const [sourceSelection, setSourceSelection] = useState(() => `${initialSeason ?? 1}:${initialEpisode ?? 1}`);
 
   const details = useAsync<MediaDetails>(() => unwrap(api.catalog.details(id)), [id]);
   const isSeries = details.data?.mediaType === "series" && (details.data?.seasons.length ?? 0) > 0;
@@ -115,12 +117,20 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
     [id, details.data, season, episode],
   );
 
+  const requestedSelection = `${isSeries ? season : 0}:${isSeries ? episode : 0}`;
+  const sourcesReady = !releases.loading && sourceSelection === requestedSelection;
+
+  useEffect(() => {
+    if (!releases.loading && releases.data) setSourceSelection(requestedSelection);
+  }, [releases.loading, releases.data, requestedSelection]);
+
   // Preferred quality first, falling back to the best available.
   const preferred = useMemo(() => {
+    if (!sourcesReady) return null;
     const list = releases.data ?? [];
     if (list.length === 0) return null;
     return list.find((release) => release.resolution === defaultResolution) ?? list[0];
-  }, [releases.data, defaultResolution]);
+  }, [releases.data, defaultResolution, sourcesReady]);
 
   // Captions are keyed on a progressive release's `resourceId`. The adaptive stream
   // carries a manifest id instead, which `get-ext-captions` does not recognise, so the
@@ -210,6 +220,7 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
       mediaType: media.mediaType,
       year: media.year,
       startAt: resume?.position ?? 0,
+      resolution: release.resolution,
       releases: releases.data ?? [],
       subtitles,
       episodeCount: activeSeason?.episodes.length ?? 0,
@@ -220,29 +231,25 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
   // The store owns the toast and the progress stream; this only supplies the metadata
   // the Downloads page needs to show a poster and play the file back.
   const download = (release: Release) => {
-    const candidates = (releases.data ?? []).filter((item) => item.kind !== "dash");
-    const downloadable = release.kind === "dash"
-      ? candidates.find((item) => item.resolution <= release.resolution) ?? candidates[0]
-      : release;
-    if (!downloadable) {
+    if (!release) {
       notify({
         kind: "error",
         title: "No downloadable file",
-        body: "This title only provides an adaptive stream. A standalone MP4 is not available.",
+        body: "No source is available for this quality.",
       });
       return;
     }
-    if (downloadable !== release) {
+    if (release.kind === "dash") {
       notify({
         kind: "info",
-        title: `Downloading ${qualityLabel(downloadable.resolution)}`,
-        body: "The higher-quality option is adaptive, so InfinityPlay selected the best standalone MP4.",
+        title: `Preparing ${qualityLabel(release.resolution)}`,
+        body: "InfinityPlay will save this adaptive quality as a standalone MP4.",
       });
     }
     void beginDownload({
-      url: downloadable.url,
+      url: release.url,
       // Captions hang off a progressive release; the adaptive manifest has no caption id.
-      resourceId: captionSource?.resourceId ?? downloadable.resourceId,
+      resourceId: captionSource?.resourceId ?? release.resourceId,
       title: media.title,
       year: media.year,
       posterUrl: media.posterUrl,
@@ -250,8 +257,8 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
       mediaType: media.mediaType,
       season: isSeries ? season : 0,
       episode: isSeries ? episode : 0,
-      resolution: downloadable.resolution,
-      sourceKind: downloadable.kind ?? "mp4",
+      resolution: release.resolution,
+      sourceKind: release.kind ?? "mp4",
     });
   };
 
@@ -325,6 +332,11 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
             >
               <Download size={17} /> Download
             </button>
+            {watchHistory.some((entry) => entry.subjectId === id) && (
+              <button className="btn btn-ghost" onClick={() => void forgetTitle(id)}>
+                <Trash2 size={16} /> Remove progress
+              </button>
+            )}
           </div>
         </div>
       </section>
@@ -349,6 +361,7 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
                     className="chip"
                     data-active={entry.number === season}
                     onClick={() => {
+                      setSourceSelection("");
                       setSeason(entry.number);
                       setEpisode(1);
                     }}
@@ -365,7 +378,10 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
                     className="episode"
                     data-active={entry.number === episode}
                     data-watched={Boolean(findProgress(watchHistory, id, season, entry.number))}
-                    onClick={() => setEpisode(entry.number)}
+                    onClick={() => {
+                      setSourceSelection("");
+                      setEpisode(entry.number);
+                    }}
                   >
                     {entry.number}
                   </button>
@@ -404,19 +420,19 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
 
             {releases.loading && <LoadingState label="Finding sources…" />}
             {releases.error && <ErrorState message={releases.error} onRetry={releases.reload} />}
-            {!releases.loading && !releases.error && (releases.data ?? []).length === 0 && (
+            {sourcesReady && !releases.error && (releases.data ?? []).length === 0 && (
               <EmptyState title="No sources" body="This episode has no playable release yet." />
             )}
 
-            {(releases.data ?? []).map((release) => (
-              <button key={release.url} className="release" onClick={() => play(release)}>
+            {sourcesReady && (releases.data ?? []).map((release) => (
+              <button key={`${release.url}-${release.resolution}`} className="release" onClick={() => play(release)}>
                 <span className="release-quality">{qualityLabel(release.resolution)}</span>
                 <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
                   {release.format.toUpperCase()}
                   {release.language ? ` · ${release.language}` : ""}
                 </span>
                 <span className="release-meta">
-                  {formatBytes(release.sizeBytes)}
+                  {release.kind === "dash" ? "Adaptive" : formatBytes(release.sizeBytes)}
                   <span
                     className="icon-button"
                     role="button"

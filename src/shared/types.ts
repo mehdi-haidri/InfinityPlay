@@ -260,6 +260,8 @@ export interface PreparedLiveStream {
   url: string;
   transcoded: boolean;
   codec?: string;
+  /** Full source duration when ffprobe can determine it. */
+  duration?: number;
   warning?: string;
 }
 
@@ -285,7 +287,7 @@ export interface WatchHistoryItem {
 }
 
 export interface AppConfig {
-  theme: "midnight" | "noir" | "ember";
+  theme: "midnight" | "noir" | "ember" | "ocean" | "forest" | "plum";
   /** Country the Home rows are filtered to; one of `CATALOG_COUNTRIES`. */
   catalogCountry: string;
   /** Keep pornographic and explicitly erotic titles out of every list. */
@@ -296,6 +298,12 @@ export interface AppConfig {
   preferredSubtitle: string;
   defaultResolution: number;
   autoplayNext: boolean;
+  /** What to do when a saved playback position exists. */
+  resumeBehavior: "ask" | "resume" | "restart";
+  /** Uses Electron/GPU decoding and FFmpeg auto hardware acceleration when available. */
+  hardwareAcceleration: boolean;
+  /** Disables non-essential interface animation independently of the OS preference. */
+  reducedMotion: boolean;
   /** Cue text size as a percentage of the player default. */
   subtitleSize: number;
   /** Cue text colour, any CSS colour. */
@@ -316,6 +324,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   preferredSubtitle: SUBTITLE_OFF,
   defaultResolution: 0,
   autoplayNext: true,
+  resumeBehavior: "ask",
+  hardwareAcceleration: true,
+  reducedMotion: false,
   subtitleSize: 100,
   subtitleColor: "#ffffff",
   downloadSubtitles: "preferred",
@@ -354,7 +365,7 @@ export interface DownloadRequest {
   season: number;
   episode: number;
   resolution: number;
-  /** DASH manifests cannot be saved as standalone playable files. */
+  /** DASH downloads are remuxed to a standalone MP4 at the requested resolution. */
   sourceKind?: "mp4" | "dash";
 }
 
@@ -388,6 +399,8 @@ export interface AppInfo {
   packageType: string;
   /** False in dev, unpacked builds, and intentionally unsigned macOS builds. */
   updatable: boolean;
+  /** Detected graphics vendor and Chromium video-decode status. */
+  gpu: string;
 }
 
 /** Progress of the GitHub-release update flow, pushed to the renderer as it changes. */

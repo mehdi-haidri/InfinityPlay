@@ -226,13 +226,13 @@ export class MovieBoxService {
     subjectId: string,
     season: number,
     episode: number,
-  ): Promise<Release | null> {
+  ): Promise<Release[]> {
     try {
       const info = await this.client.getPlayInfo(subjectId, season, episode);
       const stream = (info?.streams ?? []).find(
         (entry: any) => typeof entry?.url === "string" && entry.url.includes(".mpd"),
       );
-      if (!stream) return null;
+      if (!stream) return [];
 
       const signedUrl = registerSignedStream(stream.url, String(stream.signCookie ?? ""));
 
@@ -258,13 +258,12 @@ export class MovieBoxService {
         const claimed = Number(String(stream.resolutions ?? "").split(",")[0]);
         ladder = Number.isFinite(claimed) && claimed > 0 ? [claimed] : [];
       }
-      if (ladder.length === 0) return null;
+      if (ladder.length === 0) return [];
 
-      return {
+      const base = {
         url: signedUrl,
         resourceId: String(stream.id ?? ""),
         filename: "",
-        resolution: ladder[0],
         sizeBytes: Number(stream.size ?? 0) || 0,
         format: String(stream.codecName ?? "dash"),
         headers: {},
@@ -272,9 +271,10 @@ export class MovieBoxService {
         language: "",
         kind: "dash",
         ladder,
-      };
+      } satisfies Omit<Release, "resolution">;
+      return ladder.map((resolution) => ({ ...base, resolution }));
     } catch {
-      return null;
+      return [];
     }
   }
 
@@ -303,9 +303,9 @@ export class MovieBoxService {
       ]);
 
       // The adaptive stream leads: it carries the qualities the progressive rows lost.
-      return adaptive
-        ? [adaptive, ...sortReleases(progressive)]
-        : sortReleases(progressive);
+      return [...adaptive, ...sortReleases(progressive)].sort(
+        (a, b) => b.resolution - a.resolution || (a.kind === "dash" ? -1 : 1),
+      );
     });
   }
 

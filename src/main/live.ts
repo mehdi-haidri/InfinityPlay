@@ -1,83 +1,171 @@
 import { randomUUID } from "node:crypto";
 import { spawn, spawnSync } from "node:child_process";
+import fs from "node:fs";
+import path from "node:path";
 import { Readable } from "node:stream";
-import { protocol } from "electron";
+import { app, protocol } from "electron";
 import type { PreparedLiveStream } from "@shared/types";
+import { getConfig } from "./store";
 
 export const LIVE_TRANSCODE_SCHEME = "iptranscode";
 
 const PROBE_TIMEOUT_MS = 8_000;
 const SUPPORTED_VIDEO_CODECS = new Set(["h264", "vp8", "vp9", "av1"]);
-const prepared = new Map<string, { source: string; createdAt: number }>();
-const probeCache = new Map<string, { codec: string; checkedAt: number }>();
+const prepared = new Map<string, { source: string; startAt: number; createdAt: number; temporary?: boolean }>();
+const probeCache = new Map<string, { codec: string; duration: number; checkedAt: number }>();
 const CACHE_MS = 6 * 60 * 60 * 1000;
+const commandCache = new Map<string, boolean>();
 
-function commandAvailable(command: string): boolean {
-  return spawnSync(command, ["-version"], { stdio: "ignore" }).status === 0;
+function prunePrepared(): void {
+  for (const [key, entry] of prepared) {
+    if (Date.now() - entry.createdAt > CACHE_MS || prepared.size > 30) {
+      if (entry.temporary) {
+        try { fs.rmSync(entry.source, { force: true }); } catch { /* ignored */ }
+      }
+      prepared.delete(key);
+    }
+  }
 }
 
-function probeCodec(source: string): Promise<string> {
+function commandAvailable(command: string): boolean {
+  const cached = commandCache.get(command);
+  if (cached !== undefined) return cached;
+  const available = spawnSync(command, ["-version"], { stdio: "ignore" }).status === 0;
+  commandCache.set(command, available);
+  return available;
+}
+
+function probeMedia(source: string): Promise<{ codec: string; duration: number }> {
   const cached = probeCache.get(source);
-  if (cached && Date.now() - cached.checkedAt < CACHE_MS) return Promise.resolve(cached.codec);
+  if (cached && Date.now() - cached.checkedAt < CACHE_MS) return Promise.resolve(cached);
 
   return new Promise((resolve) => {
     const child = spawn("ffprobe", [
       "-v", "error",
       "-rw_timeout", "6000000",
       "-select_streams", "v:0",
-      "-show_entries", "stream=codec_name",
-      "-of", "default=noprint_wrappers=1:nokey=1",
+      "-show_entries", "stream=codec_name:format=duration",
+      "-of", "json",
       source,
     ], { stdio: ["ignore", "pipe", "ignore"] });
     const chunks: Buffer[] = [];
     const timer = setTimeout(() => child.kill("SIGKILL"), PROBE_TIMEOUT_MS);
     child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
-    child.once("error", () => resolve(""));
+    child.once("error", () => resolve({ codec: "", duration: 0 }));
     child.once("close", () => {
       clearTimeout(timer);
-      const codec = Buffer.concat(chunks).toString("utf8").trim().split(/\s+/)[0] ?? "";
-      if (codec) probeCache.set(source, { codec, checkedAt: Date.now() });
-      resolve(codec);
+      try {
+        const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+        const codec = String(payload?.streams?.[0]?.codec_name ?? "");
+        const parsedDuration = Number(payload?.format?.duration ?? 0);
+        const duration = Number.isFinite(parsedDuration) ? parsedDuration : 0;
+        const result = { codec, duration, checkedAt: Date.now() };
+        if (codec) probeCache.set(source, result);
+        resolve({ codec, duration });
+      } catch {
+        resolve({ codec: "", duration: 0 });
+      }
     });
   });
 }
 
-export async function prepareLiveStream(source: string): Promise<PreparedLiveStream> {
+export async function prepareLiveStream(
+  source: string,
+  startAt = 0,
+  resolution = 0,
+): Promise<PreparedLiveStream> {
   let probeSource = source;
   if (source.startsWith("ipmedia://")) {
     probeSource = new URL(source).searchParams.get("path") ?? "";
   } else if (!/^https?:\/\//i.test(source)) {
     return { url: source, transcoded: false };
   }
-  // DASH playback needs the session-level CloudFront signer in Electron. FFmpeg runs as
-  // a separate process and cannot inherit those signed segment redirects.
-  if (/\.mpd(?:$|\?)/i.test(source)) return { url: source, transcoded: false };
+  if (/\.mpd(?:$|\?)/i.test(source)) return prepareDashStream(source, startAt, resolution);
   if (!commandAvailable("ffprobe")) return { url: source, transcoded: false };
 
-  const codec = await probeCodec(probeSource);
+  const { codec, duration } = await probeMedia(probeSource);
   if (!codec || SUPPORTED_VIDEO_CODECS.has(codec)) {
-    return { url: source, transcoded: false, codec: codec || undefined };
+    return { url: source, transcoded: false, codec: codec || undefined, duration };
   }
   if (!commandAvailable("ffmpeg")) {
     return {
       url: source,
       transcoded: false,
       codec,
+      duration,
       warning: `This video uses ${codec}, which Electron cannot decode directly. Install FFmpeg to enable compatibility playback.`,
     };
   }
 
   const token = randomUUID();
-  prepared.set(token, { source: probeSource, createdAt: Date.now() });
-  for (const [key, entry] of prepared) {
-    if (Date.now() - entry.createdAt > CACHE_MS || prepared.size > 30) prepared.delete(key);
-  }
+  prepared.set(token, { source: probeSource, startAt: Math.max(0, startAt), createdAt: Date.now() });
+  prunePrepared();
   return {
     url: `${LIVE_TRANSCODE_SCHEME}://live/${token}`,
     transcoded: true,
     codec,
+    duration,
     warning: `Compatibility mode enabled for this ${codec} video.`,
   };
+}
+
+function parseIsoDuration(value: string): number {
+  const match = value.match(/^PT(?:(\d+)H)?(?:(\d+)M)?([\d.]+)S$/);
+  if (!match) return 0;
+  return Number(match[1] ?? 0) * 3600 + Number(match[2] ?? 0) * 60 + Number(match[3] ?? 0);
+}
+
+async function prepareDashStream(
+  source: string,
+  startAt: number,
+  resolution: number,
+): Promise<PreparedLiveStream> {
+  if (!commandAvailable("ffmpeg")) return { url: source, transcoded: false };
+  try {
+    const response = await fetch(source, { signal: AbortSignal.timeout(15_000) });
+    if (!response.ok) return { url: source, transcoded: false };
+    const original = await response.text();
+    const blocks = [...original.matchAll(/<Representation\b[\s\S]*?<\/Representation>/g)];
+    const videoBlocks = blocks.filter((match) => /\bheight="\d+"/.test(match[0]));
+    const selected =
+      videoBlocks.find((match) => Number(match[0].match(/\bheight="(\d+)"/)?.[1]) === resolution) ??
+      videoBlocks[0];
+    if (!selected) return { url: source, transcoded: false };
+    const codecValue = selected[0].match(/\bcodecs="([^"]+)"/)?.[1]?.toLowerCase() ?? "";
+    const codec = codecValue.includes("hev") || codecValue.includes("hvc") ? "hevc" : "h264";
+    const duration = parseIsoDuration(original.match(/mediaPresentationDuration="([^"]+)"/)?.[1] ?? "");
+    if (SUPPORTED_VIDEO_CODECS.has(codec)) return { url: source, transcoded: false, codec, duration };
+
+    const chosenHeight = Number(selected[0].match(/\bheight="(\d+)"/)?.[1] ?? 0);
+    const filtered = original.replace(/<Representation\b[\s\S]*?<\/Representation>/g, (block) => {
+      const height = Number(block.match(/\bheight="(\d+)"/)?.[1] ?? 0);
+      return height === 0 || height === chosenHeight ? block : "";
+    });
+    const parsed = new URL(source);
+    const baseUrl = `${parsed.origin}${parsed.pathname.replace(/[^/]+$/, "")}`;
+    const query = parsed.search.slice(1).replace(/&/g, "&amp;");
+    const signed = query
+      ? filtered.replace(
+          /\b(initialization|media)="([^"]+)"/g,
+          (_match, name: string, value: string) => `${name}="${value}?${query}"`,
+        )
+      : filtered;
+    const manifest = signed.replace(/(<Period\b[^>]*>)/, `$1\n<BaseURL>${baseUrl}</BaseURL>`);
+    const token = randomUUID();
+    const manifestPath = path.join(app.getPath("temp"), `infinityplay-${token}.mpd`);
+    fs.writeFileSync(manifestPath, manifest, "utf8");
+    prepared.set(token, { source: manifestPath, startAt: Math.max(0, startAt), createdAt: Date.now(), temporary: true });
+    prunePrepared();
+    return {
+      url: `${LIVE_TRANSCODE_SCHEME}://live/${token}`,
+      transcoded: true,
+      codec,
+      duration,
+      warning: `Compatibility mode enabled for this ${codec} ${chosenHeight}p video.`,
+    };
+  } catch {
+    return { url: source, transcoded: false };
+  }
 }
 
 export function registerLiveTranscodeProtocol(): void {
@@ -86,10 +174,15 @@ export function registerLiveTranscodeProtocol(): void {
     const entry = prepared.get(token);
     if (!entry) return new Response("Stream session expired", { status: 404 });
 
+    const acceleration = getConfig().hardwareAcceleration ? ["-hwaccel", "auto"] : [];
+    const seek = entry.startAt > 0 ? ["-ss", entry.startAt.toFixed(3)] : [];
     const child = spawn("ffmpeg", [
       "-hide_banner", "-loglevel", "warning",
       "-fflags", "nobuffer", "-flags", "low_delay",
       "-analyzeduration", "2000000", "-probesize", "2000000",
+      ...acceleration,
+      ...seek,
+      "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
       "-i", entry.source,
       "-map", "0:v:0?", "-map", "0:a:0?",
       "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
@@ -102,6 +195,11 @@ export function registerLiveTranscodeProtocol(): void {
     child.stderr.on("data", (chunk: Buffer) => {
       const message = chunk.toString("utf8").trim();
       if (message) console.warn("[live-transcode]", message);
+    });
+    child.once("close", () => {
+      if (!entry.temporary) return;
+      try { fs.rmSync(entry.source, { force: true }); } catch { /* ignored */ }
+      prepared.delete(token);
     });
     request.signal.addEventListener("abort", () => child.kill("SIGKILL"), { once: true });
 

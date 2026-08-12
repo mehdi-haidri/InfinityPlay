@@ -31,6 +31,14 @@ page, then offers **Restart & install** when a new version is ready.
 - Reduced scrolling work with off-screen row containment, asynchronous image decoding,
   indexed watch progress and narrower state subscriptions.
 - Replaced legacy Linux updater metadata 404 stacks with concise manual-update guidance.
+- Made the player timeline draggable and seekable for both native H.264 and FFmpeg-backed
+  H.265/MPEG-2 playback, including signed adaptive movie streams.
+- Added an in-player continue/start-over choice with configurable resume behaviour.
+- Added exact 720p/1080p adaptive downloads instead of silently falling back to 480p.
+- Hide stale source rows while a new episode loads and allow progress removal from title
+  pages, Continue Watching cards, or the history library.
+- Added Ocean, Forest and Plum themes, reduced-motion controls, and restart-aware
+  NVIDIA/AMD/Intel hardware acceleration with detected GPU status.
 
 ---
 

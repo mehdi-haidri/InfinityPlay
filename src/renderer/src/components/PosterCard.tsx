@@ -1,4 +1,4 @@
-import { Star } from "lucide-react";
+import { Star, X } from "lucide-react";
 import type { CatalogItem } from "@shared/types";
 import { useApp } from "../store";
 import { MediaImage } from "./MediaImage";
@@ -9,14 +9,16 @@ interface Props {
   /** 0–1 watch progress; renders the resume strip when above zero. */
   progress?: number;
   onOpen?: (item: CatalogItem) => void;
+  onRemove?: (item: CatalogItem) => void;
 }
 
-export function PosterCard({ item, progress = 0, onOpen }: Props) {
+export function PosterCard({ item, progress = 0, onOpen, onRemove }: Props) {
   const navigate = useApp((state) => state.navigate);
   const open = () => (onOpen ? onOpen(item) : navigate({ name: "details", id: item.id }));
 
   return (
-    <button className="card" onClick={open} title={item.title}>
+    <article className="poster-card-shell">
+      <button className="card" onClick={open} title={item.title}>
       <div className="card-art">
         <MediaImage src={item.posterUrl} label={item.title} alt="" />
 
@@ -48,6 +50,17 @@ export function PosterCard({ item, progress = 0, onOpen }: Props) {
           {[item.year, item.season > 1 ? `S${item.season}` : null].filter(Boolean).join(" · ")}
         </div>
       </div>
-    </button>
+      </button>
+      {onRemove && (
+        <button
+          className="icon-button card-remove-action"
+          onClick={() => onRemove(item)}
+          aria-label={`Remove ${item.title} from continue watching`}
+          title="Remove from continue watching"
+        >
+          <X size={14} />
+        </button>
+      )}
+    </article>
   );
 }

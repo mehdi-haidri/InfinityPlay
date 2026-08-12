@@ -7,8 +7,13 @@ import { initUpdater } from "./updater";
 import { initDownloads } from "./downloads";
 import { installStreamSigner } from "./streams";
 import { LIVE_TRANSCODE_SCHEME, registerLiveTranscodeProtocol } from "./live";
+import { getConfig } from "./store";
 
 const isDev = !app.isPackaged;
+
+// Electron must receive this before `ready`. FFmpeg reads the same preference when it
+// starts compatibility playback. Changing it in Settings therefore offers a restart.
+if (!getConfig().hardwareAcceleration) app.disableHardwareAcceleration();
 
 /**
  * The renderer is served from `file://`, and Chromium refuses to load `file://`
