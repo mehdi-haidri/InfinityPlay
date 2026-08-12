@@ -74,14 +74,17 @@ linux:
   vendor: EL HADRATI Othman
   executableName: infinityplay
   icon: icon.png
+  # electron-builder 26 nests the `[Desktop Entry]` keys under `desktop.entry`; they sat
+  # directly on `desktop` in 25.
   desktop:
-    Name: InfinityPlay
-    Comment: Stream movies, series, anime and live TV
-    Categories: AudioVideo;Video;
-    Keywords: movies;series;anime;television;streaming;
-    StartupWMClass: InfinityPlay
-    Terminal: false
-    Type: Application
+    entry:
+      Name: InfinityPlay
+      Comment: Stream movies, series, anime and live TV
+      Categories: AudioVideo;Video;
+      Keywords: movies;series;anime;television;streaming;
+      StartupWMClass: InfinityPlay
+      Terminal: false
+      Type: Application
   artifactName: ${productName}-${version}-linux-${arch}.${ext}
 
 # electron-builder 25 otherwise uses `.pacman` as the artifact extension. Keep the

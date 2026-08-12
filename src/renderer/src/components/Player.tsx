@@ -51,7 +51,7 @@ export function Player() {
   const hlsRef = useRef<Hls | null>(null);
   const dashRef = useRef<MediaPlayerClass | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
-  const idleTimer = useRef<number>();
+  const idleTimer = useRef<number | undefined>(undefined);
   const lastSaved = useRef(0);
   const draggingScrub = useRef(false);
   const previewRequest = useRef(0);
@@ -303,9 +303,9 @@ export function Player() {
       });
       if (requestedHeight > 0) {
         player.on(MediaPlayer.events.STREAM_INITIALIZED, () => {
-          const choices = player.getBitrateInfoListFor("video");
+          const choices = player.getRepresentationsByType("video");
           const exact = choices.find((choice) => choice.height === requestedHeight);
-          if (exact) player.setQualityFor("video", exact.qualityIndex, true);
+          if (exact) player.setRepresentationForTypeById("video", exact.id, true);
         });
       }
       player.on(MediaPlayer.events.ERROR, (event: any) => {
@@ -636,10 +636,10 @@ export function Player() {
     setMenu(null);
     setWaiting(true);
     if (release.kind === "dash" && release.url === selectedSourceUrl && dashRef.current) {
-      const choices = dashRef.current.getBitrateInfoListFor("video");
+      const choices = dashRef.current.getRepresentationsByType("video");
       const exact = choices.find((choice) => choice.height === release.resolution);
       dashRef.current.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } });
-      if (exact) dashRef.current.setQualityFor("video", exact.qualityIndex, true);
+      if (exact) dashRef.current.setRepresentationForTypeById("video", exact.id, true);
       setWaiting(false);
       return;
     }

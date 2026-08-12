@@ -126,7 +126,7 @@ function LiveAnnouncements() {
   const downloads = useApp((state) => state.downloads);
   const [polite, setPolite] = useState("");
   const [assertive, setAssertive] = useState("");
-  const lastToast = useRef<number>();
+  const lastToast = useRef<number | undefined>(undefined);
   const progressBuckets = useRef(new Map<string, number>());
 
   useEffect(() => {

@@ -64,7 +64,7 @@ video-decode status; changing this setting requires an app restart.
 
 ## Development
 
-Requires **Node.js 20+**.
+Requires **Node.js 24+**, matching the Node version Electron 43 bundles.
 
 Linux packaging also requires `bsdtar` (usually `libarchive-tools`), `rpm`, `xz` and
 `zstd`. On Fedora, electron-builder 25's bundled FPM additionally needs
