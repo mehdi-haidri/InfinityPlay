@@ -58,6 +58,13 @@ jobs:
       - name: Build NSIS installer
         run: npm run dist:win
 
+      - name: Confirm FFmpeg was bundled
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f release/win-unpacked/resources/bin/ffmpeg.exe
+          test -f release/win-unpacked/resources/bin/ffprobe.exe
+
       - name: Upload Windows release files
         uses: actions/upload-artifact@v7
         with:
@@ -87,6 +94,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # npm installs only the runner's own architecture, but this job packages x64 as
+      # well as arm64, so the x64 FFmpeg binaries are added for the cross build.
+      - name: Add x64 FFmpeg binaries for the cross build
+        run: npm install --no-save --cpu=x64 --os=darwin @ffmpeg-installer/darwin-x64 @ffprobe-installer/darwin-x64
+
       - name: Build unsigned DMG and ZIP packages
         run: npm run dist:mac
 
@@ -104,6 +116,12 @@ jobs:
             grep -F "InfinityPlay-${version}-mac-${arch}.zip" release/latest-mac.yml
           done
           find release -path "*/InfinityPlay.app/Contents/MacOS/InfinityPlay" -exec file {} \;
+          # The bundled FFmpeg must match the app's architecture, or it cannot be spawned.
+          for app_dir in release/mac*/InfinityPlay.app; do
+            test -x "$app_dir/Contents/Resources/bin/ffmpeg"
+            test -x "$app_dir/Contents/Resources/bin/ffprobe"
+            file "$app_dir/Contents/Resources/bin/ffmpeg"
+          done
 
       - name: Confirm app bundles are intentionally unsigned
         shell: bash
@@ -175,6 +193,8 @@ jobs:
           grep -F ".pkg.tar.zst" release/latest-linux.yml
           chmod +x "$appimage"
           "$appimage" --appimage-extract >/dev/null
+          test -x squashfs-root/resources/bin/ffmpeg
+          test -x squashfs-root/resources/bin/ffprobe
 
       - name: Upload Linux release files
         uses: actions/upload-artifact@v7

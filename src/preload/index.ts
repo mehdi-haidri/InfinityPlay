@@ -12,6 +12,7 @@ import type {
   MediaType,
   PersonDetails,
   PreparedLiveStream,
+  SeasonDownloadRequest,
   Release,
   Result,
   SubtitleOption,
@@ -51,6 +52,10 @@ const api = {
       invoke<PreparedLiveStream>("media:prepareLive", url, startAt, resolution),
     preview: (url: string, position: number, resolution = 0) =>
       invoke<string | null>("media:preview", url, position, resolution),
+    /** Stores a rewritten DASH manifest and returns a URL dash.js can load. */
+    stageManifest: (xml: string) => invoke<string>("media:stageManifest", xml),
+    /** Reports the codecs this renderer can decode, so main can skip transcoding. */
+    reportDecodable: (codecs: string[]) => invoke<boolean>("media:decodable", codecs),
   },
   config: {
     get: () => invoke<AppConfig>("config:get"),
@@ -64,6 +69,12 @@ const api = {
   },
   downloads: {
     start: (request: DownloadRequest) => invoke<DownloadRecord>("download:start", request),
+    /** Queues a whole season; resolves with the number of episodes queued. */
+    startSeason: (request: SeasonDownloadRequest) =>
+      invoke<number>("download:startSeason", request),
+    /** Drops queued season episodes; the one in flight keeps going. */
+    clearQueue: () => invoke<number>("download:clearQueue"),
+    queueSize: () => invoke<number>("download:queueSize"),
     list: () => invoke<DownloadRecord[]>("download:list"),
     pause: (id: string) => invoke<boolean>("download:pause", id),
     resume: (id: string) => invoke<boolean>("download:resume", id),

@@ -26,6 +26,28 @@ function extractAttribute(line: string, attribute: string): string {
   return end === -1 ? "" : line.slice(from, end);
 }
 
+/**
+ * ISO country for a channel, as an upper-case two-letter code.
+ *
+ * Playlists disagree on how they carry it. Free-TV writes an explicit `tvg-country`;
+ * iptv-org does not, but its `tvg-id` is `ChannelName.<cc>@<quality>`, so the code sits
+ * after the last dot of the part before `@`. Anything else yields "".
+ */
+export function channelCountry(line: string, tvgId: string): string {
+  const explicit = extractAttribute(line, 'tvg-country="').trim();
+  // Some playlists list several; the first is the origin.
+  if (explicit) {
+    const first = explicit.split(/[;,]/)[0].trim().toUpperCase();
+    if (/^[A-Z]{2}$/.test(first)) return first;
+  }
+
+  const base = tvgId.split("@")[0];
+  const dot = base.lastIndexOf(".");
+  if (dot === -1) return "";
+  const code = base.slice(dot + 1).toUpperCase();
+  return /^[A-Z]{2}$/.test(code) ? code : "";
+}
+
 export function parseM3u(content: string): Channel[] {
   const channels: Channel[] = [];
   let pending: Omit<Channel, "streamUrl"> | null = null;
@@ -36,10 +58,12 @@ export function parseM3u(content: string): Channel[] {
 
     if (line.startsWith("#EXTINF:")) {
       const commaIdx = line.lastIndexOf(",");
+      const tvgId = extractAttribute(line, 'tvg-id="');
       pending = {
-        id: extractAttribute(line, 'tvg-id="'),
+        id: tvgId,
         logo: extractAttribute(line, 'tvg-logo="'),
         group: extractAttribute(line, 'group-title="') || "Uncategorized",
+        country: channelCountry(line, tvgId),
         name: commaIdx === -1 ? "" : line.slice(commaIdx + 1).trim(),
       };
       continue;

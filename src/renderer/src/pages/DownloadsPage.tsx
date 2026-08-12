@@ -1,7 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   ExternalLink,
   FolderOpen,
+  ListX,
   Pause,
   Play,
   Trash2,
@@ -51,9 +52,33 @@ export function DownloadsPage() {
   const notify = useApp((state) => state.notify);
   const navigate = useApp((state) => state.navigate);
 
+  /** Episodes a season download still has waiting; the queue itself lives in main. */
+  const [queued, setQueued] = useState(0);
+
   useEffect(() => {
     void loadDownloads();
   }, [loadDownloads]);
+
+  // Polled rather than pushed: the count only changes as episodes start, which is exactly
+  // when a progress event arrives anyway, and a stale count here costs nothing.
+  useEffect(() => {
+    let cancelled = false;
+    const read = () => {
+      unwrap(api.downloads.queueSize())
+        .then((size) => {
+          if (!cancelled) setQueued(size);
+        })
+        .catch(() => {
+          if (!cancelled) setQueued(0);
+        });
+    };
+    read();
+    const timer = window.setInterval(read, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [downloads]);
 
   const running = downloads.filter(isRunning);
   const finished = downloads.filter((record) => !isRunning(record));
@@ -242,16 +267,36 @@ export function DownloadsPage() {
         eyebrow="Offline library"
         title="Downloads"
         description="Track active transfers and play files stored on this device."
-        action={finished.length > 0 ? (
-          <button
-            className="btn btn-sm btn-ghost"
-            onClick={async () => {
-              useApp.setState({ downloads: await unwrap(api.downloads.clearFinished()) });
-            }}
-          >
-            <Trash2 size={14} /> Clear finished
-          </button>
-        ) : undefined}
+        action={
+          <div className="inline-actions">
+            {queued > 0 && (
+              <button
+                className="btn btn-sm btn-ghost"
+                onClick={async () => {
+                  const dropped = await unwrap(api.downloads.clearQueue());
+                  setQueued(0);
+                  notify({
+                    kind: "info",
+                    title: `Stopped ${dropped} queued episode${dropped === 1 ? "" : "s"}`,
+                    body: "The episode already downloading continues; cancel it separately.",
+                  });
+                }}
+              >
+                <ListX size={14} /> Stop queue ({queued})
+              </button>
+            )}
+            {finished.length > 0 && (
+              <button
+                className="btn btn-sm btn-ghost"
+                onClick={async () => {
+                  useApp.setState({ downloads: await unwrap(api.downloads.clearFinished()) });
+                }}
+              >
+                <Trash2 size={14} /> Clear finished
+              </button>
+            )}
+          </div>
+        }
       />
 
       {running.length > 0 && (

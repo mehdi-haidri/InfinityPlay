@@ -24,6 +24,15 @@ files:
 
 asar: true
 
+# Stages the FFmpeg binaries for the target platform/arch into build/bin.
+beforePack: build/prepare-ffmpeg.cjs
+
+# FFmpeg ships beside the app rather than inside the asar: an archived file cannot be
+# executed, and these are spawned as child processes.
+extraResources:
+  - from: build/bin
+    to: bin
+
 # electron-builder 25's pacman target emits an XZ stream. Recompress that one artifact
 # to real Zstandard before electron-builder reports it as complete.
 artifactBuildStarted: build/prepare-linux-target.cjs

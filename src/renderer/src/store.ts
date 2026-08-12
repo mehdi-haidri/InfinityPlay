@@ -73,6 +73,13 @@ interface AppState {
   goForward: () => void;
 
   config: AppConfig;
+  /**
+   * FFmpeg on PATH. Adaptive (DASH) qualities are remuxed with it, so without it 720p and
+   * 1080p cannot be saved. Assumed present until proven otherwise, so the UI does not
+   * flash a warning during startup.
+   */
+  ffmpeg: boolean;
+  loadCapabilities: () => Promise<void>;
   loadConfig: () => Promise<void>;
   patchConfig: (patch: Partial<AppConfig>) => Promise<void>;
 
@@ -140,6 +147,37 @@ export const useApp = create<AppState>((set, get) => ({
   },
 
   config: DEFAULT_CONFIG,
+  ffmpeg: true,
+
+  loadCapabilities: async () => {
+    // What Chromium will decode is only knowable here, and the main process needs it to
+    // decide whether a file has to be transcoded. HEVC is the one that matters: it is the
+    // catalog's usual codec, and support depends on the platform and GPU.
+    try {
+      const probe = document.createElement("video");
+      const playable = (type: string) => probe.canPlayType(type) !== "";
+      const decodable: string[] = [];
+      if (
+        playable('video/mp4; codecs="hvc1.1.6.L93.B0"') ||
+        playable('video/mp4; codecs="hev1.1.6.L93.B0"')
+      ) {
+        // ffprobe names the codec `hevc`; `h265` is accepted by some tools.
+        decodable.push("hevc", "h265");
+      }
+      if (playable('video/mp4; codecs="av01.0.05M.08"')) decodable.push("av1");
+      if (playable('video/webm; codecs="vp9"')) decodable.push("vp9");
+      await unwrap(api.media.reportDecodable(decodable));
+    } catch {
+      // Main keeps its conservative defaults, which only costs an unnecessary transcode.
+    }
+
+    try {
+      const info = await unwrap(api.app.info());
+      set({ ffmpeg: info.ffmpeg });
+    } catch {
+      // Leave the optimistic default; a wrong "missing" warning is worse than none.
+    }
+  },
 
   loadConfig: async () => {
     try {
@@ -264,7 +302,9 @@ export const useApp = create<AppState>((set, get) => ({
                   ...entry,
                   kind: "error",
                   title: record.state === "cancelled" ? "Download cancelled" : "Download interrupted",
-                  body: record.filename,
+                  // The reason is the useful part — "interrupted" alone leaves the user
+                  // with no idea that, say, FFmpeg is missing.
+                  body: record.failureReason ?? record.filename,
                   sticky: false,
                 }
               : entry,

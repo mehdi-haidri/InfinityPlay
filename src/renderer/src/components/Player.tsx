@@ -37,6 +37,59 @@ const PROGRESS_SAVE_MS = 5000;
 
 type MenuTab = "quality" | "subtitles" | "subtitle-style" | "speed" | null;
 
+/**
+ * Full HEVC codec strings to try, widest first. Chromium answers `isTypeSupported` on the
+ * exact string, so the level has to be one this machine's decoder accepts.
+ */
+const HEVC_CODEC_CANDIDATES = ["1.6.L153.B0", "1.6.L150.90", "1.6.L120.90", "1.6.L93.B0"];
+
+/**
+ * Repairs a DASH manifest that declares an incomplete video codec.
+ *
+ * Some of the catalog's `index.mpd` files carry `codecs="hev1"` with no profile or level.
+ * Chromium rejects that exact string — `MediaSource.isTypeSupported('…codecs="hev1"')` is
+ * false while `hev1.1.6.L120.90` is true — so dash.js discards every video representation
+ * and reports the whole stream as unavailable. The titles that play declare the full
+ * string in an `index_web.mpd`, which these assets do not have.
+ *
+ * The manifest is rewritten with a codec string this machine accepts and an absolute
+ * `BaseURL`, then staged by the main process. It cannot be handed over as a blob or data
+ * URL: this window is a `file://` page, and Chromium refuses those as opaque-origin reads
+ * — dash.js's XHR fails before it parses anything. Segments still resolve to the CDN,
+ * where the main process re-attaches the CloudFront signature.
+ *
+ * Returns a URL for the repaired manifest, or null when none is needed.
+ */
+async function repairDashManifest(manifestUrl: string): Promise<string | null> {
+  const incomplete = /codecs="(hev1|hvc1)"/;
+  // Bounded: this probe sits in front of playback, so a manifest request that stalls must
+  // not leave the player waiting with no picture and no error. On timeout the original
+  // URL is used and dash.js reports anything genuinely wrong.
+  const response = await fetch(manifestUrl, { signal: AbortSignal.timeout(6000) });
+  if (!response.ok) return null;
+
+  const xml = await response.text();
+  const match = xml.match(incomplete);
+  if (!match) return null;
+
+  const family = match[1];
+  const codec = HEVC_CODEC_CANDIDATES.map((suffix) => `${family}.${suffix}`).find((candidate) =>
+    MediaSource.isTypeSupported(`video/mp4; codecs="${candidate}"`),
+  );
+  if (!codec) return null;
+
+  let patched = xml.replace(new RegExp(`codecs="${family}"`, "g"), `codecs="${codec}"`);
+
+  // Relative segment paths would otherwise resolve against the blob URL.
+  if (!/<BaseURL>/i.test(patched)) {
+    const url = new URL(manifestUrl);
+    const directory = `${url.origin}${url.pathname.replace(/[^/]+$/, "")}`;
+    patched = patched.replace(/(<MPD\b[^>]*>)/i, `$1<BaseURL>${directory}</BaseURL>`);
+  }
+
+  return unwrap(api.media.stageManifest(patched));
+}
+
 export function Player() {
   const request = useApp((state) => state.player);
   const closePlayer = useApp((state) => state.closePlayer);
@@ -279,6 +332,8 @@ export function Player() {
     dashRef.current?.destroy();
     dashRef.current = null;
 
+    let cancelled = false;
+
     const isHls = /\.m3u8(\?|$)/i.test(sourceUrl);
     const isDash = /\.mpd(\?|$)/i.test(sourceUrl);
 
@@ -292,6 +347,26 @@ export function Player() {
         notify({ kind: "error", title: "Stream error", body: data.details });
       });
     } else if (isDash) {
+      void startDash(video);
+    } else {
+      video.src = sourceUrl;
+      video.play().catch(() => setPlaying(false));
+    }
+
+    /**
+     * DASH start-up is async because a manifest may need repairing first. `cancelled`
+     * guards the gap: the effect can be torn down while that fetch is in flight.
+     */
+    async function startDash(media: HTMLVideoElement) {
+      let manifestUrl = sourceUrl;
+      try {
+        const repaired = await repairDashManifest(sourceUrl);
+        if (repaired) manifestUrl = repaired;
+      } catch {
+        // Fall back to the original manifest; dash.js reports the failure if it is fatal.
+      }
+      if (cancelled) return;
+
       const player = MediaPlayer().create();
       dashRef.current = player;
       const requestedHeight = activeRelease?.kind === "dash" ? activeRelease.resolution : 0;
@@ -302,27 +377,39 @@ export function Player() {
         },
       });
       if (requestedHeight > 0) {
-        player.on(MediaPlayer.events.STREAM_INITIALIZED, () => {
+        // Applied once. `setRepresentationForTypeById` re-fires STREAM_INITIALIZED, so a
+        // handler that pins the quality every time it runs restarts the stream forever —
+        // playback drops out and comes back every few seconds. `forceReplace` is off for
+        // the same reason: it discards the buffer, which is the visible stall.
+        let pinned = false;
+        const pinQuality = () => {
+          if (pinned) return;
           const choices = player.getRepresentationsByType("video");
           const exact = choices.find((choice) => choice.height === requestedHeight);
-          if (exact) player.setRepresentationForTypeById("video", exact.id, true);
-        });
+          if (!exact) return;
+          pinned = true;
+          player.off(MediaPlayer.events.STREAM_INITIALIZED, pinQuality);
+          player.setRepresentationForTypeById("video", exact.id, false);
+        };
+        player.on(MediaPlayer.events.STREAM_INITIALIZED, pinQuality);
       }
       player.on(MediaPlayer.events.ERROR, (event: any) => {
+        // dash.js reports recoverable problems here too — a segment it retried, a
+        // representation it dropped. Reporting those interrupts a stream that is still
+        // playing, so the toast is kept for failures the viewer can actually see.
+        if (media.readyState >= 3 && !media.error) return;
         notify({
           kind: "error",
           title: "Stream error",
           body: event?.error?.message ?? "The adaptive stream could not be played.",
         });
       });
-      player.initialize(video, sourceUrl, true);
-    } else {
-      video.src = sourceUrl;
+      player.initialize(media, manifestUrl, true);
+      media.play().catch(() => setPlaying(false));
     }
 
-    video.play().catch(() => setPlaying(false));
-
     return () => {
+      cancelled = true;
       hlsRef.current?.destroy();
       hlsRef.current = null;
       dashRef.current?.destroy();

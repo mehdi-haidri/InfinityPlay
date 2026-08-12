@@ -269,6 +269,8 @@ export interface Channel {
   name: string;
   logo: string;
   group: string;
+  /** ISO 3166-1 alpha-2, upper case. Empty when the playlist does not say. */
+  country: string;
   streamUrl: string;
 }
 
@@ -286,6 +288,37 @@ export interface PlaylistSource {
   name: string;
   url: string;
 }
+
+/**
+ * Community-maintained, openly published playlists.
+ *
+ * Both projects index streams their broadcasters put out publicly; neither carries
+ * subscription services. Arabic coverage measured against the live lists: 325 channels
+ * across 18 Arab countries in the iptv-org index, 356 in its Arabic-language cut, 77 in
+ * Free-TV — which also tags every entry with `tvg-country`.
+ */
+export const DEFAULT_PLAYLISTS: PlaylistSource[] = [
+  {
+    name: "IPTV-org — All channels",
+    url: "https://iptv-org.github.io/iptv/index.m3u",
+  },
+  {
+    name: "IPTV-org — Arabic",
+    url: "https://iptv-org.github.io/iptv/languages/ara.m3u",
+  },
+  {
+    name: "IPTV-org — Sports",
+    url: "https://iptv-org.github.io/iptv/categories/sports.m3u",
+  },
+  {
+    name: "IPTV-org — News",
+    url: "https://iptv-org.github.io/iptv/categories/news.m3u",
+  },
+  {
+    name: "Free-TV",
+    url: "https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8",
+  },
+];
 
 export interface WatchHistoryItem {
   provider: ProviderKind;
@@ -349,12 +382,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   downloadSubtitles: "preferred",
   subtitleBackground: "box",
   volume: 1,
-  playlists: [
-    {
-      name: "IPTV-org — All channels",
-      url: "https://iptv-org.github.io/iptv/index.m3u",
-    },
-  ],
+  playlists: [...DEFAULT_PLAYLISTS],
 };
 
 /** Uniform IPC envelope so renderer code never has to catch across the bridge. */
@@ -384,6 +412,21 @@ export interface DownloadRequest {
   resolution: number;
   /** DASH downloads are remuxed to a standalone MP4 at the requested resolution. */
   sourceKind?: "mp4" | "dash";
+}
+
+/**
+ * A whole season queued at once. The episode list is resolved to concrete releases one at
+ * a time in the main process, because the signed URLs expire before a long queue drains.
+ */
+export interface SeasonDownloadRequest {
+  subjectId: string;
+  title: string;
+  year: string;
+  posterUrl: string | null;
+  season: number;
+  episodes: number[];
+  /** Preferred height; 0 takes the best available for each episode. */
+  resolution: number;
 }
 
 export interface DownloadRecord extends DownloadRequest {
@@ -416,6 +459,8 @@ export interface AppInfo {
   packageType: string;
   /** False in dev, unpacked builds, and intentionally unsigned macOS builds. */
   updatable: boolean;
+  /** FFmpeg on PATH. Without it, adaptive (DASH) qualities cannot be saved. */
+  ffmpeg: boolean;
   /** Detected graphics vendor and Chromium video-decode status. */
   gpu: string;
 }

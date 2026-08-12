@@ -49,12 +49,27 @@ sudo pacman -U ./InfinityPlay-*-linux-x64.pkg.tar.zst
 Installed Windows and supported Linux packages can update from GitHub Releases through
 the About page.
 
-On Linux, InfinityPlay uses the system `ffprobe` and `ffmpeg` when a Live TV channel or
-download uses MPEG-2 or HEVC video that Chromium cannot decode directly. Install FFmpeg
-from your distribution when compatibility playback is needed.
+## FFmpeg
 
-FFmpeg is also used for the on-demand thumbnail shown while hovering over the player
-timeline. Thumbnails are cached in memory and are never generated while simply scrolling.
+**Nothing to install.** Every package ships FFmpeg and FFprobe for its own platform and
+architecture, in `resources/bin` beside the app. A copy already on your `PATH` is used only
+when the bundled one is missing.
+
+They are needed for:
+
+- **Downloading 720p and 1080p.** Those qualities are published only as adaptive (DASH)
+  streams — a manifest of segments rather than one file. Playing them needs nothing, but
+  saving one means remuxing the segments into an MP4. Sources marked *Adaptive* take this
+  path; entries showing a file size are direct downloads.
+- **Live TV and downloads** whose MPEG-2 or HEVC video Chromium cannot decode directly.
+- **Player timeline thumbnails**, generated on demand and cached in memory.
+
+This is why the installers are larger than a typical Electron app: the two binaries add
+roughly 140 MB before compression.
+
+If a build ever ships without them, the app falls back to `PATH` and, when nothing is
+found, says so instead of failing silently — adaptive downloads are marked as unavailable
+and a season download takes the best direct file instead.
 Cast profiles use the MovieBox catalog for verified credits and may request an optional
 English biography from Wikipedia; movies and series still appear if that service is offline.
 
@@ -161,3 +176,10 @@ Worth knowing before debugging something that "returns nothing":
 
 MIT. Catalog and stream data come from a third-party API; this is an unofficial client and
 is not affiliated with or endorsed by its operators.
+
+The packages bundle unmodified FFmpeg binaries, which carry their own licence (GPL/LGPL
+depending on the build) and remain the work of the [FFmpeg project](https://ffmpeg.org).
+They are shipped as separate executables and run as child processes, not linked into the
+app. Their source is available from the FFmpeg project and from the
+[@ffmpeg-installer](https://github.com/kribblo/node-ffmpeg-installer) packages the builds
+take them from.

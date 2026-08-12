@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AudioLines, Captions, Download, Play, Star, Trash2 } from "lucide-react";
 import {
+  HIDDEN_AUDIO_LANGUAGES,
   ORIGINAL_AUDIO,
   SUBTITLE_OFF,
   type AudioVariant,
@@ -26,6 +27,7 @@ interface Props {
 
 export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: Props) {
   const notify = useApp((state) => state.notify);
+  const loadDownloads = useApp((state) => state.loadDownloads);
   const beginDownload = useApp((state) => state.beginDownload);
   const preferredAudio = useApp((state) => state.config.preferredAudio);
   const navigate = useApp((state) => state.navigate);
@@ -33,6 +35,7 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
   const watchHistory = useApp((state) => state.watchHistory);
   const forgetTitle = useApp((state) => state.forgetTitle);
   const defaultResolution = useApp((state) => state.config.defaultResolution);
+  const ffmpeg = useApp((state) => state.ffmpeg);
 
   const preferredSubtitle = useApp((state) => state.config.preferredSubtitle);
 
@@ -41,6 +44,7 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
   const [subtitles, setSubtitles] = useState<SubtitleOption[]>([]);
   const [subtitleChoice, setSubtitleChoice] = useState(preferredSubtitle);
   const [sourceSelection, setSourceSelection] = useState(() => `${initialSeason ?? 1}:${initialEpisode ?? 1}`);
+  const [queueingSeason, setQueueingSeason] = useState(false);
 
   const details = useAsync<MediaDetails>(() => unwrap(api.catalog.details(id)), [id]);
   const isSeries = details.data?.mediaType === "series" && (details.data?.seasons.length ?? 0) > 0;
@@ -85,7 +89,10 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
     if (audioLocked) return;
     const media = details.data;
     const options = variants.data;
-    if (!media || !options || options.length < 2) return;
+    // One option is enough to be worth switching to: hidden regional dubs are filtered
+    // out upstream, so a title whose only listed track is the original still arrives
+    // here as a single-entry list while the viewed subject is the dub.
+    if (!media || !options || options.length === 0) return;
     if (media.audioLanguage === preferredAudio) return;
 
     const target = options.find((variant) => variant.language === preferredAudio);
@@ -169,15 +176,19 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
   const activeSeason = media.seasons.find((entry) => entry.number === season) ?? media.seasons[0];
   const resume = findProgress(watchHistory, id, isSeries ? season : 0, isSeries ? episode : 0);
 
-  // The subject being viewed is always offered, even if the variant search missed it.
+  // The subject being viewed is offered even if the variant search missed it — but not
+  // when it is a hidden regional dub and a listed track exists, or the switcher would
+  // advertise the very dubs the catalog filter removes.
   const audioTracks: AudioVariant[] = (() => {
     const found = variants.data ?? [];
-    return found.some((variant) => variant.subjectId === media.id)
-      ? found
-      : [
-          { language: media.audioLanguage, subjectId: media.id, rawTitle: media.rawTitle },
-          ...found,
-        ];
+    if (found.some((variant) => variant.subjectId === media.id)) return found;
+    if (found.length > 0 && HIDDEN_AUDIO_LANGUAGES.includes(media.audioLanguage as never)) {
+      return found;
+    }
+    return [
+      { language: media.audioLanguage, subjectId: media.id, rawTitle: media.rawTitle },
+      ...found,
+    ];
   })();
 
   // Null when the picker is on Off, or when this episode has no track in the chosen
@@ -260,6 +271,44 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
       resolution: release.resolution,
       sourceKind: release.kind ?? "mp4",
     });
+  };
+
+  /**
+   * Queues the visible season. The main process resolves each episode's source when its
+   * turn comes, so nothing here has to fetch a release per episode up front.
+   */
+  const downloadSeason = async () => {
+    if (!activeSeason || queueingSeason) return;
+    setQueueingSeason(true);
+    try {
+      const queued = await unwrap(
+        api.downloads.startSeason({
+          subjectId: media.id,
+          title: media.title,
+          year: media.year,
+          posterUrl: media.posterUrl,
+          season,
+          episodes: activeSeason.episodes.map((entry) => entry.number),
+          // 0 means each episode takes the best quality it actually has, rather than
+          // failing the ones that lack whatever height this episode happens to offer.
+          resolution: 0,
+        }),
+      );
+      notify({
+        kind: "info",
+        title: `Queued ${queued} episode${queued === 1 ? "" : "s"}`,
+        body: `Season ${season} downloads one after another. Progress is on the Downloads page.`,
+      });
+      void loadDownloads();
+    } catch (error) {
+      notify({
+        kind: "error",
+        title: "Could not queue the season",
+        body: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setQueueingSeason(false);
+    }
   };
 
   return (
@@ -352,7 +401,26 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
 
           {isSeries && activeSeason && (
             <section className="section">
-              <h2 className="section-title">Episodes</h2>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  flexWrap: "wrap",
+                }}
+              >
+                <h2 className="section-title">Episodes</h2>
+                <button
+                  className="btn btn-sm"
+                  onClick={() => void downloadSeason()}
+                  disabled={queueingSeason || (activeSeason?.episodes.length ?? 0) === 0}
+                  title={`Download every episode of season ${season}, one after another`}
+                >
+                  {queueingSeason ? <Spinner /> : <Download size={15} />}
+                  Download season {season}
+                </button>
+              </div>
 
               <div className="chip-row" style={{ marginBottom: 16 }}>
                 {media.seasons.map((entry) => (
@@ -450,6 +518,12 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
                     role="button"
                     tabIndex={0}
                     aria-label={`Download ${qualityLabel(release.resolution)}`}
+                    data-disabled={release.kind === "dash" && !ffmpeg}
+                    title={
+                      release.kind === "dash" && !ffmpeg
+                        ? "This quality is adaptive and needs FFmpeg to be saved as a file"
+                        : `Download ${qualityLabel(release.resolution)}`
+                    }
                     onClick={(event) => {
                       event.stopPropagation();
                       download(release);
@@ -466,6 +540,13 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
                 </span>
               </button>
             ))}
+
+            {!ffmpeg && sourcesReady && (releases.data ?? []).some((r) => r.kind === "dash") && (
+              <div className="setting-hint" style={{ marginTop: 10 }}>
+                Adaptive qualities stream fine but need FFmpeg to download. Install FFmpeg to
+                save them, or pick a quality that lists a file size.
+              </div>
+            )}
           </div>
 
           {subtitles.length > 0 && (

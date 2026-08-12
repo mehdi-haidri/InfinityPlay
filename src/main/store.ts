@@ -8,7 +8,9 @@ import path from "node:path";
 import { app } from "electron";
 import {
   DEFAULT_CONFIG,
+  DEFAULT_PLAYLISTS,
   type AppConfig,
+  type PlaylistSource,
   type DownloadRecord,
   type WatchHistoryItem,
 } from "@shared/types";
@@ -57,11 +59,25 @@ class JsonFile<T> {
   }
 }
 
+/**
+ * Adds playlists shipped with a newer version to an existing config.
+ *
+ * A stored `playlists` array otherwise pins whatever the first run wrote, so anyone who
+ * already had the app would never see sources added later. Matching is by URL, and the
+ * user's own entries and ordering are kept — a playlist they deleted stays deleted only
+ * until the next upgrade, which is the accepted cost of not losing new defaults.
+ */
+function withDefaultPlaylists(stored: PlaylistSource[]): PlaylistSource[] {
+  const known = new Set(stored.map((entry) => entry.url));
+  const missing = DEFAULT_PLAYLISTS.filter((entry) => !known.has(entry.url));
+  return missing.length === 0 ? stored : [...stored, ...missing];
+}
+
 const configFile = new JsonFile<AppConfig>("config.json", DEFAULT_CONFIG, (raw) => ({
   ...DEFAULT_CONFIG,
   ...(raw as Partial<AppConfig>),
   playlists: Array.isArray((raw as AppConfig)?.playlists)
-    ? (raw as AppConfig).playlists
+    ? withDefaultPlaylists((raw as AppConfig).playlists)
     : DEFAULT_CONFIG.playlists,
 }));
 

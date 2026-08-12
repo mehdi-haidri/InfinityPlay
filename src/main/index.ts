@@ -24,14 +24,29 @@ if (!getConfig().hardwareAcceleration) app.disableHardwareAcceleration();
  */
 const LOCAL_MEDIA_SCHEME = "ipmedia";
 
+// `corsEnabled` is what lets the renderer read these with fetch/XHR at all. Without it
+// Chromium rejects the request before the handler runs, whatever headers it would return
+// — which blocks dash.js from loading a locally repaired manifest.
 protocol.registerSchemesAsPrivileged([
   {
     scheme: LOCAL_MEDIA_SCHEME,
-    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      corsEnabled: true,
+    },
   },
   {
     scheme: LIVE_TRANSCODE_SCHEME,
-    privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true },
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      stream: true,
+      corsEnabled: true,
+    },
   },
 ]);
 
@@ -43,6 +58,19 @@ const MEDIA_MIME: Record<string, string> = {
   ".mp3": "audio/mpeg",
   ".m4a": "audio/mp4",
   ".vtt": "text/vtt",
+  ".mpd": "application/dash+xml",
+};
+
+/**
+ * The renderer is a `file://` page, so its origin is `null` and every cross-scheme read is
+ * a CORS request. Without this, `fetch`/XHR against this scheme fails outright — which is
+ * how dash.js loads a manifest. The scheme only ever serves files this app wrote or was
+ * pointed at, and only this app's own window can reach it.
+ */
+const LOCAL_MEDIA_CORS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "Range",
+  "Access-Control-Expose-Headers": "Content-Length, Content-Range, Accept-Ranges",
 };
 
 /**
@@ -73,6 +101,7 @@ function registerLocalMediaProtocol(): void {
           "Content-Type": contentType,
           "Content-Length": String(size),
           "Accept-Ranges": "bytes",
+          ...LOCAL_MEDIA_CORS,
         },
       });
     }
@@ -95,6 +124,7 @@ function registerLocalMediaProtocol(): void {
           "Content-Length": String(end - start + 1),
           "Content-Range": `bytes ${start}-${end}/${size}`,
           "Accept-Ranges": "bytes",
+          ...LOCAL_MEDIA_CORS,
         },
       },
     );
@@ -121,7 +151,17 @@ function createWindow(): BrowserWindow {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: false,
-      webSecurity: true,
+      /**
+       * On in every packaged build. Off only under `npm run dev`.
+       *
+       * The stream CDN returns `Access-Control-Allow-Origin` only when a request carries
+       * an `Origin`, and sends no `Vary: Origin`, so CloudFront serves one cached variant
+       * to everyone — often the one without the header. A packaged build never notices:
+       * its page is `file://`, whose opaque origin skips the check. The dev server gives
+       * the renderer a real `http://localhost` origin, so the same streams fail CORS,
+       * intermittently, depending on what happens to be in the CDN cache.
+       */
+      webSecurity: app.isPackaged,
     },
   });
 
@@ -159,7 +199,13 @@ function rewriteMediaRequestHeaders(): void {
     const headers: Record<string, string> = { ...details.requestHeaders };
     for (const name of Object.keys(headers)) {
       const lower = name.toLowerCase();
-      if (lower === "origin" || lower === "referer" || lower.startsWith("sec-fetch-")) {
+      // `Origin` is deliberately kept. The CDN only answers with
+      // `Access-Control-Allow-Origin` when the request carries an Origin, so stripping it
+      // made every response fail the browser's CORS check — invisible in a packaged build,
+      // where the page is `file://` and exempt, but it breaks all adaptive playback under
+      // `npm run dev`, and only intermittently, since a cached response may already carry
+      // the header from an earlier request that kept it.
+      if (lower === "referer" || lower.startsWith("sec-fetch-")) {
         delete headers[name];
       }
       if (lower === "user-agent") delete headers[name];
@@ -167,6 +213,7 @@ function rewriteMediaRequestHeaders(): void {
     headers["User-Agent"] = STREAM_USER_AGENT;
     callback({ requestHeaders: headers });
   });
+
 }
 
 app.whenReady().then(() => {

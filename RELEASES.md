@@ -7,6 +7,41 @@ page, then offers **Restart & install** when a new version is ready.
 
 ## 0.1.1
 
+### Playback
+
+- Fixed adaptive streams failing with "Stream error" when running from source. The stream
+  CDN only returns its CORS header to requests that carry an Origin and does not vary its
+  cache on it, so a development build could be served a cached response the browser then
+  refused. Packaged builds were never affected.
+- Fixed titles whose adaptive stream refused to start with "Stream error", including
+  House of the Dragon. Those manifests declare an incomplete video codec that Chromium
+  rejects; they are now repaired before playback.
+- Fixed adaptive (1080p/720p) playback dropping out and restarting every few seconds.
+  Pinning the chosen quality was restarting the stream, which then pinned it again.
+- Recoverable streaming hiccups no longer raise a "Stream error" over a video that is
+  still playing.
+- HEVC video now plays directly when the machine can decode it. It was always being
+  re-encoded on the fly, which caused stuttering and pausing on files that play fine
+  elsewhere. Compatibility mode is now used only when Chromium genuinely cannot decode.
+
+### Live TV
+
+- Four more channel sources alongside the full IPTV-org index: an Arabic list, Sports,
+  News, and Free-TV — about 12,700 channels in total.
+- Filter by country and by channel type. Both pickers have their own search field and
+  show how many channels each option holds, busiest first — 180 countries are no longer a
+  scrolling exercise.
+- New sources are added automatically when upgrading, without touching playlists you
+  added yourself.
+
+### Downloads
+
+- FFmpeg now ships with the app, so 720p and 1080p downloads work with nothing to install.
+- Each download gets its own folder holding the video and its subtitles. Series are filed
+  as `Show/Season 01/S01E02/`.
+- Download a whole season in one click; episodes queue and run one at a time, and the
+  queue can be stopped from the Downloads page.
+
 ### Packages
 
 - Added Intel and Apple Silicon macOS DMGs, with ZIP companions for future signed updates.

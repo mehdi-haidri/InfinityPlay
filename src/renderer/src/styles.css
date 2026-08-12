@@ -11,10 +11,13 @@
   --text-muted: #9aa2b6;
   --text-faint: #646c81;
 
-  --accent: #ff4d6d;
-  --accent-soft: rgba(255, 77, 109, 0.16);
-  --accent-strong: #ff2e55;
-  --focus: #6ea8ff;
+  /* Purple is the product's colour, matching the logo. It lives on the base `:root` so
+     the launch screen is already purple on the very first paint, before the stored
+     config is read and a theme attribute is applied. */
+  --accent: #a855f7;
+  --accent-soft: rgba(168, 85, 247, 0.18);
+  --accent-strong: #c084fc;
+  --focus: #c4a3ff;
 
   --radius-sm: 6px;
   --radius: 10px;
@@ -181,14 +184,17 @@ button {
   height: 28px;
 }
 
-.sidebar[data-collapsed="true"] .brand {
-  padding-inline: 11px;
+.sidebar[data-collapsed="true"] .brand-name,
+.sidebar[data-collapsed="true"] .nav-label {
+  display: none;
 }
 
-.sidebar[data-collapsed="true"] .brand-name,
-.sidebar[data-collapsed="true"] .nav-label,
-.sidebar[data-collapsed="true"] .brand-mark {
-  display: none;
+/* The mark stays when collapsed — it is the app's identity, and a rail with no logo reads
+   as a stray toolbar. There is no room beside the toggle at this width, so the two stack. */
+.sidebar[data-collapsed="true"] .brand {
+  flex-direction: column;
+  gap: 14px;
+  padding-inline: 0;
 }
 
 .sidebar[data-collapsed="true"] .sidebar-toggle {
@@ -313,6 +319,12 @@ button {
 .icon-button:hover:not(:disabled) {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+/* A `span[role="button"]` cannot carry `:disabled`, so the dimmed look is driven by an
+   attribute instead. The click still fires and reports why it cannot be saved. */
+.icon-button[data-disabled="true"] {
+  opacity: 0.4;
 }
 
 .icon-button:disabled {
@@ -2114,24 +2126,6 @@ select.input:focus {
   animation: splash-rise 620ms 90ms var(--ease) both;
 }
 
-.splash-track {
-  position: relative;
-  width: 168px;
-  height: 3px;
-  border-radius: 999px;
-  background: var(--border);
-  overflow: hidden;
-}
-
-.splash-track span {
-  position: absolute;
-  inset: 0;
-  width: 42%;
-  border-radius: 999px;
-  background: var(--accent);
-  animation: splash-sweep 1.25s var(--ease) infinite;
-}
-
 @keyframes splash-breathe {
   0%, 100% { opacity: 0.55; transform: scale(0.94); }
   50%      { opacity: 1;    transform: scale(1.06); }
@@ -2147,15 +2141,176 @@ select.input:focus {
   to   { stroke-dashoffset: -100; }
 }
 
-@keyframes splash-sweep {
-  0%   { transform: translateX(-115%); }
-  100% { transform: translateX(255%); }
-}
-
 @media (prefers-reduced-motion: reduce) {
   .splash-glow,
-  .splash-ring rect,
-  .splash-track span {
+  .splash-ring rect {
     animation: none;
   }
+}
+
+/* ── Searchable filter select ──────────────────────────────────────────────── */
+
+.filter-select {
+  position: relative;
+}
+
+.filter-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 12px 0 14px;
+  max-width: 260px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--text);
+  font-size: 13px;
+  transition: border-color 140ms var(--ease), background 140ms var(--ease);
+}
+
+.filter-trigger:hover,
+.filter-trigger[data-open="true"] {
+  border-color: var(--border-strong);
+  background: var(--bg-hover);
+}
+
+.filter-trigger-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-chevron {
+  color: var(--text-faint);
+  flex: none;
+  transition: transform 160ms var(--ease);
+}
+
+.filter-trigger[data-open="true"] .filter-chevron {
+  transform: rotate(180deg);
+}
+
+/* Counts read as metadata, not as part of the name. */
+.filter-count {
+  flex: none;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--bg-hover);
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.filter-popover {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 6px);
+  left: 0;
+  width: 268px;
+  padding: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-pop);
+  animation: filter-pop 130ms var(--ease) both;
+}
+
+@keyframes filter-pop {
+  from { opacity: 0; transform: translateY(-4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.filter-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 34px;
+  padding: 0 10px;
+  margin-bottom: 6px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.filter-search:focus-within {
+  border-color: var(--accent);
+}
+
+.filter-search input {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  outline: none;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.filter-search input::placeholder {
+  color: var(--text-faint);
+}
+
+.filter-clear {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  color: var(--text-faint);
+  flex: none;
+}
+
+.filter-clear:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.filter-options {
+  max-height: 280px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.filter-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: 13px;
+  text-align: left;
+}
+
+/* Hover and keyboard focus share one state, so arrowing looks the same as pointing. */
+.filter-option[data-highlight="true"] {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.filter-option[data-active="true"] {
+  color: var(--accent);
+}
+
+.filter-option-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-tick {
+  flex: none;
+  color: var(--accent);
+}
+
+.filter-empty {
+  padding: 14px 10px;
+  text-align: center;
+  color: var(--text-faint);
+  font-size: 12px;
 }

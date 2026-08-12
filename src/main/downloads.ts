@@ -10,10 +10,16 @@ import fs from "node:fs";
 import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { app, shell, type BrowserWindow, type DownloadItem } from "electron";
-import type { DownloadRecord, DownloadRequest } from "@shared/types";
+import type {
+  DownloadRecord,
+  DownloadRequest,
+  Release,
+  SeasonDownloadRequest,
+} from "@shared/types";
 import { getConfig, getDownloadRecords, saveDownloadRecords } from "./store";
 import { MovieBoxService } from "./providers/moviebox";
 import { saveSubtitleFile } from "./providers/subtitles";
+import { toolAvailable, toolPath } from "./media-tools";
 
 const catalog = new MovieBoxService();
 
@@ -30,12 +36,42 @@ const awaitingItem = new Map<string, DownloadRecord>();
 
 let resolveWindow: () => BrowserWindow | null = () => null;
 
+/** Filesystem-safe path fragment. Trailing dots and spaces are illegal on Windows. */
+const safeName = (value: string): string =>
+  value
+    .replace(/[\\/:*?"<>|]+/g, "_")
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[. ]+$/, "");
+
+const pad2 = (value: number): string => String(value).padStart(2, "0");
+
+/**
+ * Every download gets its own folder, so the video and its subtitle files stay together
+ * instead of scattering across the Downloads root:
+ *
+ * ```text
+ * Downloads/Some Movie (2019)/Some Movie 1080p.mp4 + .srt
+ * Downloads/Some Show (2016)/Season 01/S01E02/Some Show S01E02 1080p.mp4 + .srt
+ * ```
+ */
+function buildDownloadDirectory(request: DownloadRequest): string {
+  const root = app.getPath("downloads");
+  const year = request.year ? ` (${request.year})` : "";
+  const title = safeName(`${request.title}${year}`) || "download";
+  if (request.season <= 0) return path.join(root, title);
+  return path.join(
+    root,
+    title,
+    `Season ${pad2(request.season)}`,
+    `S${pad2(request.season)}E${pad2(request.episode)}`,
+  );
+}
+
 /** Renderer-safe filename: no separators, no reserved characters, always an extension. */
 function buildFilename(request: DownloadRequest): string {
   const episodeTag =
-    request.season > 0
-      ? ` S${String(request.season).padStart(2, "0")}E${String(request.episode).padStart(2, "0")}`
-      : "";
+    request.season > 0 ? ` S${pad2(request.season)}E${pad2(request.episode)}` : "";
   const quality = request.resolution > 0 ? ` ${request.resolution}p` : "";
   const base = `${request.title}${episodeTag}${quality}`.replace(/[\\/:*?"<>|]+/g, "_").trim();
 
@@ -63,9 +99,37 @@ function uniquePath(directory: string, filename: string): string {
   return candidate;
 }
 
+const TERMINAL_STATES = new Set(["completed", "cancelled", "interrupted"]);
+
+/** Resolvers for season-queue entries, so the next episode starts only when one settles. */
+const finishWaiters = new Map<string, () => void>();
+
+/** Drops the download's own folders once empty, stopping at the Downloads root. */
+function pruneEmptyFolders(directory: string): void {
+  const root = app.getPath("downloads");
+  let current = path.resolve(directory);
+  while (current.startsWith(root) && current !== root) {
+    try {
+      if (fs.readdirSync(current).length > 0) return;
+      fs.rmdirSync(current);
+    } catch {
+      return;
+    }
+    current = path.dirname(current);
+  }
+}
+
 function broadcast(record: DownloadRecord): void {
   const window = resolveWindow();
   if (window && !window.isDestroyed()) window.webContents.send("download:progress", record);
+
+  if (TERMINAL_STATES.has(record.state)) {
+    const done = finishWaiters.get(record.id);
+    if (done) {
+      finishWaiters.delete(record.id);
+      done();
+    }
+  }
 }
 
 function upsert(record: DownloadRecord): DownloadRecord {
@@ -186,9 +250,9 @@ export function startDownload(request: DownloadRequest): DownloadRecord {
   const window = resolveWindow();
   if (!window) throw new Error("No window is available to own the download.");
 
-  const directory = app.getPath("downloads");
-  const filename = buildFilename(request);
-  const savePath = uniquePath(directory, filename);
+  const directory = buildDownloadDirectory(request);
+  fs.mkdirSync(directory, { recursive: true });
+  const savePath = uniquePath(directory, buildFilename(request));
 
   const record: DownloadRecord = {
     ...request,
@@ -214,6 +278,149 @@ export function startDownload(request: DownloadRequest): DownloadRecord {
   }
   void saveSubtitlesFor(record);
   return record;
+}
+
+/**
+ * Queues a whole season, one episode at a time.
+ *
+ * Episodes are downloaded serially rather than in parallel: the CDN throttles concurrent
+ * transfers, and a DASH episode spends its time in an ffmpeg remux that would otherwise
+ * fight for CPU with its siblings.
+ *
+ * Each episode's release is resolved immediately before its turn, never up front — the
+ * URLs are CloudFront-signed and expire, so links resolved at queue time would be dead by
+ * the time a long season reached them.
+ */
+export async function startSeasonDownload(request: SeasonDownloadRequest): Promise<number> {
+  const episodes = [...request.episodes].sort((a, b) => a - b);
+  for (const episode of episodes) {
+    seasonQueue.push({ request, episode });
+  }
+  void runSeasonQueue();
+  return episodes.length;
+}
+
+interface SeasonQueueEntry {
+  request: SeasonDownloadRequest;
+  episode: number;
+}
+
+const seasonQueue: SeasonQueueEntry[] = [];
+let seasonQueueRunning = false;
+
+/**
+ * Drops everything still waiting. The episode already downloading is left alone — its own
+ * Cancel button stops it, and killing it from here would discard a nearly finished file.
+ * Returns how many queued episodes were dropped.
+ */
+export function clearSeasonQueue(): number {
+  const dropped = seasonQueue.length;
+  seasonQueue.length = 0;
+  return dropped;
+}
+
+/** Episodes still waiting their turn, for the Downloads page. */
+export function pendingSeasonCount(): number {
+  return seasonQueue.length;
+}
+
+async function runSeasonQueue(): Promise<void> {
+  if (seasonQueueRunning) return;
+  seasonQueueRunning = true;
+  try {
+    while (seasonQueue.length > 0) {
+      const next = seasonQueue.shift();
+      if (next) await downloadSeasonEpisode(next.request, next.episode);
+    }
+  } finally {
+    seasonQueueRunning = false;
+  }
+}
+
+/** Picks the requested quality, else the best that does not exceed it, else the best. */
+function chooseRelease(releases: Release[], resolution: number): Release | undefined {
+  if (releases.length === 0) return undefined;
+  // Drop adaptive sources that cannot be muxed on this machine, unless they are all there
+  // is — then the attempt still runs and records why it could not be saved.
+  const usable = toolAvailable("ffmpeg") ? releases : releases.filter((release) => release.kind !== "dash");
+  const ranked = [...(usable.length > 0 ? usable : releases)].sort(
+    (a, b) => b.resolution - a.resolution,
+  );
+  if (resolution > 0) {
+    return (
+      ranked.find((release) => release.resolution === resolution) ??
+      ranked.find((release) => release.resolution <= resolution) ??
+      ranked[0]
+    );
+  }
+  return ranked[0];
+}
+
+async function downloadSeasonEpisode(
+  request: SeasonDownloadRequest,
+  episode: number,
+): Promise<void> {
+  const base = {
+    title: request.title,
+    year: request.year,
+    posterUrl: request.posterUrl,
+    subjectId: request.subjectId,
+    mediaType: "series" as const,
+    season: request.season,
+    episode,
+  };
+
+  let release: Release | undefined;
+  try {
+    const releases = await catalog.releases(request.subjectId, request.season, episode);
+    release = chooseRelease(releases, request.resolution);
+  } catch {
+    // Handled by the missing-release branch below.
+  }
+
+  if (!release) {
+    // Recorded rather than skipped silently, so a gap in the season is visible in the UI.
+    recordSeasonFailure(base, "No playable source was found for this episode.");
+    return;
+  }
+
+  const record = startDownload({
+    ...base,
+    url: release.url,
+    resourceId: release.resourceId,
+    resolution: release.resolution,
+    sourceKind: release.kind ?? "mp4",
+  });
+
+  // Resolves from `broadcast` when the download reaches a terminal state.
+  await new Promise<void>((resolve) => finishWaiters.set(record.id, resolve));
+}
+
+/** Lists an episode that could not be started, so the season shows the gap. */
+function recordSeasonFailure(
+  base: Omit<DownloadRequest, "url" | "resourceId" | "resolution" | "sourceKind">,
+  reason: string,
+): void {
+  const request: DownloadRequest = { ...base, url: "", resourceId: "", resolution: 0 };
+  const directory = buildDownloadDirectory(request);
+  const savePath = path.join(directory, buildFilename(request));
+  broadcast(
+    upsert({
+      ...request,
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      filename: path.basename(savePath),
+      savePath,
+      fileUrl: localMediaUrl(savePath),
+      receivedBytes: 0,
+      totalBytes: 0,
+      state: "interrupted",
+      startedAt: Date.now(),
+      completedAt: null,
+      fileExists: false,
+      failureReason: reason,
+      subtitles: [],
+    }),
+  );
 }
 
 /**
@@ -289,7 +496,7 @@ function startAdaptiveDownload(
     partPath,
   );
 
-  const child = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+  const child = spawn(toolPath("ffmpeg"), args, { stdio: ["ignore", "ignore", "pipe"] });
   activeAdaptive.set(record.id, child);
   const errors: Buffer[] = [];
   let settled = false;
@@ -348,11 +555,16 @@ function finishAdaptiveDownload(
     }
   }
   try { fs.rmSync(partPath, { force: true }); } catch { /* ignored */ }
+  // ENOENT here means ffmpeg is not installed, which is worth saying plainly: the raw
+  // spawn error tells the user nothing about what to do next.
+  const missingFfmpeg = Boolean(error && error.includes("ENOENT"));
   broadcast(upsert({
     ...current,
     state: "interrupted",
     fileExists: false,
-    failureReason: error || `The ${record.resolution}p adaptive stream could not be saved.`,
+    failureReason: missingFfmpeg
+      ? `Saving ${record.resolution}p needs FFmpeg, which was not found. Install FFmpeg, or download a quality that is offered as a direct file.`
+      : error || `The ${record.resolution}p adaptive stream could not be saved.`,
   }));
 }
 
@@ -503,6 +715,9 @@ export function removeDownload(id: string, deleteFile: boolean): DownloadRecord[
         // A locked or already-removed file should not block dropping the record.
       }
     }
+    // Now that each download owns a folder, deleting the last file in it should not leave
+    // an empty `Show/Season 01/S01E02` shell behind.
+    pruneEmptyFolders(path.dirname(record.savePath));
   }
 
   const remaining = getDownloadRecords().filter((entry) => entry.id !== id);

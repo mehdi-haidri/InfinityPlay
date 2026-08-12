@@ -1,20 +1,73 @@
 import { randomUUID } from "node:crypto";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { PassThrough, Readable } from "node:stream";
 import { app, protocol } from "electron";
+import { toolAvailable, toolPath } from "./media-tools";
 import type { PreparedLiveStream } from "@shared/types";
 import { getConfig } from "./store";
 
 export const LIVE_TRANSCODE_SCHEME = "iptranscode";
 
+/**
+ * Writes a rewritten DASH manifest to disk and returns a URL the renderer can load.
+ *
+ * The renderer cannot hand dash.js a blob or data URL: the window is a `file://` page, so
+ * those are opaque-origin reads that Chromium refuses. Staging the text as a real file
+ * served over the local media scheme is the only route that dash.js's XHR can follow.
+ */
+export function stageManifest(xml: string): string {
+  const directory = path.join(app.getPath("temp"), "infinityplay-manifests");
+  fs.mkdirSync(directory, { recursive: true });
+
+  // Clear anything older than an hour; a staged manifest is useless once playback ends.
+  const cutoff = Date.now() - 60 * 60 * 1000;
+  for (const name of fs.readdirSync(directory)) {
+    const file = path.join(directory, name);
+    try {
+      if (fs.statSync(file).mtimeMs < cutoff) fs.rmSync(file, { force: true });
+    } catch {
+      // Another run may have removed it already.
+    }
+  }
+
+  const target = path.join(directory, `${randomUUID()}.mpd`);
+  fs.writeFileSync(target, xml, "utf8");
+  return `ipmedia://local/?path=${encodeURIComponent(target)}`;
+}
+
 const PROBE_TIMEOUT_MS = 8_000;
-const SUPPORTED_VIDEO_CODECS = new Set(["h264", "vp8", "vp9", "av1"]);
+/**
+ * Codecs Chromium is assumed to decode before the renderer has reported in. Deliberately
+ * conservative: these are the ones every build handles.
+ */
+const BASE_VIDEO_CODECS = ["h264", "vp8", "vp9", "av1"];
+
+/**
+ * What this machine can actually play, as reported by the renderer.
+ *
+ * HEVC is the reason this is not a fixed list. Whether Chromium decodes it depends on the
+ * platform and the GPU, so hard-coding it as unsupported forced a real-time FFmpeg
+ * transcode of every HEVC file — the catalog's usual codec — which stutters on playback
+ * the machine could have decoded natively.
+ */
+const decodableCodecs = new Set(BASE_VIDEO_CODECS);
+
+/** Called once at renderer start-up with the result of its `canPlayType` probes. */
+export function setDecodableCodecs(codecs: string[]): void {
+  decodableCodecs.clear();
+  for (const codec of [...BASE_VIDEO_CODECS, ...codecs]) {
+    decodableCodecs.add(codec.toLowerCase());
+  }
+}
+
+const SUPPORTED_VIDEO_CODECS = {
+  has: (codec: string): boolean => decodableCodecs.has(codec.toLowerCase()),
+};
 const prepared = new Map<string, { source: string; startAt: number; createdAt: number; temporary?: boolean }>();
 const probeCache = new Map<string, { codec: string; duration: number; checkedAt: number }>();
 const CACHE_MS = 6 * 60 * 60 * 1000;
-const commandCache = new Map<string, boolean>();
 const previewCache = new Map<string, { dataUrl: string; createdAt: number }>();
 const PREVIEW_CACHE_MS = 30 * 60 * 1000;
 const PREVIEW_CACHE_MAX = 140;
@@ -30,20 +83,12 @@ function prunePrepared(): void {
   }
 }
 
-function commandAvailable(command: string): boolean {
-  const cached = commandCache.get(command);
-  if (cached !== undefined) return cached;
-  const available = spawnSync(command, ["-version"], { stdio: "ignore" }).status === 0;
-  commandCache.set(command, available);
-  return available;
-}
-
 function probeMedia(source: string): Promise<{ codec: string; duration: number }> {
   const cached = probeCache.get(source);
   if (cached && Date.now() - cached.checkedAt < CACHE_MS) return Promise.resolve(cached);
 
   return new Promise((resolve) => {
-    const child = spawn("ffprobe", [
+    const child = spawn(toolPath("ffprobe"), [
       "-v", "error",
       "-rw_timeout", "6000000",
       "-select_streams", "v:0",
@@ -84,13 +129,13 @@ export async function prepareLiveStream(
     return { url: source, transcoded: false };
   }
   if (/\.mpd(?:$|\?)/i.test(source)) return prepareDashStream(source, startAt, resolution);
-  if (!commandAvailable("ffprobe")) return { url: source, transcoded: false };
+  if (!toolAvailable("ffprobe")) return { url: source, transcoded: false };
 
   const { codec, duration } = await probeMedia(probeSource);
   if (!codec || SUPPORTED_VIDEO_CODECS.has(codec)) {
     return { url: source, transcoded: false, codec: codec || undefined, duration };
   }
-  if (!commandAvailable("ffmpeg")) {
+  if (!toolAvailable("ffmpeg")) {
     return {
       url: source,
       transcoded: false,
@@ -174,7 +219,7 @@ async function prepareDashStream(
   startAt: number,
   resolution: number,
 ): Promise<PreparedLiveStream> {
-  if (!commandAvailable("ffmpeg")) return { url: source, transcoded: false };
+  if (!toolAvailable("ffmpeg")) return { url: source, transcoded: false };
   try {
     const input = await materializeDash(source, resolution);
     if (!input) return { url: source, transcoded: false };
@@ -204,7 +249,7 @@ export async function generateMediaPreview(
   position: number,
   resolution: number,
 ): Promise<string | null> {
-  if (!commandAvailable("ffmpeg")) return null;
+  if (!toolAvailable("ffmpeg")) return null;
   const bucket = Math.max(0, Math.round(position / 5) * 5);
   const key = `${source}|${resolution}|${bucket}`;
   const cached = previewCache.get(key);
@@ -228,7 +273,7 @@ export async function generateMediaPreview(
 
   try {
     const dataUrl = await new Promise<string | null>((resolve) => {
-      const child = spawn("ffmpeg", [
+      const child = spawn(toolPath("ffmpeg"), [
         "-hide_banner", "-loglevel", "error",
         "-ss", bucket.toFixed(3),
         "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
@@ -300,7 +345,7 @@ export function registerLiveTranscodeProtocol(): void {
 
     const launch = (accelerationArgs: string[], mayFallback: boolean) => {
       let emitted = false;
-      child = spawn("ffmpeg", [
+      child = spawn(toolPath("ffmpeg"), [
         "-hide_banner", "-loglevel", "warning",
         "-fflags", "nobuffer", "-flags", "low_delay",
         "-analyzeduration", "2000000", "-probesize", "2000000",

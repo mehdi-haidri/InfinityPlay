@@ -9,6 +9,7 @@ import type {
   AppConfig,
   AppInfo,
   DownloadRequest,
+  SeasonDownloadRequest,
   MediaType,
   Result,
   WatchHistoryItem,
@@ -28,6 +29,8 @@ import {
 import {
   cancelDownload,
   clearFinishedDownloads,
+  clearSeasonQueue,
+  pendingSeasonCount,
   listDownloads,
   openDownload,
   pauseDownload,
@@ -35,6 +38,7 @@ import {
   resumeDownload,
   revealDownload,
   startDownload,
+  startSeasonDownload,
 } from "./downloads";
 import {
   checkForUpdates,
@@ -42,7 +46,8 @@ import {
   installUpdate,
   isAutoUpdateSupported,
 } from "./updater";
-import { generateMediaPreview, prepareLiveStream } from "./live";
+import { generateMediaPreview, prepareLiveStream, setDecodableCodecs, stageManifest } from "./live";
+import { toolAvailable } from "./media-tools";
 
 const moviebox = new MovieBoxService();
 
@@ -118,6 +123,19 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   handle("history:clear", () => clearHistory());
 
   handle("download:start", (request: DownloadRequest) => startDownload(request));
+  handle("download:startSeason", (request: SeasonDownloadRequest) =>
+    startSeasonDownload(request),
+  );
+  handle("download:clearQueue", () => clearSeasonQueue());
+  handle("download:queueSize", () => pendingSeasonCount());
+  // The renderer is the only place that knows what Chromium will decode here.
+  handle("media:stageManifest", (xml: string) => stageManifest(xml));
+
+  handle("media:decodable", (codecs: string[]) => {
+    setDecodableCodecs(Array.isArray(codecs) ? codecs : []);
+    return true;
+  });
+
   handle("download:list", () => listDownloads());
   handle("download:pause", (id: string) => pauseDownload(id));
   handle("download:resume", (id: string) => resumeDownload(id));
@@ -152,6 +170,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       node: process.versions.node,
       platform: `${process.platform}-${process.arch}`,
       packageType: packageType(),
+      ffmpeg: toolAvailable("ffmpeg"),
       updatable: isAutoUpdateSupported(),
       gpu: `${vendor} · video decode ${decode}`,
     };

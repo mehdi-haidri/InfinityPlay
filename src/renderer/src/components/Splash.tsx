@@ -55,10 +55,6 @@ export function Splash({ ready }: { ready: boolean }) {
       </div>
 
       <div className="splash-name">InfinityPlay</div>
-
-      <div className="splash-track">
-        <span />
-      </div>
     </div>
   );
 }

@@ -158,6 +158,7 @@ function LiveAnnouncements() {
 
 export function App() {
   const loadConfig = useApp((state) => state.loadConfig);
+  const loadCapabilities = useApp((state) => state.loadCapabilities);
   const loadWatchHistory = useApp((state) => state.loadWatchHistory);
   const loadDownloads = useApp((state) => state.loadDownloads);
   const watchDownloads = useApp((state) => state.watchDownloads);
@@ -169,12 +170,12 @@ export function App() {
   useEffect(() => {
     // The splash lifts once the persisted state is in, so the first frame behind it is
     // the real UI rather than empty shells.
-    void Promise.allSettled([loadConfig(), loadWatchHistory(), loadDownloads()]).then(() =>
+    void Promise.allSettled([loadConfig(), loadWatchHistory(), loadDownloads(), loadCapabilities()]).then(() =>
       setBooted(true),
     );
     // One subscription for the whole app: progress feeds both the toasts and the page.
     return watchDownloads();
-  }, [loadConfig, loadWatchHistory, loadDownloads, watchDownloads]);
+  }, [loadConfig, loadWatchHistory, loadDownloads, loadCapabilities, watchDownloads]);
 
   // Every route change starts at the top, the way a browser would.
   useEffect(() => {
