@@ -94,10 +94,28 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # npm installs only the runner's own architecture, but this job packages x64 as
-      # well as arm64, so the x64 FFmpeg binaries are added for the cross build.
+      # npm installs only the runner's own architecture, but this job packages x64 as well
+      # as arm64. `npm install` refuses a package whose `cpu` does not match the machine
+      # (EBADPLATFORM) and `--cpu`/`--os` only steer optional-dependency *selection*, so
+      # the tarballs are fetched with `npm pack`, which performs no platform check, and
+      # unpacked where `beforePack` looks for them.
       - name: Add x64 FFmpeg binaries for the cross build
-        run: npm install --no-save --cpu=x64 --os=darwin @ffmpeg-installer/darwin-x64 @ffprobe-installer/darwin-x64
+        shell: bash
+        run: |
+          set -euo pipefail
+          for package in @ffmpeg-installer/darwin-x64 @ffprobe-installer/darwin-x64; do
+            target="node_modules/${package}"
+            mkdir -p "$target"
+            tarball=$(npm pack "$package" --silent | tail -1)
+            tar -xzf "$tarball" -C "$target" --strip-components=1
+            rm -f "$tarball"
+          done
+          # The binaries must be executable and must really be x86_64, or the x64 DMG
+          # would ship something its own app cannot spawn.
+          chmod +x node_modules/@ffmpeg-installer/darwin-x64/ffmpeg
+          chmod +x node_modules/@ffprobe-installer/darwin-x64/ffprobe
+          file node_modules/@ffmpeg-installer/darwin-x64/ffmpeg
+          file node_modules/@ffprobe-installer/darwin-x64/ffprobe
 
       - name: Build unsigned DMG and ZIP packages
         run: npm run dist:mac
