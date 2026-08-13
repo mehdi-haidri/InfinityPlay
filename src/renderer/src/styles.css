@@ -1528,11 +1528,15 @@ button {
   }
 }
 
-/* Baseline only; the player overrides colour, size and background from settings. */
+/* Native HTML5 track cues are hidden so only the single custom draggable subtitle overlay displays. */
 video::cue {
-  background: rgba(0, 0, 0, 0.62);
-  color: #fff;
-  font-family: inherit;
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  font-size: 0 !important;
+  color: transparent !important;
+  background: transparent !important;
+  text-shadow: none !important;
 }
 
 /* ── Subtitle appearance controls ──────────────────────────────────────────── */

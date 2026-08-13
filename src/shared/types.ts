@@ -183,11 +183,36 @@ export interface SubtitleOption {
   url: string;
 }
 
-/**
- * `box` draws a dark panel behind the text, `shadow` keeps the picture visible with a
- * heavy outline instead, `none` is bare text.
- */
-export type SubtitleBackground = "box" | "shadow" | "none";
+export type SubtitleBackground = "box" | "shadow" | "none" | "window" | "semi-transparent";
+
+export type SubtitleFontFamily = "sans-serif" | "serif" | "monospace" | "casual" | "cursive" | "small-caps";
+
+export type SubtitleEdgeStyle = "none" | "drop-shadow" | "outline" | "raised" | "depressed";
+
+export type SubtitlePosition = "bottom" | "middle" | "top";
+
+export const SUBTITLE_FONT_FAMILIES: { value: SubtitleFontFamily; label: string; fontFamily: string }[] = [
+  { value: "sans-serif", label: "Sans-Serif", fontFamily: "system-ui, -apple-system, sans-serif" },
+  { value: "serif", label: "Serif", fontFamily: "Georgia, 'Times New Roman', serif" },
+  { value: "monospace", label: "Monospace", fontFamily: "'Courier New', Courier, monospace" },
+  { value: "casual", label: "Casual", fontFamily: "'Comic Sans MS', 'Trebuchet MS', sans-serif" },
+  { value: "cursive", label: "Cursive", fontFamily: "'Brush Script MT', cursive" },
+  { value: "small-caps", label: "Small Caps", fontFamily: "sans-serif" },
+];
+
+export const SUBTITLE_EDGE_STYLES: { value: SubtitleEdgeStyle; label: string }[] = [
+  { value: "drop-shadow", label: "Drop Shadow" },
+  { value: "outline", label: "Uniform Outline" },
+  { value: "raised", label: "Raised" },
+  { value: "depressed", label: "Depressed" },
+  { value: "none", label: "None" },
+];
+
+export const SUBTITLE_POSITIONS: { value: SubtitlePosition; label: string }[] = [
+  { value: "bottom", label: "Bottom" },
+  { value: "middle", label: "Middle" },
+  { value: "top", label: "Top" },
+];
 
 /**
  * Saving every language turns one download into ~16 extra requests and files. `preferred`
@@ -202,6 +227,7 @@ export const SUBTITLE_COLORS = [
   { value: "#8ff0a4", label: "Green" },
   { value: "#7fd3ff", label: "Cyan" },
   { value: "#ffb2c8", label: "Pink" },
+  { value: "#ff4d4d", label: "Red" },
   { value: "#111111", label: "Black" },
 ];
 
@@ -362,6 +388,9 @@ export interface AppConfig {
   downloadSubtitles: DownloadSubtitlePolicy;
   /** How cue text is separated from the picture behind it. */
   subtitleBackground: SubtitleBackground;
+  subtitleFontFamily: SubtitleFontFamily;
+  subtitleEdgeStyle: SubtitleEdgeStyle;
+  subtitlePosition: SubtitlePosition;
   volume: number;
   playlists: PlaylistSource[];
 }
@@ -381,6 +410,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   subtitleColor: "#ffffff",
   downloadSubtitles: "preferred",
   subtitleBackground: "box",
+  subtitleFontFamily: "sans-serif",
+  subtitleEdgeStyle: "drop-shadow",
+  subtitlePosition: "bottom",
   volume: 1,
   playlists: [...DEFAULT_PLAYLISTS],
 };

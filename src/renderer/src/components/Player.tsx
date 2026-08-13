@@ -9,11 +9,14 @@ import {
   Minimize,
   Minus,
   Pause,
+  PictureInPicture,
   Play,
   Plus,
   RotateCcw,
   RotateCw,
   Settings2,
+  SkipBack,
+  SkipForward,
   SlidersHorizontal,
   Volume1,
   Volume2,
@@ -22,14 +25,70 @@ import {
 } from "lucide-react";
 import {
   SUBTITLE_COLORS,
+  SUBTITLE_FONT_FAMILIES,
+  SUBTITLE_EDGE_STYLES,
   SUBTITLE_OFF,
   type Release,
   type PreparedLiveStream,
   type SubtitleOption,
+  type SubtitleFontFamily,
+  type SubtitleEdgeStyle,
 } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { formatTime, qualityLabel } from "../lib/format";
 import { useApp } from "../store";
+
+interface VttCue {
+  start: number;
+  end: number;
+  text: string;
+}
+
+function parseVttTime(timeStr: string): number {
+  const parts = timeStr.trim().replace(",", ".").split(":");
+  if (parts.length === 3) {
+    return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
+  } else if (parts.length === 2) {
+    return parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
+  }
+  return parseFloat(timeStr) || 0;
+}
+
+function parseVttCues(vttText: string): VttCue[] {
+  if (!vttText) return [];
+  const cues: VttCue[] = [];
+  const blocks = vttText.replace(/^WEBVTT[^\n]*\n/i, "").split(/\n\s*\n/);
+  for (const block of blocks) {
+    const lines = block.trim().split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const match = lines[i].match(/^([\d:.ms,]+)\s*-->\s*([\d:.ms,]+)/);
+      if (match) {
+        const start = parseVttTime(match[1]);
+        const end = parseVttTime(match[2]);
+        const text = lines.slice(i + 1).join("\n").replace(/<[^>]+>/g, "").trim();
+        if (text && end > start) {
+          cues.push({ start, end, text });
+        }
+        break;
+      }
+    }
+  }
+  return cues;
+}
+
+function decodeBase64Utf8(dataUrl: string): string {
+  try {
+    const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder("utf-8").decode(bytes);
+  } catch {
+    return "";
+  }
+}
 
 const IDLE_MS = 2600;
 const SEEK_STEP = 10;
@@ -123,10 +182,56 @@ export function Player() {
   const [rate, setRate] = useState(1);
   const [idle, setIdle] = useState(false);
   const [menu, setMenu] = useState<MenuTab>(null);
-  /** One object rather than three strings, so label, srcLang and payload cannot drift. */
-  const [subtitle, setSubtitle] = useState<{ name: string; lang: string; dataUrl: string } | null>(
-    null,
-  );
+  const [subtitle, setSubtitle] = useState<{
+    name: string;
+    lang: string;
+    dataUrl: string;
+    vttText?: string;
+  } | null>(null);
+  const [subPosition, setSubPosition] = useState<{ x: number; y: number }>({ x: 50, y: 86 });
+  const draggingSub = useRef(false);
+
+  const cues = useMemo(() => {
+    if (!subtitle?.vttText) return [];
+    return parseVttCues(subtitle.vttText);
+  }, [subtitle?.vttText]);
+
+  const activeCueText = useMemo(() => {
+    if (cues.length === 0) return null;
+    const match = cues.find((cue) => current >= cue.start && current <= cue.end);
+    return match ? match.text : null;
+  }, [cues, current]);
+
+  const [trackCueText, setTrackCueText] = useState<string | null>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !subtitle) {
+      setTrackCueText(null);
+      return;
+    }
+
+    const onCueChange = () => {
+      let activeText: string | null = null;
+      for (let i = 0; i < video.textTracks.length; i++) {
+        const track = video.textTracks[i];
+        if (track.activeCues && track.activeCues.length > 0) {
+          activeText = Array.from(track.activeCues)
+            .map((c: any) => c.text)
+            .join("\n")
+            .replace(/<[^>]+>/g, "")
+            .trim();
+          break;
+        }
+      }
+      setTrackCueText(activeText);
+    };
+
+    const interval = setInterval(onCueChange, 200);
+    return () => clearInterval(interval);
+  }, [subtitle, sourceUrl]);
+
+  const displayCueText = trackCueText || activeCueText;
   const [fullscreen, setFullscreen] = useState(false);
   const [hint, setHint] = useState<{ id: number; icon: "play" | "pause" } | null>(null);
   const [waiting, setWaiting] = useState(false);
@@ -148,19 +253,16 @@ export function Player() {
    * so the rule is generated with literal values whenever the settings change.
    */
   const cueCss = useMemo(() => {
-    const background =
-      config.subtitleBackground === "box" ? "rgba(0, 0, 0, 0.72)" : "transparent";
-    const shadow =
-      config.subtitleBackground === "box"
-        ? "none"
-        : "0 0 4px rgba(0,0,0,0.95), 0 2px 6px rgba(0,0,0,0.9), 0 0 1px rgba(0,0,0,1)";
     return `.player-root video::cue {
-      font-size: ${config.subtitleSize}%;
-      color: ${config.subtitleColor};
-      background-color: ${background};
-      text-shadow: ${shadow};
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+      font-size: 0 !important;
+      color: transparent !important;
+      background: transparent !important;
+      text-shadow: none !important;
     }`;
-  }, [config.subtitleSize, config.subtitleColor, config.subtitleBackground]);
+  }, []);
   const subtitles = useMemo(() => request?.subtitles ?? [], [request]);
 
   // Reset the player before resolving a source. A saved position is handled inside the
@@ -306,7 +408,15 @@ export function Player() {
     unwrap(api.subtitle.load(match.url))
       .then((dataUrl) => {
         if (cancelled) return;
-        setSubtitle({ name: match.name, lang: match.lang, dataUrl });
+        let vttText = "";
+        try {
+          if (dataUrl.startsWith("data:text/vtt;charset=utf-8;base64,")) {
+            vttText = decodeURIComponent(escape(atob(dataUrl.split(",")[1])));
+          }
+        } catch {
+          /* ignore */
+        }
+        setSubtitle({ name: match.name, lang: match.lang, dataUrl, vttText });
       })
       .catch(() => {
         // A missing caption file is not worth interrupting playback for.
@@ -742,7 +852,15 @@ export function Player() {
     }
     try {
       const dataUrl = await unwrap(api.subtitle.load(option.url));
-      setSubtitle({ name: option.name, lang: option.lang, dataUrl });
+      let vttText = "";
+      try {
+        if (dataUrl.startsWith("data:text/vtt;charset=utf-8;base64,")) {
+          vttText = decodeURIComponent(escape(atob(dataUrl.split(",")[1])));
+        }
+      } catch {
+        /* ignore */
+      }
+      setSubtitle({ name: option.name, lang: option.lang, dataUrl, vttText });
     } catch (error) {
       notify({
         kind: "error",
@@ -805,6 +923,86 @@ export function Player() {
             />
           )}
         </video>
+
+        {/* Custom Draggable ("Glissable") Subtitle Overlay */}
+        {displayCueText && (
+          <div
+            style={{
+              position: "absolute",
+              left: `${subPosition.x}%`,
+              top: `${subPosition.y}%`,
+              transform: "translate(-50%, -50%)",
+              cursor: draggingSub.current ? "grabbing" : "grab",
+              zIndex: 35,
+              userSelect: "none",
+              touchAction: "none",
+              pointerEvents: "auto",
+            }}
+            onPointerDown={(e) => {
+              draggingSub.current = true;
+              e.currentTarget.setPointerCapture(e.pointerId);
+            }}
+            onPointerMove={(e) => {
+              if (!draggingSub.current || !surfaceRef.current) return;
+              const rect = surfaceRef.current.getBoundingClientRect();
+              const x = Math.min(Math.max(((e.clientX - rect.left) / rect.width) * 100, 5), 95);
+              const y = Math.min(Math.max(((e.clientY - rect.top) / rect.height) * 100, 5), 95);
+              setSubPosition({ x, y });
+            }}
+            onPointerUp={(e) => {
+              if (!draggingSub.current) return;
+              draggingSub.current = false;
+              e.currentTarget.releasePointerCapture(e.pointerId);
+            }}
+            title="Drag to reposition subtitles anywhere on screen"
+          >
+            <div
+              style={{
+                fontSize: `${Math.round(22 * ((config.subtitleSize ?? 100) / 100))}px`,
+                color: config.subtitleColor ?? "#ffffff",
+                backgroundColor:
+                  config.subtitleBackground === "box"
+                    ? "rgba(0, 0, 0, 0.85)"
+                    : config.subtitleBackground === "window"
+                      ? "rgba(16, 18, 25, 0.95)"
+                      : config.subtitleBackground === "semi-transparent"
+                        ? "rgba(0, 0, 0, 0.45)"
+                        : "transparent",
+                padding: config.subtitleBackground !== "none" ? "4px 14px" : "0",
+                borderRadius: 6,
+                textAlign: "center",
+                fontFamily:
+                  config.subtitleFontFamily === "serif"
+                    ? "Georgia, serif"
+                    : config.subtitleFontFamily === "monospace"
+                      ? "'Courier New', monospace"
+                      : config.subtitleFontFamily === "casual"
+                        ? "'Comic Sans MS', sans-serif"
+                        : config.subtitleFontFamily === "cursive"
+                          ? "'Brush Script MT', cursive"
+                          : "sans-serif",
+                fontVariant: config.subtitleFontFamily === "small-caps" ? "small-caps" : "normal",
+                textShadow:
+                  config.subtitleEdgeStyle === "outline"
+                    ? "-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000"
+                    : config.subtitleEdgeStyle === "raised"
+                      ? "1px 1px 2px #000"
+                      : config.subtitleEdgeStyle === "depressed"
+                        ? "-1px -1px 2px #000"
+                        : config.subtitleEdgeStyle === "none"
+                          ? "none"
+                          : "0 2px 4px rgba(0,0,0,0.95)",
+                whiteSpace: "pre-wrap",
+                lineHeight: 1.35,
+                maxWidth: "85vw",
+                boxShadow: draggingSub.current ? "0 0 16px rgba(255,255,255,0.5)" : undefined,
+                border: draggingSub.current ? "1px dashed rgba(255,255,255,0.6)" : "1px solid transparent",
+              }}
+            >
+              {displayCueText}
+            </div>
+          </div>
+        )}
 
         {startPosition === null && !request.live && (
           <div className="resume-prompt" role="dialog" aria-modal="true" aria-label="Resume playback">
@@ -924,7 +1122,41 @@ export function Player() {
                 {request.live ? "LIVE" : `${formatTime(displayedCurrent)} / ${formatTime(duration)}`}
               </span>
 
-              <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+              <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
+                {request.mediaType === "series" && (request.episode ?? 0) > 1 && (
+                  <button
+                    className="icon-button"
+                    onClick={() =>
+                      openPlayer({
+                        ...request,
+                        episode: (request.episode ?? 1) - 1,
+                        startAt: 0,
+                      })
+                    }
+                    aria-label="Previous Episode"
+                    title="Previous Episode"
+                  >
+                    <SkipBack size={19} />
+                  </button>
+                )}
+
+                {request.mediaType === "series" && (
+                  <button
+                    className="icon-button"
+                    onClick={() =>
+                      openPlayer({
+                        ...request,
+                        episode: (request.episode ?? 1) + 1,
+                        startAt: 0,
+                      })
+                    }
+                    aria-label="Next Episode"
+                    title="Next Episode"
+                  >
+                    <SkipForward size={19} />
+                  </button>
+                )}
+
                 {(
                   <button
                     className="icon-button"
@@ -944,6 +1176,24 @@ export function Player() {
                 >
                   <Settings2 size={19} />
                 </button>
+
+                <button
+                  className="icon-button"
+                  onClick={() => {
+                    const video = videoRef.current;
+                    if (!video) return;
+                    if (document.pictureInPictureElement) {
+                      void document.exitPictureInPicture();
+                    } else if (document.pictureInPictureEnabled) {
+                      void video.requestPictureInPicture();
+                    }
+                  }}
+                  aria-label="Picture in Picture"
+                  title="Picture in Picture (PiP)"
+                >
+                  <PictureInPicture size={19} />
+                </button>
+
                 <button className="icon-button" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"} title={fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}>
                   {fullscreen ? <Minimize size={19} /> : <Maximize size={19} />}
                 </button>
@@ -977,7 +1227,7 @@ export function Player() {
               )}
 
               <div className="player-menu-label">Speed</div>
-              {[0.75, 1, 1.25, 1.5, 2].map((value) => (
+              {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((value) => (
                 <button key={value} data-active={rate === value} onClick={() => setRate(value)}>
                   {rate === value ? <Check size={14} /> : <span style={{ width: 14 }} />}
                   {value}×
@@ -996,17 +1246,40 @@ export function Player() {
               <div
                 className="cue-preview"
                 style={{
-                  fontSize: `${Math.round(15 * (config.subtitleSize / 100))}px`,
-                  color: config.subtitleColor,
+                  fontSize: `${Math.round(15 * ((config.subtitleSize ?? 100) / 100))}px`,
+                  color: config.subtitleColor ?? "#ffffff",
                   background:
-                    config.subtitleBackground === "box" ? "rgba(0,0,0,0.72)" : "transparent",
-                  textShadow:
                     config.subtitleBackground === "box"
-                      ? "none"
-                      : "0 0 4px rgba(0,0,0,0.95), 0 2px 6px rgba(0,0,0,0.9)",
+                      ? "rgba(0,0,0,0.85)"
+                      : config.subtitleBackground === "window"
+                        ? "rgba(16,18,25,0.95)"
+                        : config.subtitleBackground === "semi-transparent"
+                          ? "rgba(0,0,0,0.45)"
+                          : "transparent",
+                  fontFamily:
+                    config.subtitleFontFamily === "serif"
+                      ? "Georgia, serif"
+                      : config.subtitleFontFamily === "monospace"
+                        ? "'Courier New', monospace"
+                        : config.subtitleFontFamily === "casual"
+                          ? "'Comic Sans MS', sans-serif"
+                          : config.subtitleFontFamily === "cursive"
+                            ? "'Brush Script MT', cursive"
+                            : "sans-serif",
+                  fontVariant: config.subtitleFontFamily === "small-caps" ? "small-caps" : "normal",
+                  textShadow:
+                    config.subtitleEdgeStyle === "outline"
+                      ? "-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000"
+                      : config.subtitleEdgeStyle === "raised"
+                        ? "1px 1px 2px #000"
+                        : config.subtitleEdgeStyle === "depressed"
+                          ? "-1px -1px 2px #000"
+                          : config.subtitleEdgeStyle === "none"
+                            ? "none"
+                            : "0 2px 4px rgba(0,0,0,0.95)",
                 }}
               >
-                The quick brown fox
+                Sample Subtitle Text
               </div>
 
               <div className="cue-control">
@@ -1033,6 +1306,24 @@ export function Player() {
               </div>
 
               <div className="cue-control">
+                <span>Font style</span>
+                <select
+                  className="input"
+                  style={{ width: 140, padding: "3px 8px", fontSize: 12 }}
+                  value={config.subtitleFontFamily ?? "sans-serif"}
+                  onChange={(event) =>
+                    void patchConfig({ subtitleFontFamily: event.target.value as SubtitleFontFamily })
+                  }
+                >
+                  {SUBTITLE_FONT_FAMILIES.map((font) => (
+                    <option key={font.value} value={font.value}>
+                      {font.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="cue-control">
                 <span>Colour</span>
                 <div className="cue-swatches">
                   {SUBTITLE_COLORS.map((option) => (
@@ -1052,16 +1343,34 @@ export function Player() {
               <div className="cue-control">
                 <span>Background</span>
                 <div className="cue-segments">
-                  {(["box", "shadow", "none"] as const).map((option) => (
+                  {(["box", "window", "semi-transparent", "none"] as const).map((option) => (
                     <button
                       key={option}
                       data-active={config.subtitleBackground === option}
                       onClick={() => void patchConfig({ subtitleBackground: option })}
                     >
-                      {option === "box" ? "Box" : option === "shadow" ? "Outline" : "None"}
+                      {option === "box" ? "Solid" : option === "window" ? "Window" : option === "semi-transparent" ? "Translucent" : "None"}
                     </button>
                   ))}
                 </div>
+              </div>
+
+              <div className="cue-control">
+                <span>Edge style</span>
+                <select
+                  className="input"
+                  style={{ width: 140, padding: "3px 8px", fontSize: 12 }}
+                  value={config.subtitleEdgeStyle ?? "drop-shadow"}
+                  onChange={(event) =>
+                    void patchConfig({ subtitleEdgeStyle: event.target.value as SubtitleEdgeStyle })
+                  }
+                >
+                  {SUBTITLE_EDGE_STYLES.map((edge) => (
+                    <option key={edge.value} value={edge.value}>
+                      {edge.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <button
@@ -1071,10 +1380,12 @@ export function Player() {
                     subtitleSize: 100,
                     subtitleColor: "#ffffff",
                     subtitleBackground: "box",
+                    subtitleFontFamily: "sans-serif",
+                    subtitleEdgeStyle: "drop-shadow",
                   })
                 }
               >
-                Reset to defaults
+                Reset default appearance
               </button>
             </div>
           )}

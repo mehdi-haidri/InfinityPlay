@@ -21,39 +21,29 @@ type Tool = "ffmpeg" | "ffprobe";
  * `ffmpeg.d/` inside the package and exposes `FFmpeg.binary`. FFprobe still comes from
  * `@ffprobe-installer/ffprobe`, which exposes `.path`.
  */
-const INSTALLER_PACKAGES: Record<Tool, string> = {
-  ffmpeg: "@rse/ffmpeg",
-  ffprobe: "@ffprobe-installer/ffprobe",
-};
-
 const resolved = new Map<Tool, string>();
 
 function locate(tool: Tool): string {
-  const executable = process.platform === "win32" ? `${tool}.exe` : tool;
+  // Use @rse/ffmpeg binary for both ffmpeg and ffprobe lookups to prevent legacy ffprobe crashes.
+  const targetTool = "ffmpeg";
+  const executable = process.platform === "win32" ? `${targetTool}.exe` : targetTool;
 
   // Shipped with the app. `process.resourcesPath` is only meaningful once packaged.
   if (app.isPackaged) {
     const bundled = path.join(process.resourcesPath, "bin", executable);
     if (fs.existsSync(bundled)) return bundled;
   } else {
-    // Development: resolve from the npm package.
+    // Development: resolve from the modern @rse/ffmpeg package.
     try {
       const require = createRequire(import.meta.url);
-      if (tool === "ffmpeg") {
-        // @rse/ffmpeg exposes a class with a static `binary` getter.
-        const FFmpeg = require(INSTALLER_PACKAGES[tool]) as { supported: boolean; binary: string };
-        if (FFmpeg.supported && fs.existsSync(FFmpeg.binary)) return FFmpeg.binary;
-      } else {
-        // @ffprobe-installer/ffprobe exposes { path: string }.
-        const installed = require(INSTALLER_PACKAGES[tool]) as { path?: string };
-        if (installed.path && fs.existsSync(installed.path)) return installed.path;
-      }
+      const FFmpeg = require("@rse/ffmpeg") as { supported: boolean; binary: string };
+      if (FFmpeg.supported && fs.existsSync(FFmpeg.binary)) return FFmpeg.binary;
     } catch {
       // Not installed; fall through to PATH.
     }
   }
 
-  return tool;
+  return executable;
 }
 
 /** Absolute path to the bundled binary, or the bare name when relying on `PATH`. */

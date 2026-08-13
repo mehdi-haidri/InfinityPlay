@@ -5,10 +5,16 @@ import {
   CATALOG_COUNTRIES,
   ORIGINAL_AUDIO,
   SUBTITLE_COLORS,
+  SUBTITLE_FONT_FAMILIES,
+  SUBTITLE_EDGE_STYLES,
+  SUBTITLE_POSITIONS,
   SUBTITLE_LANGUAGES,
   SUBTITLE_OFF,
   type AppConfig,
   type AppInfo,
+  type SubtitleFontFamily,
+  type SubtitleEdgeStyle,
+  type SubtitlePosition,
 } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { useApp } from "../store";
@@ -283,55 +289,160 @@ export function SettingsPage() {
           <div>
             <div className="setting-label">Subtitle appearance</div>
             <div className="setting-hint">
-              Size, colour and background for cue text. The same controls sit in the
-              player's subtitle menu, so they can be adjusted while watching.
+              Netflix-style subtitle customization: Size, Font Family, Colour, Background, Edge Style, and Position.
             </div>
           </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10, alignItems: "flex-end" }}>
-            <div className="cue-stepper">
-              <button
-                onClick={() =>
-                  void patchConfig({ subtitleSize: Math.max(60, config.subtitleSize - 10) })
-                }
-                aria-label="Smaller subtitles"
-              >
-                −
-              </button>
-              <b>{config.subtitleSize}%</b>
-              <button
-                onClick={() =>
-                  void patchConfig({ subtitleSize: Math.min(220, config.subtitleSize + 10) })
-                }
-                aria-label="Larger subtitles"
-              >
-                +
-              </button>
-            </div>
-
-            <div className="cue-swatches">
-              {SUBTITLE_COLORS.map((option) => (
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, alignItems: "flex-end", width: "100%", maxWidth: 360 }}>
+            {/* Size Stepper */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+              <span className="setting-hint" style={{ margin: 0 }}>Font Size</span>
+              <div className="cue-stepper">
                 <button
-                  key={option.value}
-                  className="cue-swatch"
-                  style={{ background: option.value }}
-                  data-active={config.subtitleColor === option.value}
-                  title={option.label}
-                  aria-label={option.label}
-                  onClick={() => void patchConfig({ subtitleColor: option.value })}
-                />
-              ))}
-            </div>
-
-            <div className="cue-segments">
-              {(["box", "shadow", "none"] as const).map((option) => (
-                <button
-                  key={option}
-                  data-active={config.subtitleBackground === option}
-                  onClick={() => void patchConfig({ subtitleBackground: option })}
+                  onClick={() =>
+                    void patchConfig({ subtitleSize: Math.max(60, config.subtitleSize - 10) })
+                  }
+                  aria-label="Smaller subtitles"
                 >
-                  {option === "box" ? "Box" : option === "shadow" ? "Outline" : "None"}
+                  −
                 </button>
-              ))}
+                <b>{config.subtitleSize}%</b>
+                <button
+                  onClick={() =>
+                    void patchConfig({ subtitleSize: Math.min(220, config.subtitleSize + 10) })
+                  }
+                  aria-label="Larger subtitles"
+                >
+                  +
+                </button>
+              </div>
+            </div>
+
+            {/* Font Family Selector */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+              <span className="setting-hint" style={{ margin: 0 }}>Font Style</span>
+              <select
+                className="input"
+                style={{ width: 180 }}
+                value={config.subtitleFontFamily ?? "sans-serif"}
+                onChange={(event) =>
+                  void patchConfig({ subtitleFontFamily: event.target.value as SubtitleFontFamily })
+                }
+              >
+                {SUBTITLE_FONT_FAMILIES.map((font) => (
+                  <option key={font.value} value={font.value}>
+                    {font.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Text Color Swatches */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+              <span className="setting-hint" style={{ margin: 0 }}>Text Colour</span>
+              <div className="cue-swatches">
+                {SUBTITLE_COLORS.map((option) => (
+                  <button
+                    key={option.value}
+                    className="cue-swatch"
+                    style={{ background: option.value }}
+                    data-active={config.subtitleColor === option.value}
+                    title={option.label}
+                    aria-label={option.label}
+                    onClick={() => void patchConfig({ subtitleColor: option.value })}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Background Style */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+              <span className="setting-hint" style={{ margin: 0 }}>Background</span>
+              <div className="cue-segments">
+                {(["box", "window", "semi-transparent", "none"] as const).map((option) => (
+                  <button
+                    key={option}
+                    data-active={config.subtitleBackground === option}
+                    onClick={() => void patchConfig({ subtitleBackground: option })}
+                  >
+                    {option === "box" ? "Solid" : option === "window" ? "Window" : option === "semi-transparent" ? "Translucent" : "None"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Edge Style (Shadow/Outline) */}
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", width: "100%" }}>
+              <span className="setting-hint" style={{ margin: 0 }}>Edge Style</span>
+              <select
+                className="input"
+                style={{ width: 180 }}
+                value={config.subtitleEdgeStyle ?? "drop-shadow"}
+                onChange={(event) =>
+                  void patchConfig({ subtitleEdgeStyle: event.target.value as SubtitleEdgeStyle })
+                }
+              >
+                {SUBTITLE_EDGE_STYLES.map((edge) => (
+                  <option key={edge.value} value={edge.value}>
+                    {edge.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* Live Subtitle Preview Box */}
+            <div
+              style={{
+                width: "100%",
+                height: 70,
+                borderRadius: "var(--radius)",
+                background: "#050608 url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"20\" height=\"20\" viewBox=\"0 0 20 20\"><rect width=\"20\" height=\"20\" fill=\"%23101219\"/><circle cx=\"10\" cy=\"10\" r=\"2\" fill=\"%231c1f2b\"/></svg>')",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                marginTop: 6,
+                border: "1px solid var(--border)",
+                overflow: "hidden",
+              }}
+            >
+              <span
+                style={{
+                  fontSize: `${Math.round((config.subtitleSize ?? 100) * 0.16)}px`,
+                  color: config.subtitleColor ?? "#ffffff",
+                  backgroundColor:
+                    config.subtitleBackground === "box"
+                      ? "rgba(0, 0, 0, 0.85)"
+                      : config.subtitleBackground === "window"
+                        ? "rgba(16, 18, 25, 0.95)"
+                        : config.subtitleBackground === "semi-transparent"
+                          ? "rgba(0, 0, 0, 0.45)"
+                          : "transparent",
+                  padding: config.subtitleBackground !== "none" ? "2px 8px" : "0",
+                  borderRadius: 4,
+                  fontFamily:
+                    config.subtitleFontFamily === "serif"
+                      ? "Georgia, serif"
+                      : config.subtitleFontFamily === "monospace"
+                        ? "'Courier New', monospace"
+                        : config.subtitleFontFamily === "casual"
+                          ? "'Comic Sans MS', sans-serif"
+                          : config.subtitleFontFamily === "cursive"
+                            ? "'Brush Script MT', cursive"
+                            : "sans-serif",
+                  fontVariant: config.subtitleFontFamily === "small-caps" ? "small-caps" : "normal",
+                  textShadow:
+                    config.subtitleEdgeStyle === "outline"
+                      ? "-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000"
+                      : config.subtitleEdgeStyle === "raised"
+                        ? "1px 1px 2px #000"
+                        : config.subtitleEdgeStyle === "depressed"
+                          ? "-1px -1px 2px #000"
+                          : config.subtitleEdgeStyle === "none"
+                            ? "none"
+                            : "0 2px 4px rgba(0,0,0,0.95)",
+                }}
+              >
+                Sample Subtitle Text
+              </span>
             </div>
           </div>
         </div>

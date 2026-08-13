@@ -47,20 +47,29 @@ const toDataUrl = (vtt: string): string => {
   return `data:text/vtt;charset=utf-8;base64,${base64}`;
 };
 
-export async function fetchSubtitleAsVttDataUrl(url: string): Promise<string> {
+export async function fetchSubtitleVtt(url: string): Promise<{ dataUrl: string; vttText: string }> {
+  let rawText = "";
   if (url.startsWith(LOCAL_SUBTITLE_PREFIX)) {
     const filePath = url.slice(LOCAL_SUBTITLE_PREFIX.length);
     try {
       const fs = await import("node:fs/promises");
-      return toDataUrl(srtToVtt(await fs.readFile(filePath, "utf8")));
+      rawText = await fs.readFile(filePath, "utf8");
     } catch {
       throw new Error("Local subtitle files are not supported on this platform.");
     }
+  } else {
+    const response = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
+    if (!response.ok) throw new Error(`Subtitle download failed with status ${response.status}.`);
+    rawText = await response.text();
   }
 
-  const response = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
-  if (!response.ok) throw new Error(`Subtitle download failed with status ${response.status}.`);
-  return toDataUrl(srtToVtt(await response.text()));
+  const vttText = srtToVtt(rawText);
+  return { dataUrl: toDataUrl(vttText), vttText };
+}
+
+export async function fetchSubtitleAsVttDataUrl(url: string): Promise<string> {
+  const { dataUrl } = await fetchSubtitleVtt(url);
+  return dataUrl;
 }
 
 /**
