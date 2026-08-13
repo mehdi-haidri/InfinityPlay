@@ -87,33 +87,75 @@ function probeMedia(source: string): Promise<{ codec: string; duration: number }
   const cached = probeCache.get(source);
   if (cached && Date.now() - cached.checkedAt < CACHE_MS) return Promise.resolve(cached);
 
-  return new Promise((resolve) => {
-    const child = spawn(toolPath("ffprobe"), [
-      "-v", "error",
-      "-rw_timeout", "6000000",
-      "-select_streams", "v:0",
-      "-show_entries", "stream=codec_name:format=duration",
-      "-of", "json",
-      source,
-    ], { stdio: ["ignore", "pipe", "ignore"] });
-    const chunks: Buffer[] = [];
-    const timer = setTimeout(() => child.kill("SIGKILL"), PROBE_TIMEOUT_MS);
-    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
-    child.once("error", () => resolve({ codec: "", duration: 0 }));
-    child.once("close", () => {
-      clearTimeout(timer);
-      try {
-        const payload = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-        const codec = String(payload?.streams?.[0]?.codec_name ?? "");
-        const parsedDuration = Number(payload?.format?.duration ?? 0);
-        const duration = Number.isFinite(parsedDuration) ? parsedDuration : 0;
-        const result = { codec, duration, checkedAt: Date.now() };
-        if (codec) probeCache.set(source, result);
-        resolve({ codec, duration });
-      } catch {
-        resolve({ codec: "", duration: 0 });
+  // Fast-path for DASH .mpd manifests: parse XML in 0.1ms without launching native processes
+  if (source.endsWith(".mpd") || source.includes(".mpd")) {
+    try {
+      if (fs.existsSync(source)) {
+        const xml = fs.readFileSync(source, "utf8");
+        const match = xml.match(/mediaPresentationDuration="PT(?:(\d+(?:\.\d+)?)H)?(?:(\d+(?:\.\d+)?)M)?(?:(\d+(?:\.\d+)?)S)?"/i);
+        if (match) {
+          const hours = parseFloat(match[1] || "0");
+          const minutes = parseFloat(match[2] || "0");
+          const seconds = parseFloat(match[3] || "0");
+          const duration = hours * 3600 + minutes * 60 + seconds;
+          const codecMatch = xml.match(/codecs="([^"]+)"/i);
+          const codec = codecMatch ? codecMatch[1] : "h264";
+          const result = { codec, duration, checkedAt: Date.now() };
+          probeCache.set(source, result);
+          return Promise.resolve(result);
+        }
       }
-    });
+    } catch {
+      /* fallback below */
+    }
+  }
+
+  return new Promise((resolve) => {
+    let child: ReturnType<typeof spawn> | null = null;
+    let settled = false;
+
+    const finish = (codec = "", duration = 0) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (child && !child.killed) {
+        try { child.kill("SIGKILL"); } catch { /* ignore */ }
+      }
+      const result = { codec, duration, checkedAt: Date.now() };
+      if (codec || duration > 0) probeCache.set(source, result);
+      resolve(result);
+    };
+
+    const timer = setTimeout(() => finish("", 0), PROBE_TIMEOUT_MS);
+
+    try {
+      child = spawn(toolPath("ffmpeg"), [
+        "-hide_banner", "-loglevel", "info",
+        "-rw_timeout", "5000000",
+        "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
+        "-i", source,
+      ], { stdio: ["ignore", "ignore", "pipe"] });
+
+      const chunks: Buffer[] = [];
+      child.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
+      child.once("error", () => finish("", 0));
+      child.once("close", () => {
+        const output = Buffer.concat(chunks).toString("utf8");
+        const durationMatch = output.match(/Duration:\s*(\d+):(\d+):([\d.]+)/i);
+        let duration = 0;
+        if (durationMatch) {
+          duration =
+            parseFloat(durationMatch[1]) * 3600 +
+            parseFloat(durationMatch[2]) * 60 +
+            parseFloat(durationMatch[3]);
+        }
+        const videoMatch = output.match(/Video:\s*([a-zA-Z0-9_]+)/i);
+        const codec = videoMatch ? videoMatch[1] : "";
+        finish(codec, duration);
+      });
+    } catch {
+      finish("", 0);
+    }
   });
 }
 
@@ -170,10 +212,17 @@ interface MaterializedDash {
   height: number;
 }
 
+const dashManifestCache = new Map<string, MaterializedDash>();
+
 async function materializeDash(
   source: string,
   resolution: number,
 ): Promise<MaterializedDash | null> {
+  const cacheKey = `${source}_${resolution}`;
+  if (dashManifestCache.has(cacheKey)) {
+    return dashManifestCache.get(cacheKey)!;
+  }
+
   const response = await fetch(source, { signal: AbortSignal.timeout(15_000) });
   if (!response.ok) return null;
   const original = await response.text();
@@ -211,7 +260,10 @@ async function materializeDash(
   const token = randomUUID();
   const manifestPath = path.join(app.getPath("temp"), `infinityplay-${token}.mpd`);
   fs.writeFileSync(manifestPath, manifest, "utf8");
-  return { path: manifestPath, codec, duration, height: chosenHeight };
+  
+  const result = { path: manifestPath, codec, duration, height: chosenHeight };
+  dashManifestCache.set(cacheKey, result);
+  return result;
 }
 
 async function prepareDashStream(
@@ -272,43 +324,61 @@ export async function generateMediaPreview(
   if (!input) return null;
 
   try {
+    const { duration } = await probeMedia(input);
+    if (duration > 0 && bucket >= duration) return null;
+
+    const seekSeconds = Math.max(0, bucket);
     const dataUrl = await new Promise<string | null>((resolve) => {
-      const child = spawn(toolPath("ffmpeg"), [
-        "-hide_banner", "-loglevel", "error",
-        "-ss", bucket.toFixed(3),
-        "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
-        "-i", input,
-        "-map", "0:v:0?", "-frames:v", "1",
-        "-vf", "scale=320:-2:force_original_aspect_ratio=decrease",
-        "-q:v", "5", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1",
-      ], { stdio: ["ignore", "pipe", "ignore"] });
-      const chunks: Buffer[] = [];
-      let size = 0;
+      let child: ReturnType<typeof spawn> | null = null;
       let settled = false;
+
       const finish = (value: string | null) => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
+        if (child && !child.killed) {
+          try { child.kill("SIGKILL"); } catch { /* ignore */ }
+        }
         resolve(value);
       };
-      const timer = setTimeout(() => {
-        child.kill("SIGKILL");
+
+      const timer = setTimeout(() => finish(null), 10_000);
+
+      try {
+        child = spawn(toolPath("ffmpeg"), [
+          "-hide_banner", "-loglevel", "quiet",
+          "-rw_timeout", "5000000",
+          "-ss", seekSeconds.toFixed(3),
+          "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
+          "-i", input,
+          "-map", "0:v:0?", "-frames:v", "1",
+          "-vf", "scale=320:-2:force_original_aspect_ratio=decrease",
+          "-q:v", "5", "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1",
+        ], { stdio: ["ignore", "pipe", "ignore"] });
+
+        const chunks: Buffer[] = [];
+        let size = 0;
+
+        child.stdout?.on("data", (chunk: Buffer) => {
+          size += chunk.length;
+          if (size > 2_000_000) {
+            finish(null);
+            return;
+          }
+          chunks.push(chunk);
+        });
+        child.once("error", () => finish(null));
+        child.once("close", (code) => {
+          if (code !== 0) {
+            finish(null);
+            return;
+          }
+          const image = Buffer.concat(chunks);
+          finish(image.length > 0 ? `data:image/jpeg;base64,${image.toString("base64")}` : null);
+        });
+      } catch {
         finish(null);
-      }, 12_000);
-      child.stdout?.on("data", (chunk: Buffer) => {
-        size += chunk.length;
-        if (size > 2_000_000) {
-          child.kill("SIGKILL");
-          finish(null);
-          return;
-        }
-        chunks.push(chunk);
-      });
-      child.once("error", () => finish(null));
-      child.once("close", (code) => {
-        const image = Buffer.concat(chunks);
-        finish(code === 0 && image.length > 0 ? `data:image/jpeg;base64,${image.toString("base64")}` : null);
-      });
+      }
     });
     if (!dataUrl) return null;
     previewCache.set(key, { dataUrl, createdAt: Date.now() });

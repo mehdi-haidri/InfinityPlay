@@ -36,6 +36,9 @@ export function TopBar() {
         inputRef.current?.select();
       }
     };
+    const isMobileTouch = window.matchMedia("(pointer: coarse)").matches && window.innerWidth <= 768;
+    if (isMobileTouch) return;
+
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);

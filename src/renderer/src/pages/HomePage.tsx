@@ -66,7 +66,7 @@ export function HomePage() {
   if (loading || !data) {
     return (
       <div className="page">
-        <div className="skeleton" style={{ height: 360, margin: "-76px -28px 28px", borderRadius: 0 }} />
+        <div className="skeleton home-hero-skeleton" />
         <div className="row"><div className="skeleton" style={{ height: 16, width: 180, marginBottom: 12 }} /><SkeletonRow /></div>
         <div className="row"><div className="skeleton" style={{ height: 16, width: 140, marginBottom: 12 }} /><SkeletonRow /></div>
       </div>

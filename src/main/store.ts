@@ -12,6 +12,8 @@ import {
   type AppConfig,
   type PlaylistSource,
   type DownloadRecord,
+  type CatalogItem,
+  type FavoriteItem,
   type WatchHistoryItem,
 } from "@shared/types";
 
@@ -68,9 +70,11 @@ class JsonFile<T> {
  * until the next upgrade, which is the accepted cost of not losing new defaults.
  */
 function withDefaultPlaylists(stored: PlaylistSource[]): PlaylistSource[] {
-  const known = new Set(stored.map((entry) => entry.url));
+  const defaults = new Map(DEFAULT_PLAYLISTS.map((entry) => [entry.url, entry]));
+  const upgraded = stored.map((entry) => ({ ...defaults.get(entry.url), ...entry }));
+  const known = new Set(upgraded.map((entry) => entry.url));
   const missing = DEFAULT_PLAYLISTS.filter((entry) => !known.has(entry.url));
-  return missing.length === 0 ? stored : [...stored, ...missing];
+  return missing.length === 0 ? upgraded : [...upgraded, ...missing];
 }
 
 const configFile = new JsonFile<AppConfig>("config.json", DEFAULT_CONFIG, (raw) => ({
@@ -107,6 +111,23 @@ export const removeHistory = (subjectId: string): WatchHistoryItem[] =>
   historyFile.write(historyFile.read().filter((entry) => entry.subjectId !== subjectId));
 
 export const clearHistory = (): WatchHistoryItem[] => historyFile.write([]);
+
+const favoritesFile = new JsonFile<FavoriteItem[]>("favorites.json", [], (raw) =>
+  Array.isArray(raw) ? (raw as FavoriteItem[]) : [],
+);
+
+export const getFavorites = (): FavoriteItem[] =>
+  [...favoritesFile.read()].sort((a, b) => b.addedAt - a.addedAt);
+
+export function toggleFavorite(item: CatalogItem): FavoriteItem[] {
+  const current = favoritesFile.read();
+  const exists = current.some((entry) => entry.id === item.id);
+  return favoritesFile.write(
+    exists
+      ? current.filter((entry) => entry.id !== item.id)
+      : [{ ...item, addedAt: Date.now() }, ...current],
+  );
+}
 
 const downloadsFile = new JsonFile<DownloadRecord[]>("downloads.json", [], (raw) =>
   Array.isArray(raw) ? (raw as DownloadRecord[]) : [],

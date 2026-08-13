@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Hls from "hls.js";
 import { MediaPlayer, type MediaPlayerClass } from "dashjs";
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
 import {
   Captions,
   Check,
@@ -9,11 +10,15 @@ import {
   Minimize,
   Minus,
   Pause,
+  PictureInPicture,
   Play,
   Plus,
+  Languages,
   RotateCcw,
   RotateCw,
   Settings2,
+  SkipBack,
+  SkipForward,
   SlidersHorizontal,
   Volume1,
   Volume2,
@@ -22,20 +27,79 @@ import {
 } from "lucide-react";
 import {
   SUBTITLE_COLORS,
+  SUBTITLE_FONT_FAMILIES,
+  SUBTITLE_EDGE_STYLES,
   SUBTITLE_OFF,
   type Release,
   type PreparedLiveStream,
   type SubtitleOption,
+  type SubtitleFontFamily,
+  type SubtitleEdgeStyle,
 } from "@shared/types";
 import { api, unwrap } from "../lib/api";
+import { nativePlayer } from "../lib/capacitorApi";
 import { formatTime, qualityLabel } from "../lib/format";
+import { registerStreamSignature } from "../lib/streamSigner";
 import { useApp } from "../store";
+
+interface VttCue {
+  start: number;
+  end: number;
+  text: string;
+}
+
+function parseVttTime(timeStr: string): number {
+  const parts = timeStr.trim().replace(",", ".").split(":");
+  if (parts.length === 3) {
+    return parseFloat(parts[0]) * 3600 + parseFloat(parts[1]) * 60 + parseFloat(parts[2]);
+  } else if (parts.length === 2) {
+    return parseFloat(parts[0]) * 60 + parseFloat(parts[1]);
+  }
+  return parseFloat(timeStr) || 0;
+}
+
+function parseVttCues(vttText: string): VttCue[] {
+  if (!vttText) return [];
+  const cues: VttCue[] = [];
+  const blocks = vttText.replace(/^WEBVTT[^\n]*\n/i, "").split(/\n\s*\n/);
+  for (const block of blocks) {
+    const lines = block.trim().split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      const match = lines[i].match(/^([\d:.ms,]+)\s*-->\s*([\d:.ms,]+)/);
+      if (match) {
+        const start = parseVttTime(match[1]);
+        const end = parseVttTime(match[2]);
+        const text = lines.slice(i + 1).join("\n").replace(/<[^>]+>/g, "").trim();
+        if (text && end > start) {
+          cues.push({ start, end, text });
+        }
+        break;
+      }
+    }
+  }
+  return cues;
+}
+
+function decodeBase64Utf8(dataUrl: string): string {
+  try {
+    const base64 = dataUrl.includes(",") ? dataUrl.split(",")[1] : dataUrl;
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    return new TextDecoder("utf-8").decode(bytes);
+  } catch {
+    return "";
+  }
+}
 
 const IDLE_MS = 2600;
 const SEEK_STEP = 10;
 const PROGRESS_SAVE_MS = 5000;
 
-type MenuTab = "quality" | "subtitles" | "subtitle-style" | "speed" | null;
+type MenuTab = "quality" | "audio" | "subtitles" | "subtitle-style" | null;
+type VideoFit = "contain" | "cover" | "fill";
 
 /**
  * Full HEVC codec strings to try, widest first. Chromium answers `isTypeSupported` on the
@@ -65,10 +129,16 @@ async function repairDashManifest(manifestUrl: string): Promise<string | null> {
   // Bounded: this probe sits in front of playback, so a manifest request that stalls must
   // not leave the player waiting with no picture and no error. On timeout the original
   // URL is used and dash.js reports anything genuinely wrong.
-  const response = await fetch(manifestUrl, { signal: AbortSignal.timeout(6000) });
-  if (!response.ok) return null;
-
-  const xml = await response.text();
+  let xml = "";
+  if (Capacitor.isNativePlatform()) {
+    const response = await CapacitorHttp.get({ url: manifestUrl, readTimeout: 6000, connectTimeout: 6000 });
+    if (response.status < 200 || response.status >= 300) return null;
+    xml = typeof response.data === "string" ? response.data : String(response.data ?? "");
+  } else {
+    const response = await fetch(manifestUrl, { signal: AbortSignal.timeout(6000) });
+    if (!response.ok) return null;
+    xml = await response.text();
+  }
   const match = xml.match(incomplete);
   if (!match) return null;
 
@@ -80,11 +150,28 @@ async function repairDashManifest(manifestUrl: string): Promise<string | null> {
 
   let patched = xml.replace(new RegExp(`codecs="${family}"`, "g"), `codecs="${codec}"`);
 
-  // Relative segment paths would otherwise resolve against the blob URL.
+  // Relative segment paths would otherwise resolve against the blob URL or local proxy.
   if (!/<BaseURL>/i.test(patched)) {
     const url = new URL(manifestUrl);
     const directory = `${url.origin}${url.pathname.replace(/[^/]+$/, "")}`;
     patched = patched.replace(/(<MPD\b[^>]*>)/i, `$1<BaseURL>${directory}</BaseURL>`);
+  }
+
+  // Ensure segment templates inherit the CloudFront signature parameters
+  const parsed = new URL(manifestUrl);
+  const query = parsed.search.slice(1).replace(/&/g, "&amp;");
+  if (query) {
+    patched = patched.replace(
+      /\b(initialization|sourceURL|media|url)="([^"]+)"/gi,
+      (_match, name: string, value: string) =>
+        `${name}="${value}${value.includes("?") ? "&amp;" : "?"}${query}"`,
+    );
+  }
+
+  // On Capacitor Android, we are on http://localhost or https://localhost, NOT file://.
+  // We use a Data URL because CapacitorHttp (which we need for CORS) intercepts and breaks Blob URLs.
+  if (typeof window !== "undefined" && (window as any).Capacitor?.isNativePlatform?.()) {
+    return `data:application/dash+xml;charset=utf-8,${encodeURIComponent(patched)}`;
   }
 
   return unwrap(api.media.stageManifest(patched));
@@ -102,13 +189,17 @@ export function Player() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const hlsRetryTimer = useRef<number | undefined>(undefined);
   const dashRef = useRef<MediaPlayerClass | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const idleTimer = useRef<number | undefined>(undefined);
   const lastSaved = useRef(0);
   const draggingScrub = useRef(false);
   const previewRequest = useRef(0);
+  const mediaPositionUpdated = useRef(0);
   const previewCache = useRef(new Map<string, string | null>());
+  const androidFallbackTried = useRef(false);
+  const nativeLaunch = useRef("");
 
   const [sourceUrl, setSourceUrl] = useState("");
   const [selectedSourceUrl, setSelectedSourceUrl] = useState("");
@@ -123,13 +214,83 @@ export function Player() {
   const [rate, setRate] = useState(1);
   const [idle, setIdle] = useState(false);
   const [menu, setMenu] = useState<MenuTab>(null);
-  /** One object rather than three strings, so label, srcLang and payload cannot drift. */
-  const [subtitle, setSubtitle] = useState<{ name: string; lang: string; dataUrl: string } | null>(
-    null,
-  );
+  const [subtitle, setSubtitle] = useState<{
+    name: string;
+    lang: string;
+    dataUrl: string;
+    vttText?: string;
+  } | null>(null);
+  const subPosition = config.subtitlePosition === "top" ? 28 : config.subtitlePosition === "middle" ? 54 : 86;
+  const [videoFit, setVideoFit] = useState<VideoFit>("contain");
+  const [sleepMinutes, setSleepMinutes] = useState(0);
+  const [audioTracks, setAudioTracks] = useState<Array<{ id: string; label: string; language: string }>>([]);
+  const [selectedAudioId, setSelectedAudioId] = useState("auto");
+
+  const cues = useMemo(() => {
+    if (!subtitle?.vttText) return [];
+    return parseVttCues(subtitle.vttText);
+  }, [subtitle?.vttText]);
+
+  const activeCueText = useMemo(() => {
+    if (cues.length === 0) return null;
+    const match = cues.find((cue) => current >= cue.start && current <= cue.end);
+    return match ? match.text : null;
+  }, [cues, current]);
+
+  const [trackCueText, setTrackCueText] = useState<string | null>(null);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !subtitle) {
+      setTrackCueText(null);
+      return;
+    }
+
+    const onCueChange = () => {
+      let activeText: string | null = null;
+      for (let i = 0; i < video.textTracks.length; i++) {
+        const track = video.textTracks[i];
+        if (track.activeCues && track.activeCues.length > 0) {
+          activeText = Array.from(track.activeCues)
+            .map((c: any) => c.text)
+            .join("\n")
+            .replace(/<[^>]+>/g, "")
+            .trim();
+          break;
+        }
+      }
+      setTrackCueText(activeText);
+    };
+
+    const listening = new Set<TextTrack>();
+    const attach = (track: TextTrack) => {
+      if (listening.has(track)) return;
+      track.addEventListener("cuechange", onCueChange);
+      listening.add(track);
+    };
+    const attachAll = () => {
+      for (let index = 0; index < video.textTracks.length; index++) attach(video.textTracks[index]);
+      onCueChange();
+    };
+    const onTrackAdded = (event: TrackEvent) => {
+      if (event.track instanceof TextTrack) attach(event.track);
+    };
+    attachAll();
+    video.textTracks.addEventListener("addtrack", onTrackAdded);
+    video.addEventListener("loadedmetadata", attachAll);
+    return () => {
+      video.textTracks.removeEventListener("addtrack", onTrackAdded);
+      video.removeEventListener("loadedmetadata", attachAll);
+      listening.forEach((track) => track.removeEventListener("cuechange", onCueChange));
+    };
+  }, [subtitle, sourceUrl]);
+
+  const displayCueText = trackCueText || activeCueText;
   const [fullscreen, setFullscreen] = useState(false);
   const [hint, setHint] = useState<{ id: number; icon: "play" | "pause" } | null>(null);
   const [waiting, setWaiting] = useState(false);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
   const [prepared, setPrepared] = useState<PreparedLiveStream | null>(null);
   const [playbackOffset, setPlaybackOffset] = useState(0);
   const [startPosition, setStartPosition] = useState<number | null>(0);
@@ -142,25 +303,23 @@ export function Player() {
     : null;
 
   const releases = useMemo(() => request?.releases ?? [], [request]);
+  const isNativeAndroidPlayer = Capacitor.getPlatform() === "android" && Boolean(request);
 
   /**
    * `::cue` cannot be styled inline and does not read CSS custom properties in Chromium,
    * so the rule is generated with literal values whenever the settings change.
    */
   const cueCss = useMemo(() => {
-    const background =
-      config.subtitleBackground === "box" ? "rgba(0, 0, 0, 0.72)" : "transparent";
-    const shadow =
-      config.subtitleBackground === "box"
-        ? "none"
-        : "0 0 4px rgba(0,0,0,0.95), 0 2px 6px rgba(0,0,0,0.9), 0 0 1px rgba(0,0,0,1)";
     return `.player-root video::cue {
-      font-size: ${config.subtitleSize}%;
-      color: ${config.subtitleColor};
-      background-color: ${background};
-      text-shadow: ${shadow};
+      display: none !important;
+      visibility: hidden !important;
+      opacity: 0 !important;
+      font-size: 0 !important;
+      color: transparent !important;
+      background: transparent !important;
+      text-shadow: none !important;
     }`;
-  }, [config.subtitleSize, config.subtitleColor, config.subtitleBackground]);
+  }, []);
   const subtitles = useMemo(() => request?.subtitles ?? [], [request]);
 
   // Reset the player before resolving a source. A saved position is handled inside the
@@ -181,12 +340,15 @@ export function Player() {
           : saved,
     );
     setWaiting(false);
+    setPlaybackError(null);
     setActiveRelease(
       releases.find(
         (release) => release.url === request.url && (!request.resolution || release.resolution === request.resolution),
       ) ?? null,
     );
     setSubtitle(null);
+    setAudioTracks([]);
+    setSelectedAudioId("auto");
     setCurrent(saved > 30 && config.resumeBehavior !== "restart" ? saved : 0);
     setDuration(0);
     setScrubPreview(null);
@@ -194,9 +356,82 @@ export function Player() {
     setPreviewImage(null);
     previewCache.current.clear();
     lastSaved.current = 0;
+    androidFallbackTried.current = false;
     // Request identity is intentionally the media URL; metadata updates must not restart it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.url]);
+
+  // Media3 handles HEVC VOD and IPTV manifests that need Referer/User-Agent headers.
+  // WebView cannot reliably do either. The native activity also owns quality changes,
+  // subtitles and resume, returning the final VOD position when it closes.
+  useEffect(() => {
+    if (!request || !isNativeAndroidPlayer || nativeLaunch.current === request.url) return;
+    nativeLaunch.current = request.url;
+    let cancelled = false;
+    const savedPosition = config.resumeBehavior === "restart" ? 0 : Math.max(0, request.startAt ?? 0);
+
+    void nativePlayer.open({
+      url: request.url,
+      title: request.subtitleLine ? `${request.title} · ${request.subtitleLine}` : request.title,
+      positionMs: Math.round(savedPosition * 1000),
+      subtitlesJson: JSON.stringify(
+        (request.subtitles ?? []).map(({ name, lang, url }) => ({ name, lang, url })),
+      ),
+      releasesJson: JSON.stringify(
+        (request.releases ?? []).map(({ url, resolution, kind, format, headers }) => ({
+          url,
+          resolution,
+          kind: kind ?? "mp4",
+          format,
+          headers,
+        })),
+      ),
+      headersJson: JSON.stringify(request.headers ?? {}),
+      preferredAudioLanguage: config.preferredAudio ?? "",
+      preferredSubtitleLanguage: request.initialSubtitle ?? config.preferredSubtitle ?? "",
+      live: request.live,
+    }).then((result) => {
+      if (cancelled) return;
+      const position = Math.max(0, result.positionMs / 1000);
+      const total = Math.max(0, result.durationMs / 1000);
+      if (request.subjectId && total > 0) {
+        void saveProgress({
+          provider: "moviebox",
+          subjectId: request.subjectId,
+          title: request.title,
+          posterUrl: request.posterUrl,
+          mediaType: request.mediaType ?? "movie",
+          year: request.year ?? "",
+          season: request.season ?? 0,
+          episode: request.episode ?? 0,
+          position: result.ended ? total : position,
+          duration: total,
+          timestamp: Date.now(),
+        });
+      }
+      if (result.error) {
+        notify({
+          kind: "error",
+          title: "Android playback stopped",
+          body: result.error,
+        });
+      }
+      closePlayer();
+    }).catch((error) => {
+      if (cancelled) return;
+      nativeLaunch.current = "";
+      notify({
+        kind: "error",
+        title: "Could not open Android player",
+        body: error instanceof Error ? error.message : String(error),
+      });
+      closePlayer();
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [request, isNativeAndroidPlayer, config.resumeBehavior, config.preferredAudio, config.preferredSubtitle, saveProgress, notify, closePlayer]);
 
   // Netflix-style hover frames are generated lazily and bucketed every five seconds.
   // The debounce prevents pointer movement from starting an FFmpeg process per pixel.
@@ -215,6 +450,12 @@ export function Player() {
     }
 
     setPreviewImage(null);
+    
+    if (typeof window !== "undefined" && (window as any).Capacitor?.isNativePlatform?.()) {
+      setPreviewLoading(false);
+      return;
+    }
+
     const sequence = ++previewRequest.current;
     const timer = window.setTimeout(() => {
       setPreviewLoading(true);
@@ -245,7 +486,7 @@ export function Player() {
   // Probe the selected source. Unsupported x265/MPEG-2 streams become a private H.264
   // compatibility stream; its start offset makes that stream seekable from the UI.
   useEffect(() => {
-    if (!request || !selectedSourceUrl || startPosition === null) return;
+    if (!request || isNativeAndroidPlayer || !selectedSourceUrl || startPosition === null) return;
     let cancelled = false;
     setWaiting(true);
     unwrap(api.media.prepareLive(selectedSourceUrl, startPosition, selectedResolution))
@@ -281,7 +522,7 @@ export function Player() {
     return () => {
       cancelled = true;
     };
-  }, [request, selectedSourceUrl, selectedResolution, startPosition, notify]);
+  }, [request, isNativeAndroidPlayer, selectedSourceUrl, selectedResolution, startPosition, notify, retryNonce]);
 
   /**
    * Turns on the requested subtitle once a new source is up. Declared after the reset
@@ -306,7 +547,15 @@ export function Player() {
     unwrap(api.subtitle.load(match.url))
       .then((dataUrl) => {
         if (cancelled) return;
-        setSubtitle({ name: match.name, lang: match.lang, dataUrl });
+        let vttText = "";
+        try {
+          if (dataUrl.startsWith("data:text/vtt;charset=utf-8;base64,")) {
+            vttText = decodeURIComponent(escape(atob(dataUrl.split(",")[1])));
+          }
+        } catch {
+          /* ignore */
+        }
+        setSubtitle({ name: match.name, lang: match.lang, dataUrl, vttText });
       })
       .catch(() => {
         // A missing caption file is not worth interrupting playback for.
@@ -325,10 +574,11 @@ export function Player() {
    */
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !sourceUrl) return;
+    if (!video || isNativeAndroidPlayer || !sourceUrl) return;
 
     hlsRef.current?.destroy();
     hlsRef.current = null;
+    window.clearTimeout(hlsRetryTimer.current);
     dashRef.current?.destroy();
     dashRef.current = null;
 
@@ -337,14 +587,60 @@ export function Player() {
     const isHls = /\.m3u8(\?|$)/i.test(sourceUrl);
     const isDash = /\.mpd(\?|$)/i.test(sourceUrl);
 
-    if (isHls && Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+    if (isHls && Capacitor.isNativePlatform()) {
+      // Android's media stack can fetch HLS without WebView XHR/CORS restrictions.
+      // Feeding the same URL to hls.js causes manifestLoadError on many public CDNs.
+      video.src = sourceUrl;
+      video.play().catch(() => setPlaying(false));
+    } else if (isHls && Hls.isSupported()) {
+      let networkRetries = 0;
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: request?.live === true,
+        backBufferLength: request?.live ? 30 : 90,
+        maxBufferLength: request?.live ? 30 : 60,
+        manifestLoadingMaxRetry: 4,
+        manifestLoadingRetryDelay: 800,
+        manifestLoadingMaxRetryTimeout: 8000,
+        levelLoadingMaxRetry: 4,
+        fragLoadingMaxRetry: 5,
+      });
       hlsRef.current = hls;
       hls.attachMedia(video);
       hls.loadSource(sourceUrl);
+      const syncHlsAudio = () => {
+        const tracks = hls.audioTracks.map((track, index) => ({
+          id: `hls:${index}`,
+          label: track.name || track.lang || `Audio ${index + 1}`,
+          language: track.lang || "und",
+        }));
+        setAudioTracks(tracks);
+        setSelectedAudioId(hls.audioTrack >= 0 ? `hls:${hls.audioTrack}` : "auto");
+      };
+      hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, syncHlsAudio);
+      hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, syncHlsAudio);
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
-        notify({ kind: "error", title: "Stream error", body: data.details });
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRetries < 2) {
+          networkRetries += 1;
+          window.clearTimeout(hlsRetryTimer.current);
+          hlsRetryTimer.current = window.setTimeout(() => {
+            if (cancelled) return;
+            hls.loadSource(sourceUrl);
+            hls.startLoad();
+          }, networkRetries * 1200);
+          return;
+        }
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          hls.recoverMediaError();
+          return;
+        }
+        setWaiting(false);
+        setPlaybackError(
+          data.details === "manifestLoadError"
+            ? "This channel's playlist could not be reached. It may be offline, expired, or blocking this network."
+            : `The live stream stopped: ${data.details}.`,
+        );
       });
     } else if (isDash) {
       void startDash(video);
@@ -369,11 +665,43 @@ export function Player() {
 
       const player = MediaPlayer().create();
       dashRef.current = player;
+
+      try {
+        const parsed = new URL(sourceUrl);
+        const query = parsed.search.slice(1);
+        if (query && query.includes("Policy=")) {
+          registerStreamSignature(sourceUrl, query);
+          player.extend(
+            "RequestModifier",
+            function () {
+              return {
+                modifyRequestHeader: (xhr: any) => xhr,
+                modifyRequestURL: (url: string) => {
+                  if (!url || url.startsWith("data:") || url.includes("Policy=")) return url;
+                  const separator = url.includes("?") ? "&" : "?";
+                  return `${url}${separator}${query}`;
+                },
+              };
+            },
+            true,
+          );
+        }
+      } catch {
+        // Invalid URL ignore
+      }
+
       const requestedHeight = activeRelease?.kind === "dash" ? activeRelease.resolution : 0;
       player.updateSettings({
         streaming: {
-          abr: { autoSwitchBitrate: { video: requestedHeight === 0 } },
-          buffer: { fastSwitchEnabled: true },
+          // A selected quality is the preferred start, not a permanent bandwidth trap.
+          // Keeping ABR available lets desktop playback step down before it stalls.
+          abr: { autoSwitchBitrate: { video: true } },
+          buffer: {
+            fastSwitchEnabled: false,
+            bufferTimeDefault: 24,
+            bufferTimeAtTopQuality: 36,
+            bufferTimeAtTopQualityLongForm: 48,
+          },
         },
       });
       if (requestedHeight > 0) {
@@ -404,18 +732,40 @@ export function Player() {
           body: event?.error?.message ?? "The adaptive stream could not be played.",
         });
       });
+      player.on(MediaPlayer.events.STREAM_INITIALIZED, () => {
+        const tracks = (player.getTracksFor("audio") ?? []) as any[];
+        const currentTrack = player.getCurrentTrackFor("audio") as any;
+        setAudioTracks(tracks.map((track, index) => ({
+          id: `dash:${index}`,
+          label: track.labels?.[0]?.text || track.lang || `Audio ${index + 1}`,
+          language: track.lang || "und",
+        })));
+        const selectedIndex = tracks.findIndex((track) => track === currentTrack || track.id === currentTrack?.id);
+        setSelectedAudioId(selectedIndex >= 0 ? `dash:${selectedIndex}` : "auto");
+      });
       player.initialize(media, manifestUrl, true);
       media.play().catch(() => setPlaying(false));
     }
 
     return () => {
       cancelled = true;
+      window.clearTimeout(hlsRetryTimer.current);
       hlsRef.current?.destroy();
       hlsRef.current = null;
       dashRef.current?.destroy();
       dashRef.current = null;
     };
-  }, [sourceUrl, notify, activeRelease?.kind, activeRelease?.resolution]);
+  }, [sourceUrl, request?.live, isNativeAndroidPlayer, notify]);
+
+  useEffect(() => {
+    if (sleepMinutes <= 0 || !request) return;
+    const timer = window.setTimeout(() => {
+      videoRef.current?.pause();
+      setSleepMinutes(0);
+      notify({ kind: "info", title: "Sleep timer", body: "Playback paused." });
+    }, sleepMinutes * 60_000);
+    return () => window.clearTimeout(timer);
+  }, [sleepMinutes, request, notify]);
 
   const persistProgress = useCallback(
     (position: number, total: number, force = false) => {
@@ -459,15 +809,16 @@ export function Player() {
    * Rolls the player straight into the next episode of the same season when the
    * `autoplayNext` setting is on. Silent when there is no next episode or no source.
    */
-  const playNextEpisode = useCallback(async () => {
-    if (!request || request.live || !config.autoplayNext) return;
+  const playAdjacentEpisode = useCallback(async (step: -1 | 1, autoplay = false) => {
+    if (!request || request.live || (autoplay && !config.autoplayNext)) return;
     const { subjectId, season: currentSeason, episode: currentEpisode, episodeCount } = request;
     if (!subjectId || !currentSeason || !currentEpisode || !episodeCount) return;
-    if (currentEpisode >= episodeCount) return;
+    const targetEpisode = currentEpisode + step;
+    if (targetEpisode < 1 || targetEpisode > episodeCount) return;
 
-    const nextEpisode = currentEpisode + 1;
     try {
-      const nextReleases = await unwrap(api.catalog.releases(subjectId, currentSeason, nextEpisode));
+      setWaiting(true);
+      const nextReleases = await unwrap(api.catalog.releases(subjectId, currentSeason, targetEpisode));
       if (nextReleases.length === 0) return;
 
       const chosen =
@@ -479,11 +830,11 @@ export function Player() {
 
       openPlayer({
         ...request,
-        subtitleLine: `Season ${currentSeason} · Episode ${nextEpisode} · ${qualityLabel(chosen.resolution)}`,
+        subtitleLine: `Season ${currentSeason} · Episode ${targetEpisode} · ${qualityLabel(chosen.resolution)}`,
         url: chosen.url,
         resolution: chosen.resolution,
         resourceId: chosen.resourceId,
-        episode: nextEpisode,
+        episode: targetEpisode,
         startAt: 0,
         releases: nextReleases,
         subtitles: nextSubtitles,
@@ -491,11 +842,18 @@ export function Player() {
     } catch (error) {
       notify({
         kind: "error",
-        title: "Could not start the next episode",
+        title: `Could not start the ${step > 0 ? "next" : "previous"} episode`,
         body: error instanceof Error ? error.message : undefined,
       });
+    } finally {
+      setWaiting(false);
     }
   }, [request, config.autoplayNext, activeRelease?.resolution, openPlayer, notify]);
+
+  const playNextEpisode = useCallback(
+    () => playAdjacentEpisode(1, true),
+    [playAdjacentEpisode],
+  );
 
   const close = useCallback(() => {
     const video = videoRef.current;
@@ -522,6 +880,29 @@ export function Player() {
     void seekTo((prepared?.transcoded ? playbackOffset + video.currentTime : video.currentTime) + delta);
   }, [duration, playbackOffset, prepared?.transcoded, seekTo]);
 
+  const chooseAudioTrack = useCallback((id: string) => {
+    const [engine, indexText] = id.split(":");
+    const index = Number(indexText);
+    if (!Number.isInteger(index) || index < 0) return;
+    if (engine === "hls" && hlsRef.current) {
+      hlsRef.current.audioTrack = index;
+    } else if (engine === "dash" && dashRef.current) {
+      const track = dashRef.current.getTracksFor("audio")?.[index];
+      if (track) dashRef.current.setCurrentTrack(track);
+    } else {
+      const nativeAudioTracks = (videoRef.current as HTMLVideoElement & { audioTracks?: ArrayLike<{ enabled: boolean }> })?.audioTracks;
+      if (nativeAudioTracks) {
+        for (let trackIndex = 0; trackIndex < nativeAudioTracks.length; trackIndex++) {
+          nativeAudioTracks[trackIndex].enabled = trackIndex === index;
+        }
+      }
+    }
+    setSelectedAudioId(id);
+    setMenu(null);
+  }, []);
+
+  const [orientationMode, setOrientationMode] = useState<"landscape" | "portrait" | "auto">("auto");
+
   const toggleFullscreen = useCallback(async () => {
     if (document.fullscreenElement) {
       await document.exitFullscreen();
@@ -531,6 +912,35 @@ export function Player() {
       setFullscreen(Boolean(document.fullscreenElement));
     }
   }, []);
+
+  const toggleMobileOrientation = useCallback(async () => {
+    const screenObj = window.screen as any;
+    const isLandscape = orientationMode === "landscape";
+
+    try {
+      if (isLandscape) {
+        setOrientationMode("portrait");
+        if (screenObj?.orientation?.unlock) {
+          try { screenObj.orientation.unlock(); } catch {}
+        }
+        if (document.fullscreenElement) {
+          await document.exitFullscreen().catch(() => undefined);
+          setFullscreen(false);
+        }
+      } else {
+        setOrientationMode("landscape");
+        if (!document.fullscreenElement && surfaceRef.current?.parentElement) {
+          await surfaceRef.current.parentElement.requestFullscreen().catch(() => undefined);
+          setFullscreen(true);
+        }
+        if (screenObj?.orientation?.lock) {
+          await screenObj.orientation.lock("landscape").catch(() => undefined);
+        }
+      }
+    } catch {
+      void toggleFullscreen();
+    }
+  }, [orientationMode, toggleFullscreen]);
 
   const wake = useCallback(() => {
     setIdle(false);
@@ -544,6 +954,18 @@ export function Player() {
     return () => window.clearTimeout(idleTimer.current);
   }, [request, wake]);
 
+  useEffect(() => {
+    if (!request) return;
+    const onBack = (event: Event) => {
+      event.preventDefault();
+      if (menu) setMenu(null);
+      else close();
+      wake();
+    };
+    window.addEventListener("infinityplay:back", onBack);
+    return () => window.removeEventListener("infinityplay:back", onBack);
+  }, [request, menu, close, wake]);
+
   // Keyboard shortcuts follow the usual video-player conventions.
   useEffect(() => {
     if (!request) return;
@@ -555,6 +977,7 @@ export function Player() {
       switch (event.key) {
         case " ":
         case "k":
+        case "MediaPlayPause":
           event.preventDefault();
           togglePlay();
           break;
@@ -588,6 +1011,9 @@ export function Player() {
       wake();
     };
 
+    const isMobileTouch = window.matchMedia("(pointer: coarse)").matches && window.innerWidth <= 768;
+    if (isMobileTouch) return;
+
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [request, togglePlay, seekBy, toggleFullscreen, close, wake]);
@@ -604,6 +1030,57 @@ export function Player() {
     video.muted = muted;
     video.playbackRate = rate;
   }, [volume, muted, rate]);
+
+  // Expose playback to headset keys, lock-screen controls, and desktop media overlays.
+  useEffect(() => {
+    const mediaSession = navigator.mediaSession;
+    if (!request || !mediaSession) return;
+    mediaSession.metadata = new MediaMetadata({
+      title: request.title,
+      artist: request.subtitleLine || (request.live ? "Live TV" : "InfinityPlay"),
+      album: request.live ? "InfinityPlay Live" : "InfinityPlay",
+      artwork: request.posterUrl ? [{ src: request.posterUrl }] : [],
+    });
+    const actions: Array<[MediaSessionAction, MediaSessionActionHandler | null]> = [
+      ["play", () => void videoRef.current?.play()],
+      ["pause", () => videoRef.current?.pause()],
+      ["seekbackward", (details) => seekBy(-(details.seekOffset || SEEK_STEP))],
+      ["seekforward", (details) => seekBy(details.seekOffset || SEEK_STEP)],
+      ["seekto", (details) => details.seekTime !== undefined && void seekTo(details.seekTime)],
+      ["stop", close],
+    ];
+    for (const [action, handler] of actions) {
+      try { mediaSession.setActionHandler(action, handler); } catch { /* unsupported action */ }
+    }
+    return () => {
+      for (const [action] of actions) {
+        try { mediaSession.setActionHandler(action, null); } catch { /* unsupported action */ }
+      }
+      mediaSession.metadata = null;
+    };
+  }, [request, seekBy, seekTo, close]);
+
+  useEffect(() => {
+    if (!navigator.mediaSession) return;
+    navigator.mediaSession.playbackState = playing ? "playing" : "paused";
+  }, [playing]);
+
+  // Prevent dimming during playback without forcing the screen awake after pause/close.
+  useEffect(() => {
+    let lock: { release: () => Promise<void>; released: boolean } | null = null;
+    const acquire = async () => {
+      const wakeLock = (navigator as Navigator & { wakeLock?: { request: (type: "screen") => Promise<typeof lock> } }).wakeLock;
+      if (!playing || !wakeLock || document.visibilityState !== "visible") return;
+      try { lock = await wakeLock.request("screen"); } catch { /* OS may deny low-battery locks */ }
+    };
+    void acquire();
+    const onVisibility = () => { if (document.visibilityState === "visible") void acquire(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (lock && !lock.released) void lock.release();
+    };
+  }, [playing]);
 
   // Volume is a preference; persist it, but not on every drag frame.
   useEffect(() => {
@@ -645,6 +1122,23 @@ export function Player() {
       setBuffered(playbackOffset + video.buffered.end(video.buffered.length - 1));
     }
     persistProgress(playbackOffset + video.currentTime, duration || prepared?.duration || video.duration || 0);
+    const total = duration || prepared?.duration || video.duration || 0;
+    const position = playbackOffset + video.currentTime;
+    if (
+      !request.live && navigator.mediaSession?.setPositionState && total > 0 &&
+      Number.isFinite(total) && position >= 0 && Date.now() - mediaPositionUpdated.current >= 1000
+    ) {
+      mediaPositionUpdated.current = Date.now();
+      try {
+        navigator.mediaSession.setPositionState({
+          duration: total,
+          playbackRate: video.playbackRate,
+          position: Math.min(position, total),
+        });
+      } catch {
+        // Metadata can briefly lag behind a source change; the next time update retries.
+      }
+    }
   };
 
   const scrubPosition = (clientX: number, element: HTMLDivElement): number => {
@@ -716,17 +1210,36 @@ export function Player() {
     buttons[target]?.focus();
   };
 
+  const playerRemoteKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (document.documentElement.dataset.device !== "tv" || menu) return;
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+    const controls = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>(".player-chrome button:not(:disabled)"),
+    ).filter((button) => button.offsetWidth > 0 && button.offsetHeight > 0);
+    const index = controls.indexOf(document.activeElement as HTMLButtonElement);
+    if (index < 0) return;
+    const step = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
+    event.preventDefault();
+    event.stopPropagation();
+    controls[(index + step + controls.length) % controls.length]?.focus();
+  };
+
   const chooseRelease = async (release: Release) => {
-    const resumeAt = current;
+    const video = videoRef.current;
+    const resumeAt = prepared?.transcoded
+      ? playbackOffset + (video?.currentTime ?? 0)
+      : video?.currentTime ?? current;
+    if (duration > 0) persistProgress(resumeAt, duration, true);
     setActiveRelease(release);
     setSelectedResolution(release.resolution);
     setMenu(null);
     setWaiting(true);
+    setPlaybackError(null);
     if (release.kind === "dash" && release.url === selectedSourceUrl && dashRef.current) {
       const choices = dashRef.current.getRepresentationsByType("video");
       const exact = choices.find((choice) => choice.height === release.resolution);
-      dashRef.current.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } });
-      if (exact) dashRef.current.setRepresentationForTypeById("video", exact.id, true);
+      dashRef.current.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: true } } } });
+      if (exact) dashRef.current.setRepresentationForTypeById("video", exact.id, false);
       setWaiting(false);
       return;
     }
@@ -742,7 +1255,15 @@ export function Player() {
     }
     try {
       const dataUrl = await unwrap(api.subtitle.load(option.url));
-      setSubtitle({ name: option.name, lang: option.lang, dataUrl });
+      let vttText = "";
+      try {
+        if (dataUrl.startsWith("data:text/vtt;charset=utf-8;base64,")) {
+          vttText = decodeURIComponent(escape(atob(dataUrl.split(",")[1])));
+        }
+      } catch {
+        /* ignore */
+      }
+      setSubtitle({ name: option.name, lang: option.lang, dataUrl, vttText });
     } catch (error) {
       notify({
         kind: "error",
@@ -752,28 +1273,72 @@ export function Player() {
     }
   };
 
+  const handlePlaybackError = () => {
+    setWaiting(false);
+    const fallback = Capacitor.isNativePlatform() && !request.live && !androidFallbackTried.current
+      ? releases.find(
+          (release) =>
+            release.kind !== "dash" &&
+            (release.url !== activeRelease?.url || release.resolution !== activeRelease?.resolution),
+        )
+      : undefined;
+    if (fallback) {
+      androidFallbackTried.current = true;
+      notify({
+        kind: "info",
+        title: "Trying an Android-compatible source",
+        body: `${qualityLabel(fallback.resolution)} progressive playback`,
+      });
+      void chooseRelease(fallback);
+      return;
+    }
+    setPlaybackError("The source rejected the request or this device cannot decode it.");
+  };
+
   const displayedCurrent = scrubPreview ?? current;
   const playedRatio = duration > 0 ? displayedCurrent / duration : 0;
   const bufferedRatio = duration > 0 ? buffered / duration : 0;
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
+  const alternateRelease = releases.find(
+    (release) => release.url !== activeRelease?.url || release.resolution !== activeRelease?.resolution,
+  );
+  const isTouchInput = document.documentElement.dataset.input === "touch";
+  const isTv = document.documentElement.dataset.device === "tv";
+  const isPhone = document.documentElement.dataset.device === "phone";
+  const pipAvailable = !isTv && Boolean(document.pictureInPictureEnabled && videoRef.current?.requestPictureInPicture);
+  const subtitleScale = (config.subtitleSize ?? 100) / 100;
 
   return (
-    <div className="player-root">
+    <div className="player-root" data-device={document.documentElement.dataset.device} onKeyDownCapture={playerRemoteKeyDown}>
       <style>{cueCss}</style>
       <div
         className="player-surface"
         ref={surfaceRef}
         data-idle={idle && playing}
-        onMouseMove={wake}
+        onPointerMove={wake}
+        onPointerDown={wake}
+        onFocusCapture={wake}
         onClick={(event) => {
           if (event.target === event.currentTarget || (event.target as HTMLElement).tagName === "VIDEO") {
-            togglePlay();
+            if (isTouchInput) wake();
+            else togglePlay();
           }
         }}
-        onDoubleClick={() => void toggleFullscreen()}
+        onDoubleClick={(event) => {
+          if (!isTouchInput) {
+            void toggleFullscreen();
+            return;
+          }
+          const rect = event.currentTarget.getBoundingClientRect();
+          const ratio = (event.clientX - rect.left) / rect.width;
+          if (ratio < 0.4) seekBy(-SEEK_STEP);
+          else if (ratio > 0.6) seekBy(SEEK_STEP);
+          else togglePlay();
+        }}
       >
         <video
           ref={videoRef}
+          style={{ objectFit: videoFit }}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
           onLoadedMetadata={onLoadedMetadata}
@@ -785,13 +1350,7 @@ export function Player() {
             setPlaying(false);
             void playNextEpisode();
           }}
-          onError={() =>
-            notify({
-              kind: "error",
-              title: "Playback failed",
-              body: "The source rejected the request or the codec is unsupported.",
-            })
-          }
+          onError={handlePlaybackError}
           playsInline
         >
           {subtitle && (
@@ -805,6 +1364,67 @@ export function Player() {
             />
           )}
         </video>
+
+        {/* A fixed overlay avoids pointer movement changing a chosen subtitle position. */}
+        {displayCueText && (
+          <div
+            style={{
+              position: "absolute",
+              left: "50%",
+              top: `${subPosition}%`,
+              transform: "translate(-50%, -50%)",
+              zIndex: 35,
+              userSelect: "none",
+              pointerEvents: "none",
+            }}
+            aria-live="off"
+          >
+            <div
+              style={{
+                fontSize: `clamp(${Math.round(16 * subtitleScale)}px, ${2.25 * subtitleScale}vmin, ${Math.round(40 * subtitleScale)}px)`,
+                color: config.subtitleColor ?? "#ffffff",
+                backgroundColor:
+                  config.subtitleBackground === "box"
+                    ? "rgba(0, 0, 0, 0.85)"
+                    : config.subtitleBackground === "window"
+                      ? "rgba(16, 18, 25, 0.95)"
+                      : config.subtitleBackground === "semi-transparent"
+                        ? "rgba(0, 0, 0, 0.45)"
+                        : "transparent",
+                padding: config.subtitleBackground !== "none" ? "4px 14px" : "0",
+                borderRadius: 6,
+                textAlign: "center",
+                fontFamily:
+                  config.subtitleFontFamily === "serif"
+                    ? "Georgia, serif"
+                    : config.subtitleFontFamily === "monospace"
+                      ? "'Courier New', monospace"
+                      : config.subtitleFontFamily === "casual"
+                        ? "'Comic Sans MS', sans-serif"
+                        : config.subtitleFontFamily === "cursive"
+                          ? "'Brush Script MT', cursive"
+                          : "sans-serif",
+                fontVariant: config.subtitleFontFamily === "small-caps" ? "small-caps" : "normal",
+                textShadow:
+                  config.subtitleEdgeStyle === "outline"
+                    ? "-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000"
+                    : config.subtitleEdgeStyle === "raised"
+                      ? "1px 1px 2px #000"
+                      : config.subtitleEdgeStyle === "depressed"
+                        ? "-1px -1px 2px #000"
+                        : config.subtitleEdgeStyle === "none"
+                          ? "none"
+                          : "0 2px 4px rgba(0,0,0,0.95)",
+                whiteSpace: "pre-wrap",
+                lineHeight: 1.35,
+                maxWidth: isTv ? "78vw" : "88vw",
+                border: "1px solid transparent",
+              }}
+            >
+              {displayCueText}
+            </div>
+          </div>
+        )}
 
         {startPosition === null && !request.live && (
           <div className="resume-prompt" role="dialog" aria-modal="true" aria-label="Resume playback">
@@ -827,6 +1447,26 @@ export function Player() {
         {waiting && (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
             <div className="spinner" />
+          </div>
+        )}
+
+        {playbackError && (
+          <div className="player-error" role="alert">
+            <div className="player-error-card">
+              <h3>Playback stopped</h3>
+              <p>{playbackError}</p>
+              <div className="resume-actions">
+                <button className="btn btn-primary" onClick={() => { setPlaybackError(null); setSourceUrl(""); setRetryNonce((value) => value + 1); }}>
+                  <RotateCw size={16} /> Retry
+                </button>
+                {alternateRelease && (
+                  <button className="btn" onClick={() => { setPlaybackError(null); void chooseRelease(alternateRelease); }}>
+                    Try {qualityLabel(alternateRelease.resolution)}
+                  </button>
+                )}
+                <button className="btn" onClick={close}>Close</button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -887,7 +1527,7 @@ export function Player() {
             )}
 
             <div className="player-controls">
-              <button className="icon-button" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"} title={playing ? "Pause (K)" : "Play (K)"}>
+              <button className="icon-button player-primary" data-focus-initial onClick={togglePlay} aria-label={playing ? "Pause" : "Play"} title={playing ? "Pause (K)" : "Play (K)"}>
                 {playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
               </button>
 
@@ -924,7 +1564,29 @@ export function Player() {
                 {request.live ? "LIVE" : `${formatTime(displayedCurrent)} / ${formatTime(duration)}`}
               </span>
 
-              <div style={{ marginLeft: "auto", display: "flex", gap: 4 }}>
+              <div className="player-secondary-controls">
+                {request.mediaType === "series" && (request.episode ?? 0) > 1 && (
+                  <button
+                    className="icon-button player-episode-control"
+                    onClick={() => void playAdjacentEpisode(-1)}
+                    aria-label="Previous Episode"
+                    title="Previous Episode"
+                  >
+                    <SkipBack size={19} />
+                  </button>
+                )}
+
+                {request.mediaType === "series" && (
+                  <button
+                    className="icon-button player-episode-control"
+                    onClick={() => void playAdjacentEpisode(1)}
+                    aria-label="Next Episode"
+                    title="Next Episode"
+                  >
+                    <SkipForward size={19} />
+                  </button>
+                )}
+
                 {(
                   <button
                     className="icon-button"
@@ -936,6 +1598,16 @@ export function Player() {
                     <Captions size={19} />
                   </button>
                 )}
+                {audioTracks.length > 1 && (
+                  <button
+                    className="icon-button"
+                    onClick={() => setMenu((value) => (value === "audio" ? null : "audio"))}
+                    aria-label="Audio language"
+                    title="Audio language"
+                  >
+                    <Languages size={19} />
+                  </button>
+                )}
                 <button
                   className="icon-button"
                   onClick={() => setMenu((value) => (value === "quality" ? null : "quality"))}
@@ -944,7 +1616,35 @@ export function Player() {
                 >
                   <Settings2 size={19} />
                 </button>
-                <button className="icon-button" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"} title={fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}>
+
+                {pipAvailable && <button
+                  className="icon-button"
+                  onClick={() => {
+                    const video = videoRef.current;
+                    if (!video) return;
+                    if (document.pictureInPictureElement) {
+                      void document.exitPictureInPicture();
+                    } else if (document.pictureInPictureEnabled) {
+                      void video.requestPictureInPicture();
+                    }
+                  }}
+                  aria-label="Picture in Picture"
+                  title="Picture in Picture (PiP)"
+                >
+                  <PictureInPicture size={19} />
+                </button>}
+
+                <button
+                  className="icon-button mobile-only-inline player-orientation"
+                  onClick={() => void toggleMobileOrientation()}
+                  aria-label="Switch orientation / Laptop view"
+                  title="Switch to Horizontal View"
+                  style={{ color: orientationMode === "landscape" ? "var(--accent)" : undefined }}
+                >
+                  <RotateCw size={19} />
+                </button>
+
+                <button className="icon-button player-fullscreen" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"} title={fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}>
                   {fullscreen ? <Minimize size={19} /> : <Maximize size={19} />}
                 </button>
               </div>
@@ -977,10 +1677,43 @@ export function Player() {
               )}
 
               <div className="player-menu-label">Speed</div>
-              {[0.75, 1, 1.25, 1.5, 2].map((value) => (
-                <button key={value} data-active={rate === value} onClick={() => setRate(value)}>
+              {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((value) => (
+                <button key={value} data-active={rate === value} onClick={() => { setRate(value); setMenu(null); }}>
                   {rate === value ? <Check size={14} /> : <span style={{ width: 14 }} />}
                   {value}×
+                </button>
+              ))}
+
+              <div className="player-menu-label">Picture</div>
+              {(["contain", "cover", "fill"] as VideoFit[]).map((value) => (
+                <button key={value} data-active={videoFit === value} onClick={() => { setVideoFit(value); setMenu(null); }}>
+                  {videoFit === value ? <Check size={14} /> : <span style={{ width: 14 }} />}
+                  {value === "contain" ? "Fit screen" : value === "cover" ? "Fill and crop" : "Stretch"}
+                </button>
+              ))}
+
+              {!request.live && (
+                <>
+                  <div className="player-menu-label">Sleep timer</div>
+                  {[0, 15, 30, 60].map((value) => (
+                    <button key={value} data-active={sleepMinutes === value} onClick={() => { setSleepMinutes(value); setMenu(null); }}>
+                      {sleepMinutes === value ? <Check size={14} /> : <span style={{ width: 14 }} />}
+                      {value === 0 ? "Off" : `${value} minutes`}
+                    </button>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+
+          {menu === "audio" && (
+            <div ref={menuRef} className="player-menu" role="dialog" aria-label="Audio language" onKeyDown={menuKeyDown}>
+              <div className="player-menu-label">Audio language</div>
+              {audioTracks.map((track) => (
+                <button key={track.id} data-active={selectedAudioId === track.id} onClick={() => chooseAudioTrack(track.id)}>
+                  {selectedAudioId === track.id ? <Check size={14} /> : <span style={{ width: 14 }} />}
+                  <span>{track.label}</span>
+                  <span className="player-track-language">{track.language === "und" ? "" : track.language.toUpperCase()}</span>
                 </button>
               ))}
             </div>
@@ -996,17 +1729,40 @@ export function Player() {
               <div
                 className="cue-preview"
                 style={{
-                  fontSize: `${Math.round(15 * (config.subtitleSize / 100))}px`,
-                  color: config.subtitleColor,
+                  fontSize: `${Math.round(15 * ((config.subtitleSize ?? 100) / 100))}px`,
+                  color: config.subtitleColor ?? "#ffffff",
                   background:
-                    config.subtitleBackground === "box" ? "rgba(0,0,0,0.72)" : "transparent",
-                  textShadow:
                     config.subtitleBackground === "box"
-                      ? "none"
-                      : "0 0 4px rgba(0,0,0,0.95), 0 2px 6px rgba(0,0,0,0.9)",
+                      ? "rgba(0,0,0,0.85)"
+                      : config.subtitleBackground === "window"
+                        ? "rgba(16,18,25,0.95)"
+                        : config.subtitleBackground === "semi-transparent"
+                          ? "rgba(0,0,0,0.45)"
+                          : "transparent",
+                  fontFamily:
+                    config.subtitleFontFamily === "serif"
+                      ? "Georgia, serif"
+                      : config.subtitleFontFamily === "monospace"
+                        ? "'Courier New', monospace"
+                        : config.subtitleFontFamily === "casual"
+                          ? "'Comic Sans MS', sans-serif"
+                          : config.subtitleFontFamily === "cursive"
+                            ? "'Brush Script MT', cursive"
+                            : "sans-serif",
+                  fontVariant: config.subtitleFontFamily === "small-caps" ? "small-caps" : "normal",
+                  textShadow:
+                    config.subtitleEdgeStyle === "outline"
+                      ? "-1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 1px 1px 0 #000"
+                      : config.subtitleEdgeStyle === "raised"
+                        ? "1px 1px 2px #000"
+                        : config.subtitleEdgeStyle === "depressed"
+                          ? "-1px -1px 2px #000"
+                          : config.subtitleEdgeStyle === "none"
+                            ? "none"
+                            : "0 2px 4px rgba(0,0,0,0.95)",
                 }}
               >
-                The quick brown fox
+                Sample Subtitle Text
               </div>
 
               <div className="cue-control">
@@ -1033,6 +1789,24 @@ export function Player() {
               </div>
 
               <div className="cue-control">
+                <span>Font style</span>
+                <select
+                  className="input"
+                  style={{ width: 140, padding: "3px 8px", fontSize: 12 }}
+                  value={config.subtitleFontFamily ?? "sans-serif"}
+                  onChange={(event) =>
+                    void patchConfig({ subtitleFontFamily: event.target.value as SubtitleFontFamily })
+                  }
+                >
+                  {SUBTITLE_FONT_FAMILIES.map((font) => (
+                    <option key={font.value} value={font.value}>
+                      {font.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="cue-control">
                 <span>Colour</span>
                 <div className="cue-swatches">
                   {SUBTITLE_COLORS.map((option) => (
@@ -1052,13 +1826,46 @@ export function Player() {
               <div className="cue-control">
                 <span>Background</span>
                 <div className="cue-segments">
-                  {(["box", "shadow", "none"] as const).map((option) => (
+                  {(["box", "window", "semi-transparent", "none"] as const).map((option) => (
                     <button
                       key={option}
                       data-active={config.subtitleBackground === option}
                       onClick={() => void patchConfig({ subtitleBackground: option })}
                     >
-                      {option === "box" ? "Box" : option === "shadow" ? "Outline" : "None"}
+                      {option === "box" ? "Solid" : option === "window" ? "Window" : option === "semi-transparent" ? "Translucent" : "None"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="cue-control">
+                <span>Edge style</span>
+                <select
+                  className="input"
+                  style={{ width: 140, padding: "3px 8px", fontSize: 12 }}
+                  value={config.subtitleEdgeStyle ?? "drop-shadow"}
+                  onChange={(event) =>
+                    void patchConfig({ subtitleEdgeStyle: event.target.value as SubtitleEdgeStyle })
+                  }
+                >
+                  {SUBTITLE_EDGE_STYLES.map((edge) => (
+                    <option key={edge.value} value={edge.value}>
+                      {edge.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="cue-control">
+                <span>Position</span>
+                <div className="cue-segments">
+                  {(["top", "middle", "bottom"] as const).map((position) => (
+                    <button
+                      key={position}
+                      data-active={config.subtitlePosition === position}
+                      onClick={() => void patchConfig({ subtitlePosition: position })}
+                    >
+                      {position[0].toUpperCase() + position.slice(1)}
                     </button>
                   ))}
                 </div>
@@ -1066,15 +1873,18 @@ export function Player() {
 
               <button
                 className="player-menu-reset"
-                onClick={() =>
+                onClick={() => {
                   void patchConfig({
                     subtitleSize: 100,
                     subtitleColor: "#ffffff",
                     subtitleBackground: "box",
-                  })
-                }
+                    subtitleFontFamily: "sans-serif",
+                    subtitleEdgeStyle: "drop-shadow",
+                    subtitlePosition: "bottom",
+                  });
+                }}
               >
-                Reset to defaults
+                Reset default appearance
               </button>
             </div>
           )}

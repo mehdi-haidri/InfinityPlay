@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Download, ExternalLink, Mail, RefreshCw, RotateCw } from "lucide-react";
-import { AUTHOR, type AppInfo, type UpdateStatus } from "@shared/types";
+import { AUTHORS, type AppInfo, type UpdateStatus } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { formatBytes } from "../lib/format";
 import { Spinner } from "../components/States";
@@ -60,6 +60,9 @@ function packageHelp(info: AppInfo | null): string {
   if (info.packageType.includes("DEB") || info.packageType.includes("RPM") || info.packageType === "pacman") {
     return "For system packages, download the matching installer from GitHub Releases and install it with your package manager.";
   }
+  if (info.packageType.includes("Android")) {
+    return "For Android and Android TV, download the latest APK from GitHub Releases to update.";
+  }
   return "Updates are downloaded from GitHub Releases and installed after restart.";
 }
 
@@ -100,6 +103,7 @@ export function AboutPage() {
 
   const open = (url: string) => void api.system.openExternal(url);
   const line = statusLine(status);
+  const isAndroid = info?.runtime === "android";
 
   return (
     <div className="page page-narrow">
@@ -109,28 +113,30 @@ export function AboutPage() {
         description="Version, release help, and project credits."
       />
 
-      <section className="panel about-hero">
-        <img
-          className="about-avatar"
-          src={`${AUTHOR.github}.png?size=200`}
-          alt={`Portrait of ${AUTHOR.name}`}
-          referrerPolicy="no-referrer"
-        />
-        <div className="min-width-zero">
-          <div className="about-name">{AUTHOR.name}</div>
-          <div className="setting-hint about-role">
-            Developer of InfinityPlay
+      {AUTHORS.map((author) => (
+        <section className="panel about-hero" key={author.github} style={{ marginBottom: 12 }}>
+          <img
+            className="about-avatar"
+            src={`${author.github}.png?size=200`}
+            alt={`Portrait of ${author.name}`}
+            referrerPolicy="no-referrer"
+          />
+          <div className="min-width-zero">
+            <div className="about-name">{author.name}</div>
+            <div className="setting-hint about-role">
+              {author.role}
+            </div>
+            <div className="inline-actions inline-actions-wrap" style={{ marginTop: 8 }}>
+              <button className="btn btn-sm" onClick={() => open(author.github)}>
+                <GitHubMark size={15} /> {author.githubHandle}
+              </button>
+              <button className="btn btn-sm" onClick={() => open(`mailto:${author.email}`)}>
+                <Mail size={15} /> {author.email}
+              </button>
+            </div>
           </div>
-          <div className="inline-actions inline-actions-wrap">
-            <button className="btn btn-sm" onClick={() => open(AUTHOR.github)}>
-              <GitHubMark size={15} /> {AUTHOR.githubHandle}
-            </button>
-            <button className="btn btn-sm" onClick={() => open(`mailto:${AUTHOR.email}`)}>
-              <Mail size={15} /> {AUTHOR.email}
-            </button>
-          </div>
-        </div>
-      </section>
+        </section>
+      ))}
 
       <section className="panel panel-spaced">
         <div className="panel-title">Updates</div>
@@ -172,12 +178,19 @@ export function AboutPage() {
 
       {info && (
         <section className="panel panel-spaced">
-          <div className="panel-title">Build</div>
+          <div className="panel-title">{isAndroid ? "Android app" : "Desktop build"}</div>
           <dl className="meta-list">
-            <div><dt>Version</dt><dd>{info.version}</dd></div>
-            <div><dt>Electron</dt><dd>{info.electron}</dd></div>
-            <div><dt>Chromium</dt><dd>{info.chrome}</dd></div>
-            <div><dt>Node</dt><dd>{info.node}</dd></div>
+            <div><dt>App version</dt><dd>{info.version}</dd></div>
+            {isAndroid ? (
+              info.buildNumber && <div><dt>Build code</dt><dd>{info.buildNumber}</dd></div>
+            ) : (
+              <>
+                <div><dt>Electron</dt><dd>{info.electron}</dd></div>
+                <div><dt>Chromium</dt><dd>{info.chrome}</dd></div>
+                <div><dt>Node</dt><dd>{info.node}</dd></div>
+                <div><dt>FFmpeg</dt><dd>{info.ffmpegVersion || (info.ffmpeg ? "Available" : "Not found")}</dd></div>
+              </>
+            )}
             <div><dt>Platform</dt><dd>{info.platform}</dd></div>
             <div><dt>Package</dt><dd>{info.packageType}</dd></div>
           </dl>

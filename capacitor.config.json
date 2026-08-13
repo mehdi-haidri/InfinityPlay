@@ -1,0 +1,13 @@
+{
+  "appId": "com.infinityplay.app",
+  "appName": "InfinityPlay",
+  "webDir": "out/renderer",
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": false
+    }
+  }
+}

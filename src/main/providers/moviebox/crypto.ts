@@ -1,19 +1,30 @@
 /**
- * Request signing for the catalog API. The canonical string layout, the field order and
- * the empty-string placeholders on GET all matter; the server rejects anything else.
+ * Request signing for the catalog API. Works across Node, Electron, Web, and Capacitor.
+ * The canonical string layout, the field order and the empty-string placeholders on GET
+ * all matter; the server rejects anything else.
  */
-import crypto from "node:crypto";
+import { md5 } from "js-md5";
 
 const SECRET_KEY_DEFAULT = "76iRl07s0xSN9jqmEWAt79EBJZulIQIsV64FZr2O";
 const SIGNATURE_BODY_MAX_BYTES = 102_400;
 
-const md5Hex = (data: crypto.BinaryLike): string =>
-  crypto.createHash("md5").update(data).digest("hex");
+const md5Hex = (data: string | Uint8Array): string => md5(data);
 
-/** The secret is base64 with the padding stripped; the HMAC key is its raw bytes. */
-function secretKeyBytes(): Buffer {
+/** The secret is base64 with the padding stripped; returns raw bytes as Uint8Array. */
+function secretKeyBytes(): Uint8Array {
   const padding = (4 - (SECRET_KEY_DEFAULT.length % 4)) % 4;
-  return Buffer.from(SECRET_KEY_DEFAULT + "=".repeat(padding), "base64");
+  const base64Str = SECRET_KEY_DEFAULT + "=".repeat(padding);
+  
+  if (typeof Buffer !== "undefined") {
+    return new Uint8Array(Buffer.from(base64Str, "base64"));
+  }
+  
+  const binaryString = atob(base64Str);
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
 }
 
 /** Query params sorted by key, duplicate keys keeping their original order. */
@@ -60,7 +71,8 @@ export function buildCanonicalString(
   let bodyHash = "";
   let bodyLength = "";
   if (body !== null) {
-    const bytes = Buffer.from(body, "utf8");
+    const encoder = new TextEncoder();
+    const bytes = encoder.encode(body);
     bodyLength = String(bytes.length);
     bodyHash = md5Hex(bytes.subarray(0, SIGNATURE_BODY_MAX_BYTES));
   }
@@ -91,10 +103,7 @@ export function generateXTrSignature(
   timestampMs: number,
 ): string {
   const canonical = buildCanonicalString(method, accept, contentType, url, body, timestampMs);
-  const signature = crypto
-    .createHmac("md5", secretKeyBytes())
-    .update(canonical, "utf8")
-    .digest("base64");
+  const signature = md5.hmac.create(secretKeyBytes()).update(canonical).base64();
   return `${timestampMs}|2|${signature}`;
 }
 
@@ -133,19 +142,10 @@ export function generateClientIdentity(): ClientIdentity {
     ["M2012K11AG", "Redmi"],
     ["M2007J20CG", "Redmi"],
   ] as const;
-  const versionCodes = [50020042, 50020043, 50020044, 50020045, 50020046] as const;
-  const networkTypes = ["NETWORK_WIFI", "NETWORK_MOBILE"] as const;
-  const timezones = [
-    "Asia/Kolkata",
-    "Asia/Shanghai",
-    "Asia/Tokyo",
-    "America/New_York",
-    "Europe/London",
-  ] as const;
+  const versionCode = pick([50020042, 50020043, 50020044, 50020045, 50020046] as const);
 
   const [osVersion, buildId] = pick(androidVersions);
   const [model, brand] = pick(redmiDevices);
-  const versionCode = pick(versionCodes);
 
   const userAgent =
     `com.community.oneroom/${versionCode} (Linux; U; Android ${osVersion}; en_US; ` +
@@ -164,9 +164,15 @@ export function generateClientIdentity(): ClientIdentity {
     brand,
     model,
     system_language: "en",
-    net: pick(networkTypes),
+    net: pick(["NETWORK_WIFI", "NETWORK_MOBILE"] as const),
     region: "US",
-    timezone: pick(timezones),
+    timezone: pick([
+      "Asia/Kolkata",
+      "Asia/Shanghai",
+      "Asia/Tokyo",
+      "America/New_York",
+      "Europe/London",
+    ] as const),
     sp_code: "40401",
     "X-Play-Mode": "2",
   });

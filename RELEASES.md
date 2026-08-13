@@ -1,130 +1,152 @@
-# Release notes
+# Release Notes
 
-Updates install themselves. InfinityPlay checks on launch and on demand from the About
-page, then offers **Restart & install** when a new version is ready.
-
----
-
-## 0.2.0
-
-### Playback
-
-- Fixed adaptive streams failing with "Stream error" when running from source. The stream
-  CDN only returns its CORS header to requests that carry an Origin and does not vary its
-  cache on it, so a development build could be served a cached response the browser then
-  refused. Packaged builds were never affected.
-- Fixed titles whose adaptive stream refused to start with "Stream error", including
-  House of the Dragon. Those manifests declare an incomplete video codec that Chromium
-  rejects; they are now repaired before playback.
-- Fixed adaptive (1080p/720p) playback dropping out and restarting every few seconds.
-  Pinning the chosen quality was restarting the stream, which then pinned it again.
-- Recoverable streaming hiccups no longer raise a "Stream error" over a video that is
-  still playing.
-- HEVC video now plays directly when the machine can decode it. It was always being
-  re-encoded on the fly, which caused stuttering and pausing on files that play fine
-  elsewhere. Compatibility mode is now used only when Chromium genuinely cannot decode.
-
-### Live TV
-
-- Four more channel sources alongside the full IPTV-org index: an Arabic list, Sports,
-  News, and Free-TV — about 12,700 channels in total.
-- Filter by country and by channel type. Both pickers have their own search field and
-  show how many channels each option holds, busiest first — 180 countries are no longer a
-  scrolling exercise.
-- New sources are added automatically when upgrading, without touching playlists you
-  added yourself.
-
-### Downloads
-
-- FFmpeg now ships with the app, so 720p and 1080p downloads work with nothing to install.
-- Each download gets its own folder holding the video and its subtitles. Series are filed
-  as `Show/Season 01/S01E02/`.
-- Download a whole season in one click; episodes queue and run one at a time, and the
-  queue can be stopped from the Downloads page.
-
-### Packages
-
-- Added Intel and Apple Silicon macOS DMGs, with ZIP companions for future signed updates.
-- Added AppImage, DEB, RPM and Arch Linux packages for x64 systems.
-- Added tagged GitHub Actions releases for Windows, macOS and Linux.
-- Unsigned macOS builds direct users to GitHub Releases instead of attempting an update
-  that macOS would reject.
-- Added Tajeddine Bourhim to the project contributor metadata.
-
-### Interface
-
-- Bundled Outfit for consistent typography and introduced a single-accent brand mark.
-- Reworked featured artwork so portrait posters are composed beside a blurred backdrop.
-- Added collapsible navigation, clearer page context, stronger content hierarchy and
-  resilient image fallbacks.
-- Improved player slider and menu keyboard support, reduced-motion behavior, download
-  announcements, empty states and package-specific update help.
-- Added FFmpeg compatibility playback for MPEG-2 and HEVC sources that otherwise played
-  audio over a black video surface on Linux.
-- Fixed adaptive DASH manifests being saved as tiny completed downloads; downloads now
-  select a real progressive file and reject non-media responses.
-- Reduced scrolling work with off-screen row containment, asynchronous image decoding,
-  indexed watch progress and narrower state subscriptions.
-- Replaced legacy Linux updater metadata 404 stacks with concise manual-update guidance.
-- Made the player timeline draggable and seekable for both native H.264 and FFmpeg-backed
-  H.265/MPEG-2 playback, including signed adaptive movie streams.
-- Added an in-player continue/start-over choice with configurable resume behaviour.
-- Added exact 720p/1080p adaptive downloads instead of silently falling back to 480p.
-- Hide stale source rows while a new episode loads and allow progress removal from title
-  pages, Continue Watching cards, or the history library.
-- Added Ocean, Forest and Plum themes, reduced-motion controls, and restart-aware
-  NVIDIA/AMD/Intel hardware acceleration with detected GPU status.
-- Made Linux adaptive HEVC playback deterministic by isolating the selected DASH
-  representation and retrying software decode when a GPU driver produces no video.
-- Added cached thumbnail previews above the player timeline, generated on demand so
-  ordinary playback and scrolling do not pay a storyboard-generation cost.
-- Cast portraits now open profiles with an optional biography plus provider-verified,
-  separately grouped movie and series credits.
+Updates install automatically. InfinityPlay checks on launch and on demand from the **About** page.
 
 ---
 
-## 0.1.0
+## 0.2.9 (Latest Update)
 
-First release.
+### Free media and legal availability
+- Added a dedicated **Free Library** for Library of Congress National Screening Room films and freely licensed Wikimedia Commons video, including archive rights and creator labels.
+- Added resilient curated Library of Congress fallbacks for temporary API challenges and selected streamable Wikimedia renditions instead of multi-gigabyte originals.
+- Added regional legal watch availability through TMDB and JustWatch, covering free, ad-supported, subscription, rental, and purchase options without proxying protected services.
 
-### Watching
+### Live TV sources, beIN, and program guides
+- Added the authorized free **beIN SPORTS XTRA** FAST feed while explicitly filtering non-XTRA beIN-branded entries from community playlists.
+- Added focused IPTV-org playlists for movies, series, Morocco, and French alongside the existing all-channel, Arabic, sports, and news lists.
+- Added visible **Verified free**, **Community link**, and **Your provider** provenance labels.
+- Added optional XMLTV program guides matched by `tvg-id`, with current-programme titles on channel cards.
+- Added user-owned Xtream IPTV accounts, live categories, channel logos, and provider XMLTV support. Credentials remain local and are never bundled with InfinityPlay.
 
-- Search and stream movies, series and anime inside the app — no external player needed.
-- Plays at up to 1080p, adjusting quality to your connection.
-- Custom player: scrubbing, speed, volume, fullscreen, keyboard shortcuts.
-- Remembers where you stopped, with a *Continue watching* row on Home.
-- Autoplay next episode.
+### Validation
+- Passed TypeScript checking for Electron, preload, renderer, and Capacitor provider paths.
+- Passed the Android Studio/Gradle unit tests, debug lint, and debug APK build; Android version metadata is synchronized as `0.2.9` (`versionCode 209`).
+- Inspected the Android build on the `Medium_Phone` emulator and checked startup logs for fatal crashes.
 
-### Subtitles
+### Android About page
+- Added an Android-specific build panel with the native app version and version code.
+- Removed Electron, Node, Chromium, GPU, and FFmpeg rows from Android instead of displaying desktop-only or unavailable values.
+- Replaced the desktop auto-update status on Android with clear manual APK update guidance and a link to GitHub Releases.
 
-- Up to 16 languages, listed under English names.
-- Pick a default language that switches on automatically.
-- Adjustable size, colour and background, with a live preview.
+---
 
-### Audio
+## 0.2.8
 
-- Defaults to original audio instead of a dubbed version.
-- Switch tracks per title; set a preferred language in Settings.
+### Desktop Live TV reliability
+- Fixed the desktop/Electron Live TV page failing with `localStorage is not defined` before IPTV channels could load.
+- Added a runtime-safe playlist cache: Electron uses an in-process cache, while Android and browser builds continue using browser storage.
+- Verified M3U parsing and cache reuse in the same Node.js environment used by Electron's main process, including a representative **2M** channel entry.
+- Protected Android release keystores and local signing credentials with enforced Git ignore rules.
 
-### Downloads
+## 0.2.7
 
-- Download for offline viewing, with live progress you can dismiss.
-- A Downloads section to play, open externally, pause, resume or delete.
-- Subtitles saved alongside the video so other players pick them up.
+### Release workflow reliability
+- Fixed release tags failing when Android signing secrets are unavailable. CI now runs the complete Android test, lint, and debug-build validation while skipping only the publishable APK.
+- Signed Android publishing remains enabled when all four signing secrets are configured; missing or partial credentials can no longer block the Windows, macOS, and Linux release jobs.
+- Added decoded-keystore validation and ensured that CI never uploads an unsigned or debug APK as a public release asset.
 
-### Home and catalog
+### Richer Android and cross-platform playback controls
+- Added Android Picture-in-Picture support with a native **PiP** action, 16:9 mini-player sizing, uninterrupted playback when the activity enters PiP, and automatic hiding of full controls inside the floating window.
+- Added native Android audio-language discovery and switching based on the tracks actually exposed by HLS, DASH, or the selected file. The saved preferred audio language is applied when a matching track is available.
+- Added a consolidated native playback options panel for audio, subtitles, playback speed, and fit/fill/stretch picture modes without overcrowding the main controller.
+- Added native headset and hardware media-key handling for play, pause, 10-second forward, and 10-second rewind.
+- Added HLS and DASH audio-track discovery and language switching to the desktop/mobile web player, with a dedicated language control that only appears when multiple tracks exist.
+- Enabled browser Picture-in-Picture on supported phones instead of hiding it by device class.
+- Added Media Session metadata and actions for headset keys, desktop media overlays, and supported lock-screen controls.
+- Added a screen wake lock during active web playback and automatic release while paused or hidden to prevent accidental battery drain.
+- Made dense phone secondary controls horizontally scrollable, keeping every advanced action touch-accessible without shrinking targets below a usable size.
 
-- Trending, new releases, recommended and genre rows.
-- Choose a catalog region — US, UK, Japan, Korea and more.
-- Adult content filtered out by default.
-- Search returns films and series only.
+### Final performance, lifecycle, and security pass
+- Split the large HLS/DASH player engine into an on-demand renderer chunk. Home and catalog screens now load an approximately **831 KB** main renderer instead of eagerly parsing the previous approximately **3.2 MB** combined bundle; the player chunk loads only when playback opens.
+- Replaced subtitle polling five times per second with native `cuechange` events, removing continuous caption work while playback is paused or no cue changes.
+- Added Media Session playback-state and bounded position updates, keeping supported lock-screen and operating-system seek surfaces synchronized without updating them on every video frame.
+- Removed the Android main activity's permanent keep-awake flag. Browsing the catalog can now dim normally while the native player and web wake lock still keep the screen awake only during playback.
+- Fixed native Android lifecycle resume so backgrounding and restoring a non-PiP player continues from the most recently reached timestamp instead of the original launch position.
+- Enabled Media3 audio-focus management and automatic noisy-output handling, so another audio app can duck/pause playback and disconnecting headphones does not continue loudly through the speaker.
+- Added a defensive native-player release during activity destruction to avoid retaining decoders after unusual lifecycle exits.
+- Restricted Electron external navigation and shell opening to validated HTTP/HTTPS URLs and blocked renderer-driven top-level navigation away from the app shell.
+- Enabled Chromium renderer sandboxing while retaining the context-isolated preload bridge, reducing the impact of a renderer compromise without exposing Node.js APIs.
+- Aligned the Linux desktop filename with Electron's app ID/WM class so launchers group the running window under the correct InfinityPlay icon.
 
-### Also
+### Android Movie & Series Playback
+- Added a dedicated Android Media3 player for Movies and Series, bypassing WebView's `MEDIA_ELEMENT_ERROR: Format error` on HEVC/H.265 releases while leaving IPTV on its separate live-stream path.
+- Added native seeking, 5/15-second skip controls, playback speed, subtitle selection, track settings, buffering feedback, immersive landscape playback, and predictive-back support.
+- Native playback now returns the exact position and duration to InfinityPlay history, and reopening the title resumes from that saved position.
+- Automatic quality now selects the highest available source, so a title with a 1080p release displays **Play · 1080p** instead of being capped at 480p on Android.
+- Passed every Movie/Series release into the Android bridge and added a native quality picker for adaptive 1080p/720p/480p and direct-file sources; switching keeps the current timestamp.
+- Prefer progressive movie and episode sources on Android phones, tablets, and TV devices so the native player can open a signed file directly when available.
+- Fetch signed DASH manifests through Capacitor's native HTTP transport to avoid Android WebView CORS failures.
+- Automatically retry a failed Android movie or episode with an alternate progressive source while preserving the playback timestamp.
+- Keep the screen awake during Android playback and retain immersive landscape behavior on Android TV.
+- Added Android-friendly player options for playback speed, picture fit/fill/stretch, sleep timers, orientation, captions, quality, episode navigation, and media keys.
 
-- Live TV from M3U playlists.
-- Three themes, an About page, and an animated launch screen.
+### Live TV Reliability
+- Fixed Android `manifestLoadError` failures by routing HLS channels through Android's native media pipeline instead of WebView `hls.js` requests that are subject to CORS.
+- Enabled user-selected HTTP IPTV manifests and segments inside the HTTPS Capacitor shell, which is required by many public M3U sources.
+- Added bounded manifest, level, fragment, network, and media recovery for desktop HLS, followed by a clear offline/expired-channel error when retries are exhausted.
+- Preserved `http-referrer`, `http-user-agent`, and matching `#EXTVLCOPT` directives from M3U playlists, then applied them to native manifests, renditions, and media segments.
+- Expanded the Android Media3 path to HLS, DASH, progressive files, and RTSP. This fixes header-protected IPTV channels such as **2M Monde**, whose manifest returned HTTP 403 without its broadcaster headers.
 
-### Known limits
+### Playback Continuity & Desktop Performance
+- Quality changes now capture and persist the exact current timestamp before switching sources, then resume at that timestamp instead of restarting from the beginning.
+- Switching representations inside one DASH manifest no longer tears down and recreates the player.
+- Desktop DASH playback keeps adaptive bitrate recovery enabled, uses longer long-form buffers, and avoids buffer-discarding fast switches to reduce recurring stalls.
+- VOD HLS now uses a larger forward/back buffer while IPTV retains its low-latency settings.
+- Added automatic alternate-quality recovery and clearer inline playback errors.
 
-- Some titles have gaps in the catalog, or no release year.
-- Windows builds are unsigned, so SmartScreen warns on first run.
+### Favorites
+- Added persistent Favorites storage on Electron and Capacitor Android.
+- Added a dedicated **Favorites** destination with **All**, **Movies**, and **Series** filters.
+- Added Favorite/Favorited controls to movie and series details, with removal directly from the Favorites grid.
+
+### Subtitle Reliability
+- Replaced the pointer-draggable caption overlay with stable **Top**, **Middle**, and **Bottom** positions.
+- Subtitle position is now stored with the rest of the caption appearance preferences and no longer follows the mouse after selection.
+- Improved responsive caption sizing, safe widths, backgrounds, font families, edge styles, and reset behavior.
+
+### Phone, Tablet & Android TV Interface
+- Added explicit phone, tablet, desktop, and TV device profiles rather than relying only on viewport width.
+- Added responsive bottom navigation and a mobile More sheet, touch-sized controls, safe-area handling, and phone/tablet grid improvements.
+- Added Android TV D-pad spatial navigation, focus restoration, overscan-safe layouts, larger 10-foot controls, a Leanback launcher entry, and a TV banner.
+- Improved Android Back behavior so player menus close before playback exits.
+- Added real Android `DownloadManager` downloads with progress, cancellation, persistence, and file opening.
+- Fixed Android touch scrolling by restoring a viewport-constrained main scroll container, explicit vertical touch panning, momentum scrolling, and native WebView nested scrolling.
+- Reworked the first Home viewport on phones: bounded dynamic hero height, mobile-centered artwork, balanced title wrapping, two-column actions, correctly positioned carousel indicators, and a responsive loading skeleton.
+
+### Android Packaging & Release Engineering
+- Synchronized app, lockfile, Gradle, and APK metadata at version **0.2.7**.
+- Added optional Android hardware declarations for universal phone, tablet, and TV installation.
+- Added conditional signed release APK generation in GitHub Actions and documented the required signing secrets.
+- Added adaptive monochrome launcher icons, dark system bars, post-splash theming, and safer WebView settings.
+
+### Validation
+- Passed TypeScript type checking and renderer production builds.
+- Passed Capacitor synchronization plus Android unit tests, lint, and debug APK assembly.
+- Verified responsive phone, tablet, TV, D-pad, mobile menu, overflow, and landscape player behavior in automated browser checks.
+- Reproduced the reported Amazing Spider-Man 2 480p failure in an Android Studio API 37 phone emulator, confirmed WebView rejected the HEVC source, then verified the same signed release plays through Android's native HEVC decoder with a detected duration of 2:21:35 and no playback exception.
+- Verified in the API 37 Android emulator that the same title resolves to 1080p, exposes all five source choices in the native quality picker, and plays at 1080p.
+- Verified the live 2M Monde manifest returns 403 without its playlist headers and 200 with them, then confirmed native HLS playback fetches its renditions and `.ts` segments without a Media3 playback exception.
+
+---
+
+## 0.2.2
+
+### Authors & Project Credits
+- Officially added **Tajeddine Bourhim** ([@Scorpiontaj](https://github.com/Scorpiontaj)) as Co-Author & Core Developer alongside **EL HADRATI Othman** ([@ELhadratiOth](https://github.com/ELhadratiOth)).
+
+### Android & Capacitor Core Enhancements
+- **DASH Stream Authentication & Interceptor**: Built a universal renderer network interceptor (`streamSigner.ts`) for Android Capacitor that intercepts `window.fetch` and `XMLHttpRequest.prototype.open` to automatically append CloudFront authentication parameters (`?Policy=...&Signature=...&Key-Pair-Id=...`) to all media segments (`init-stream0.m4s`, `chunk-stream0-00001.m4s`).
+- **Expanded Manifest Segment Repair**: Updated `repairDashManifest` to sign all `sourceURL=`, `initialization=`, `media=`, and `url=` attribute templates inside DASH XML manifests.
+- **Capacitor Memory Fix**: Fixed Capacitor Android `ArrayBuffer` data corruption by serving patched manifests via `Data URI` strings.
+- **Restored Adaptive Quality**: Fully restored 1080p and 720p adaptive streaming choices on Android devices.
+
+### Mobile & Tablet UI & Responsive Design
+- **Automatic Horizontal View**: The player automatically requests landscape screen orientation when playing media on mobile or tablet devices (`<= 1024px`).
+- **In-Player Orientation Toggle**: Added a dedicated **Rotate View button (`<RotateCw />`)** in the player control bar to seamlessly toggle between Landscape (Horizontal laptop-style view) and Portrait (Vertical view) on mobile/tablet screens.
+- **Home Page Responsiveness**:
+  - Optimized hero featured section on mobile by removing overlapping floating posters to maximize title & description readability.
+  - Added fluid typography and full-width touch targets for "Watch now" and "More info" action buttons.
+  - Touch-optimized poster rows with smooth horizontal scrolling (`-webkit-overflow-scrolling: touch`) and 2.5 visible cards per row on mobile screens.
+
+### Performance & Desktop Optimizations
+- **DASH Manifest Caching**: Implemented in-memory caching for materialized DASH manifests in `src/main/live.ts`, drastically speeding up desktop timeline scrubbing previews.

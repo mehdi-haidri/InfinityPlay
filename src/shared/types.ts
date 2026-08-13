@@ -183,11 +183,36 @@ export interface SubtitleOption {
   url: string;
 }
 
-/**
- * `box` draws a dark panel behind the text, `shadow` keeps the picture visible with a
- * heavy outline instead, `none` is bare text.
- */
-export type SubtitleBackground = "box" | "shadow" | "none";
+export type SubtitleBackground = "box" | "shadow" | "none" | "window" | "semi-transparent";
+
+export type SubtitleFontFamily = "sans-serif" | "serif" | "monospace" | "casual" | "cursive" | "small-caps";
+
+export type SubtitleEdgeStyle = "none" | "drop-shadow" | "outline" | "raised" | "depressed";
+
+export type SubtitlePosition = "bottom" | "middle" | "top";
+
+export const SUBTITLE_FONT_FAMILIES: { value: SubtitleFontFamily; label: string; fontFamily: string }[] = [
+  { value: "sans-serif", label: "Sans-Serif", fontFamily: "system-ui, -apple-system, sans-serif" },
+  { value: "serif", label: "Serif", fontFamily: "Georgia, 'Times New Roman', serif" },
+  { value: "monospace", label: "Monospace", fontFamily: "'Courier New', Courier, monospace" },
+  { value: "casual", label: "Casual", fontFamily: "'Comic Sans MS', 'Trebuchet MS', sans-serif" },
+  { value: "cursive", label: "Cursive", fontFamily: "'Brush Script MT', cursive" },
+  { value: "small-caps", label: "Small Caps", fontFamily: "sans-serif" },
+];
+
+export const SUBTITLE_EDGE_STYLES: { value: SubtitleEdgeStyle; label: string }[] = [
+  { value: "drop-shadow", label: "Drop Shadow" },
+  { value: "outline", label: "Uniform Outline" },
+  { value: "raised", label: "Raised" },
+  { value: "depressed", label: "Depressed" },
+  { value: "none", label: "None" },
+];
+
+export const SUBTITLE_POSITIONS: { value: SubtitlePosition; label: string }[] = [
+  { value: "bottom", label: "Bottom" },
+  { value: "middle", label: "Middle" },
+  { value: "top", label: "Top" },
+];
 
 /**
  * Saving every language turns one download into ~16 extra requests and files. `preferred`
@@ -202,6 +227,7 @@ export const SUBTITLE_COLORS = [
   { value: "#8ff0a4", label: "Green" },
   { value: "#7fd3ff", label: "Cyan" },
   { value: "#ffb2c8", label: "Pink" },
+  { value: "#ff4d4d", label: "Red" },
   { value: "#111111", label: "Black" },
 ];
 
@@ -272,6 +298,22 @@ export interface Channel {
   /** ISO 3166-1 alpha-2, upper case. Empty when the playlist does not say. */
   country: string;
   streamUrl: string;
+  /** Per-channel HTTP headers declared by EXTINF/EXTVLCOPT (for example Referer). */
+  headers?: Record<string, string>;
+  /** Provenance inherited from the selected source; never inferred from a channel name. */
+  trust?: SourceTrust;
+  /** Human-readable reason the source received its trust level. */
+  trustNote?: string;
+}
+
+export type SourceTrust = "official" | "community" | "user";
+
+export interface ChannelProgramme {
+  channelId: string;
+  title: string;
+  description: string;
+  start: number;
+  stop: number;
 }
 
 export interface PreparedLiveStream {
@@ -287,38 +329,124 @@ export interface PreparedLiveStream {
 export interface PlaylistSource {
   name: string;
   url: string;
+  /** An HLS URL can represent one verified channel instead of an M3U channel directory. */
+  type?: "m3u" | "direct";
+  trust?: SourceTrust;
+  trustNote?: string;
+  /** Optional user-supplied XMLTV document matched through each channel's `tvg-id`. */
+  epgUrl?: string;
+  directChannel?: Omit<Channel, "streamUrl" | "trust" | "trustNote">;
+}
+
+export interface XtreamSource {
+  id: string;
+  name: string;
+  serverUrl: string;
+  username: string;
+  password: string;
 }
 
 /**
  * Community-maintained, openly published playlists.
  *
- * Both projects index streams their broadcasters put out publicly; neither carries
- * subscription services. Arabic coverage measured against the live lists: 325 channels
- * across 18 Arab countries in the iptv-org index, 356 in its Arabic-language cut, 77 in
- * Free-TV — which also tags every entry with `tvg-country`.
+ * Community indexes can change without notice. Their entries are deliberately marked
+ * community rather than official: a public URL is not proof that a broadcaster licensed
+ * a third-party player to redistribute it.
  */
 export const DEFAULT_PLAYLISTS: PlaylistSource[] = [
   {
+    name: "Verified — beIN SPORTS XTRA",
+    url: "https://bein-xtra-bein.amagi.tv/playlist.m3u8",
+    type: "direct",
+    trust: "official",
+    trustNote: "Free beIN FAST channel delivered by its authorized Amagi distribution feed.",
+    directChannel: {
+      id: "beINSPORTSXTRA.us",
+      name: "beIN SPORTS XTRA",
+      logo: "https://i.ibb.co/HT49GPmB/XTRA-2.png",
+      group: "Sports",
+      country: "US",
+    },
+  },
+  {
     name: "IPTV-org — All channels",
     url: "https://iptv-org.github.io/iptv/index.m3u",
+    trust: "community",
   },
   {
     name: "IPTV-org — Arabic",
     url: "https://iptv-org.github.io/iptv/languages/ara.m3u",
+    trust: "community",
   },
   {
     name: "IPTV-org — Sports",
     url: "https://iptv-org.github.io/iptv/categories/sports.m3u",
+    trust: "community",
+  },
+  {
+    name: "IPTV-org — Movies",
+    url: "https://iptv-org.github.io/iptv/categories/movies.m3u",
+    trust: "community",
+  },
+  {
+    name: "IPTV-org — Series",
+    url: "https://iptv-org.github.io/iptv/categories/series.m3u",
+    trust: "community",
+  },
+  {
+    name: "IPTV-org — Morocco",
+    url: "https://iptv-org.github.io/iptv/countries/ma.m3u",
+    trust: "community",
+  },
+  {
+    name: "IPTV-org — French",
+    url: "https://iptv-org.github.io/iptv/languages/fra.m3u",
+    trust: "community",
   },
   {
     name: "IPTV-org — News",
     url: "https://iptv-org.github.io/iptv/categories/news.m3u",
+    trust: "community",
   },
   {
     name: "Free-TV",
     url: "https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8",
+    trust: "community",
   },
 ];
+
+export type FreeMediaProvider = "loc" | "wikimedia";
+
+export interface FreeMediaItem {
+  id: string;
+  provider: FreeMediaProvider;
+  title: string;
+  description: string;
+  year: string;
+  posterUrl: string | null;
+  detailUrl: string;
+  streamUrl: string | null;
+  mimeType: string;
+  rights: string;
+  creator: string;
+}
+
+export interface WatchProviderOption {
+  id: number;
+  name: string;
+  logoUrl: string | null;
+}
+
+export interface WatchAvailability {
+  configured: boolean;
+  region: string;
+  link: string | null;
+  free: WatchProviderOption[];
+  ads: WatchProviderOption[];
+  subscription: WatchProviderOption[];
+  rent: WatchProviderOption[];
+  buy: WatchProviderOption[];
+}
 
 export interface WatchHistoryItem {
   provider: ProviderKind;
@@ -334,6 +462,11 @@ export interface WatchHistoryItem {
   /** Total media length in seconds, 0 when unknown. */
   duration: number;
   timestamp: number;
+}
+
+/** A catalog item saved by the viewer, with stable local ordering metadata. */
+export interface FavoriteItem extends CatalogItem {
+  addedAt: number;
 }
 
 export interface AppConfig {
@@ -362,8 +495,17 @@ export interface AppConfig {
   downloadSubtitles: DownloadSubtitlePolicy;
   /** How cue text is separated from the picture behind it. */
   subtitleBackground: SubtitleBackground;
+  subtitleFontFamily: SubtitleFontFamily;
+  subtitleEdgeStyle: SubtitleEdgeStyle;
+  subtitlePosition: SubtitlePosition;
   volume: number;
   playlists: PlaylistSource[];
+  /** User-owned IPTV subscriptions. Credentials stay in the local app configuration. */
+  xtreamSources: XtreamSource[];
+  /** Optional TMDB v4 read token used only for legal watch-provider discovery. */
+  tmdbReadToken: string;
+  /** ISO 3166-1 region used for legal streaming availability. */
+  watchRegion: string;
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -381,8 +523,14 @@ export const DEFAULT_CONFIG: AppConfig = {
   subtitleColor: "#ffffff",
   downloadSubtitles: "preferred",
   subtitleBackground: "box",
+  subtitleFontFamily: "sans-serif",
+  subtitleEdgeStyle: "drop-shadow",
+  subtitlePosition: "bottom",
   volume: 1,
   playlists: [...DEFAULT_PLAYLISTS],
+  xtreamSources: [],
+  tmdbReadToken: "",
+  watchRegion: "MA",
 };
 
 /** Uniform IPC envelope so renderer code never has to catch across the bridge. */
@@ -451,6 +599,9 @@ export interface DownloadRecord extends DownloadRequest {
 export interface AppInfo {
   name: string;
   version: string;
+  runtime: "electron" | "android";
+  /** Native Android versionCode. Desktop builds do not expose this field. */
+  buildNumber?: string;
   electron: string;
   chrome: string;
   node: string;
@@ -461,6 +612,8 @@ export interface AppInfo {
   updatable: boolean;
   /** FFmpeg on PATH. Without it, adaptive (DASH) qualities cannot be saved. */
   ffmpeg: boolean;
+  /** Human-readable FFmpeg version string, or empty when unavailable. */
+  ffmpegVersion: string;
   /** Detected graphics vendor and Chromium video-decode status. */
   gpu: string;
 }
@@ -476,9 +629,103 @@ export type UpdateStatus =
   | { state: "error"; message: string }
   | { state: "unsupported"; message: string };
 
-export const AUTHOR = {
-  name: "EL HADRATI Othman",
-  email: "othmanelhadrati@gmail.com",
-  github: "https://github.com/ELhadratiOth",
-  githubHandle: "ELhadratiOth",
-} as const;
+export const AUTHORS = [
+  {
+    name: "EL HADRATI Othman",
+    email: "othmanelhadrati@gmail.com",
+    github: "https://github.com/ELhadratiOth",
+    githubHandle: "ELhadratiOth",
+    role: "Lead Developer",
+  },
+  {
+    name: "Tajeddine Bourhim",
+    email: "bourhimtajeddine@gmail.com",
+    github: "https://github.com/Scorpiontaj",
+    githubHandle: "Scorpiontaj",
+    role: "Co-Author & Core Developer",
+  },
+] as const;
+
+export const AUTHOR = AUTHORS[0];
+
+export interface InfinityPlayApi {
+  catalog: {
+    home: () => Promise<Result<HomePage>>;
+    featured: (tabId?: string, page?: number) => Promise<Result<HomePage>>;
+    search: (query: string, page?: number) => Promise<Result<CatalogItem[]>>;
+    suggest: (query: string) => Promise<Result<CatalogItem[]>>;
+    details: (subjectId: string) => Promise<Result<MediaDetails>>;
+    person: (staffId: string, name: string, avatarUrl: string | null) => Promise<Result<PersonDetails>>;
+    audioVariants: (title: string, mediaType: MediaType) => Promise<Result<AudioVariant[]>>;
+    releases: (subjectId: string, season?: number, episode?: number) => Promise<Result<Release[]>>;
+    subtitles: (subjectId: string, resourceId: string) => Promise<Result<SubtitleOption[]>>;
+    clearCache: () => Promise<Result<boolean>>;
+  };
+  subtitle: {
+    load: (url: string) => Promise<Result<string>>;
+  };
+  tv: {
+    playlist: (source: PlaylistSource, forceRefresh?: boolean) => Promise<Result<Channel[]>>;
+    epg: (url: string, channelIds: string[]) => Promise<Result<Record<string, ChannelProgramme[]>>>;
+    xtream: (source: XtreamSource) => Promise<Result<Channel[]>>;
+    xtreamEpg: (source: XtreamSource, channelIds: string[]) => Promise<Result<Record<string, ChannelProgramme[]>>>;
+  };
+  freeMedia: {
+    browse: (provider: FreeMediaProvider, page?: number) => Promise<Result<FreeMediaItem[]>>;
+    search: (provider: FreeMediaProvider, query: string, page?: number) => Promise<Result<FreeMediaItem[]>>;
+    details: (provider: FreeMediaProvider, id: string) => Promise<Result<FreeMediaItem>>;
+  };
+  availability: {
+    title: (title: string, mediaType: MediaType) => Promise<Result<WatchAvailability>>;
+  };
+  media: {
+    prepareLive: (url: string, startAt?: number, resolution?: number) => Promise<Result<PreparedLiveStream>>;
+    preview: (url: string, position: number, resolution?: number) => Promise<Result<string | null>>;
+    stageManifest: (xml: string) => Promise<Result<string>>;
+    reportDecodable: (codecs: string[]) => Promise<Result<boolean>>;
+  };
+  config: {
+    get: () => Promise<Result<AppConfig>>;
+    update: (patch: Partial<AppConfig>) => Promise<Result<AppConfig>>;
+  };
+  history: {
+    list: () => Promise<Result<WatchHistoryItem[]>>;
+    record: (item: WatchHistoryItem) => Promise<Result<WatchHistoryItem[]>>;
+    remove: (subjectId: string) => Promise<Result<WatchHistoryItem[]>>;
+    clear: () => Promise<Result<WatchHistoryItem[]>>;
+  };
+  favorites: {
+    list: () => Promise<Result<FavoriteItem[]>>;
+    toggle: (item: CatalogItem) => Promise<Result<FavoriteItem[]>>;
+  };
+  downloads: {
+    start: (request: DownloadRequest) => Promise<Result<DownloadRecord>>;
+    startSeason: (request: SeasonDownloadRequest) => Promise<Result<number>>;
+    clearQueue: () => Promise<Result<number>>;
+    queueSize: () => Promise<Result<number>>;
+    list: () => Promise<Result<DownloadRecord[]>>;
+    pause: (id: string) => Promise<Result<boolean>>;
+    resume: (id: string) => Promise<Result<boolean>>;
+    cancel: (id: string) => Promise<Result<boolean>>;
+    remove: (id: string, deleteFile: boolean) => Promise<Result<DownloadRecord[]>>;
+    clearFinished: () => Promise<Result<DownloadRecord[]>>;
+    open: (id: string) => Promise<Result<string>>;
+    reveal: (id: string) => Promise<Result<boolean>>;
+    onProgress: (listener: (record: DownloadRecord) => void) => () => void;
+  };
+  app: {
+    info: () => Promise<Result<AppInfo>>;
+  };
+  updates: {
+    status: () => Promise<Result<UpdateStatus>>;
+    check: () => Promise<Result<UpdateStatus>>;
+    install: () => Promise<Result<boolean>>;
+    onStatus: (listener: (status: UpdateStatus) => void) => () => void;
+  };
+  system: {
+    openExternal: (url: string) => Promise<Result<void>>;
+    setFullScreen: (value: boolean) => Promise<Result<boolean>>;
+    pickPlaylistFile: () => Promise<Result<string | null>>;
+    restart: () => Promise<Result<boolean>>;
+  };
+}

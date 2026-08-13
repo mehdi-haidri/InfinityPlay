@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
-import { Globe, LayoutGrid, ListVideo, RotateCw, Search } from "lucide-react";
-import type { Channel } from "@shared/types";
+import { BadgeCheck, Globe, LayoutGrid, ListVideo, Radio, RotateCw, Search, Users } from "lucide-react";
+import type { Channel, ChannelProgramme, PlaylistSource, XtreamSource } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { useAsync, useDebounced } from "../hooks/useAsync";
 import { EmptyState, ErrorState, LoadingState } from "../components/States";
@@ -11,21 +11,33 @@ import { FilterSelect, type FilterOption } from "../components/FilterSelect";
 
 export function LiveTvPage() {
   const playlists = useApp((state) => state.config.playlists);
+  const xtreamSources = useApp((state) => state.config.xtreamSources);
   const openPlayer = useApp((state) => state.openPlayer);
   const navigate = useApp((state) => state.navigate);
 
-  const [playlistIndex, setPlaylistIndex] = useState(0);
+  const [sourceKey, setSourceKey] = useState("");
   const [group, setGroup] = useState("All");
   const [country, setCountry] = useState("All");
   const [query, setQuery] = useState("");
   const [refreshToken, setRefreshToken] = useState(0);
   const debouncedQuery = useDebounced(query, 220);
 
-  const source = playlists[playlistIndex];
+  type SourceChoice =
+    | { key: string; kind: "playlist"; label: string; value: PlaylistSource }
+    | { key: string; kind: "xtream"; label: string; value: XtreamSource };
+  const sources = useMemo<SourceChoice[]>(() => [
+    ...playlists.map((value) => ({ key: `playlist:${value.url}`, kind: "playlist" as const, label: value.name, value })),
+    ...xtreamSources.map((value) => ({ key: `xtream:${value.id}`, kind: "xtream" as const, label: `${value.name} · My IPTV`, value })),
+  ], [playlists, xtreamSources]);
+  const source = sources.find((entry) => entry.key === sourceKey) ?? sources[0];
 
   const { data, loading, error, reload } = useAsync<Channel[]>(
-    () => (source ? unwrap(api.tv.playlist(source.url, refreshToken > 0)) : Promise.resolve([])),
-    [source?.url, refreshToken],
+    () => source
+      ? source.kind === "playlist"
+        ? unwrap(api.tv.playlist(source.value, refreshToken > 0))
+        : unwrap(api.tv.xtream(source.value))
+      : Promise.resolve([]),
+    [source?.key, refreshToken],
   );
 
   const groups = useMemo<FilterOption[]>(() => {
@@ -84,6 +96,22 @@ export function LiveTvPage() {
     });
   }, [data, group, country, debouncedQuery]);
 
+  const epgChannelIds = useMemo(() => channels.slice(0, 400).map((entry) => entry.id).filter(Boolean), [channels]);
+  const epgKey = epgChannelIds.join("|");
+  const programmes = useAsync<Record<string, ChannelProgramme[]>>(
+    () => {
+      if (!source || epgChannelIds.length === 0) return Promise.resolve({});
+      if (source.kind === "xtream") return unwrap(api.tv.xtreamEpg(source.value, epgChannelIds));
+      return source.value.epgUrl ? unwrap(api.tv.epg(source.value.epgUrl, epgChannelIds)) : Promise.resolve({});
+    },
+    [source?.key, source?.kind === "playlist" ? source.value.epgUrl : "xtream", epgKey],
+  );
+
+  const currentProgramme = (channel: Channel) => {
+    const now = Date.now();
+    return (programmes.data?.[channel.id] ?? []).find((entry) => entry.start <= now && entry.stop > now);
+  };
+
   const watch = (channel: Channel) => {
     // The player opens immediately with a spinner while the main process checks whether
     // this codec needs FFmpeg compatibility mode.
@@ -93,6 +121,7 @@ export function LiveTvPage() {
       url: channel.streamUrl,
       live: true,
       posterUrl: channel.logo || null,
+      headers: channel.headers,
     });
   };
 
@@ -117,20 +146,20 @@ export function LiveTvPage() {
       <PageHeader
         eyebrow="Live"
         title="Live TV"
-        description={`Browse ${source.name} by channel group or search.`}
+          description={`Browse ${source.label} by channel group or search.`}
       />
 
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
         <FilterSelect
           label="Playlist"
           icon={<ListVideo size={14} color="var(--text-faint)" />}
-          value={String(playlistIndex)}
-          options={playlists.map((playlist, index) => ({
-            value: String(index),
-            label: playlist.name,
+          value={source.key}
+          options={sources.map((entry) => ({
+            value: entry.key,
+            label: entry.label,
           }))}
           onChange={(next) => {
-            setPlaylistIndex(Number(next));
+            setSourceKey(next);
             setGroup("All");
             setCountry("All");
           }}
@@ -206,7 +235,13 @@ export function LiveTvPage() {
                     />
                     <span style={{ minWidth: 0 }}>
                       <span className="card-title" style={{ display: "block" }}>{channel.name}</span>
-                      <span className="card-sub">{channel.group || "Uncategorized"}</span>
+                      <span className="card-sub">
+                        {currentProgramme(channel)?.title || channel.group || "Uncategorized"}
+                      </span>
+                      <span className="source-trust" data-trust={channel.trust ?? "user"} title={channel.trustNote}>
+                        {channel.trust === "official" ? <BadgeCheck size={11} /> : channel.trust === "community" ? <Users size={11} /> : <Radio size={11} />}
+                        {channel.trust === "official" ? "Verified free" : channel.trust === "community" ? "Community link" : "Your provider"}
+                      </span>
                     </span>
                   </button>
                 ))}

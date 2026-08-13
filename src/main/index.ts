@@ -150,7 +150,7 @@ function createWindow(): BrowserWindow {
       preload: path.join(__dirname, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       /**
        * On in every packaged build. Off only under `npm run dev`.
        *
@@ -169,8 +169,20 @@ function createWindow(): BrowserWindow {
 
   // External links open in the user's browser, never inside the app shell.
   window.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol === "https:" || parsed.protocol === "http:") {
+        void shell.openExternal(parsed.toString());
+      }
+    } catch {
+      // Malformed and non-web URLs stay blocked inside the app shell.
+    }
     return { action: "deny" };
+  });
+
+  window.webContents.on("will-navigate", (event, url) => {
+    const current = window.webContents.getURL();
+    if (url !== current) event.preventDefault();
   });
 
   if (isDev && process.env.ELECTRON_RENDERER_URL) {

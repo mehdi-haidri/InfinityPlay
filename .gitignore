@@ -8,3 +8,5 @@ dist/
 
 # FFmpeg binaries staged for packaging by build/prepare-ffmpeg.cjs.
 build/bin/
+*.apk
+*.txt

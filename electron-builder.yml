@@ -67,6 +67,9 @@ mac:
   artifactName: ${productName}-${version}-mac-${arch}.${ext}
 
 linux:
+  # Keep the installed desktop filename aligned with Electron's app_id/WM_CLASS so
+  # launchers group the running window under the InfinityPlay icon.
+  syncDesktopName: true
   target:
     - target: AppImage
       arch: [x64]

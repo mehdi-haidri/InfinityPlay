@@ -5,19 +5,26 @@ import type {
   AudioVariant,
   DownloadRecord,
   DownloadRequest,
+  FavoriteItem,
+  FreeMediaItem,
+  FreeMediaProvider,
   CatalogItem,
   Channel,
+  ChannelProgramme,
   HomePage,
   MediaDetails,
   MediaType,
   PersonDetails,
   PreparedLiveStream,
+  PlaylistSource,
   SeasonDownloadRequest,
   Release,
   Result,
   SubtitleOption,
   UpdateStatus,
   WatchHistoryItem,
+  WatchAvailability,
+  XtreamSource,
 } from "@shared/types";
 
 const invoke = <T>(channel: string, ...args: unknown[]): Promise<Result<T>> =>
@@ -44,8 +51,25 @@ const api = {
     load: (url: string) => invoke<string>("subtitle:load", url),
   },
   tv: {
-    playlist: (url: string, forceRefresh = false) =>
-      invoke<Channel[]>("tv:playlist", url, forceRefresh),
+    playlist: (source: PlaylistSource, forceRefresh = false) =>
+      invoke<Channel[]>("tv:playlist", source, forceRefresh),
+    epg: (url: string, channelIds: string[]) =>
+      invoke<Record<string, ChannelProgramme[]>>("tv:epg", url, channelIds),
+    xtream: (source: XtreamSource) => invoke<Channel[]>("tv:xtream", source),
+    xtreamEpg: (source: XtreamSource, channelIds: string[]) =>
+      invoke<Record<string, ChannelProgramme[]>>("tv:xtreamEpg", source, channelIds),
+  },
+  freeMedia: {
+    browse: (provider: FreeMediaProvider, page = 1) =>
+      invoke<FreeMediaItem[]>("free:browse", provider, page),
+    search: (provider: FreeMediaProvider, query: string, page = 1) =>
+      invoke<FreeMediaItem[]>("free:search", provider, query, page),
+    details: (provider: FreeMediaProvider, id: string) =>
+      invoke<FreeMediaItem>("free:details", provider, id),
+  },
+  availability: {
+    title: (title: string, mediaType: MediaType) =>
+      invoke<WatchAvailability>("availability:title", title, mediaType),
   },
   media: {
     prepareLive: (url: string, startAt = 0, resolution = 0) =>
@@ -66,6 +90,10 @@ const api = {
     record: (item: WatchHistoryItem) => invoke<WatchHistoryItem[]>("history:record", item),
     remove: (subjectId: string) => invoke<WatchHistoryItem[]>("history:remove", subjectId),
     clear: () => invoke<WatchHistoryItem[]>("history:clear"),
+  },
+  favorites: {
+    list: () => invoke<FavoriteItem[]>("favorites:list"),
+    toggle: (item: CatalogItem) => invoke<FavoriteItem[]>("favorites:toggle", item),
   },
   downloads: {
     start: (request: DownloadRequest) => invoke<DownloadRecord>("download:start", request),

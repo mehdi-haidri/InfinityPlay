@@ -1,8 +1,9 @@
 /**
  * The MovieBox facade the IPC layer talks to: raw client + adapters + a small TTL cache.
  */
-import { HIDDEN_AUDIO_LANGUAGES } from "@shared/types";
+import { DEFAULT_CONFIG, HIDDEN_AUDIO_LANGUAGES } from "@shared/types";
 import type {
+  AppConfig,
   AudioVariant,
   CatalogItem,
   HomePage,
@@ -12,7 +13,6 @@ import type {
   Release,
   SubtitleOption,
 } from "@shared/types";
-import { getConfig } from "../../store";
 import { registerSignedStream } from "../../streams";
 import { MovieBoxClient } from "./client";
 import {
@@ -60,6 +60,11 @@ class TtlCache {
 export class MovieBoxService {
   private client = new MovieBoxClient();
   private cache = new TtlCache();
+  private getConfigFn: () => AppConfig;
+
+  constructor(getConfigFn?: () => AppConfig) {
+    this.getConfigFn = getConfigFn ?? (() => DEFAULT_CONFIG);
+  }
 
   private async cached<T>(key: string, produce: () => Promise<T>): Promise<T> {
     const hit = this.cache.get<T>(key);
@@ -76,7 +81,7 @@ export class MovieBoxService {
 
   /** Cache keys carry the audio preference — it changes which subject a row resolves to. */
   private get preferredAudio(): string {
-    return getConfig().preferredAudio;
+    return this.getConfigFn().preferredAudio;
   }
 
   /**
@@ -85,7 +90,7 @@ export class MovieBoxService {
    * rather than at the point of display.
    */
   private screen(items: CatalogItem[]): CatalogItem[] {
-    if (!getConfig().hideAdultContent) return items;
+    if (!this.getConfigFn().hideAdultContent) return items;
     return items.filter((item) => !item.isAdult);
   }
 
@@ -115,7 +120,7 @@ export class MovieBoxService {
 
   async home(): Promise<HomePage> {
     const audio = this.preferredAudio;
-    const { catalogCountry: country, hideAdultContent } = getConfig();
+    const { catalogCountry: country, hideAdultContent } = this.getConfigFn();
 
     return this.cached(`home:${country}:${audio}:${hideAdultContent}`, async () => {
       await this.client.init();
@@ -149,7 +154,7 @@ export class MovieBoxService {
   /** MovieBox's own curated feed, kept for the "Featured" view. */
   async featured(tabId = "0", page = 1): Promise<HomePage> {
     const audio = this.preferredAudio;
-    const screened = getConfig().hideAdultContent;
+    const screened = this.getConfigFn().hideAdultContent;
     return this.cached(`featured:${tabId}:${page}:${audio}:${screened}`, async () => {
       await this.client.init();
       const featured = homepageToRows(await this.client.getHomepage(tabId, page), audio);
@@ -167,7 +172,7 @@ export class MovieBoxService {
     const trimmed = query.trim();
     if (trimmed.length === 0) return [];
     const audio = this.preferredAudio;
-    const screened = getConfig().hideAdultContent;
+    const screened = this.getConfigFn().hideAdultContent;
     return this.cached(`search:${trimmed.toLowerCase()}:${page}:${audio}:${screened}`, async () => {
       await this.client.init();
       return this.screen(searchToCatalogItems(await this.client.search(trimmed, page), audio));

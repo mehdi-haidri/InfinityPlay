@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Download as DownloadIcon, Info, X } from "lucide-react";
+import { App as CapApp } from "@capacitor/app";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
-import { Player } from "./components/Player";
 import { Splash } from "./components/Splash";
 import { HomePage } from "./pages/HomePage";
 import { SearchPage } from "./pages/SearchPage";
@@ -12,9 +12,14 @@ import { HistoryPage } from "./pages/HistoryPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { AboutPage } from "./pages/AboutPage";
 import { DownloadsPage } from "./pages/DownloadsPage";
+import { FavoritesPage } from "./pages/FavoritesPage";
 import { PersonPage } from "./pages/PersonPage";
+import { FreeLibraryPage } from "./pages/FreeLibraryPage";
 import { formatBytes } from "./lib/format";
 import { useApp } from "./store";
+import { applyDeviceProfile, installTvSpatialNavigation } from "./lib/device";
+
+const Player = lazy(() => import("./components/Player").then((module) => ({ default: module.Player })));
 
 function Routes() {
   const route = useApp((state) => state.route);
@@ -45,8 +50,12 @@ function Routes() {
       );
     case "livetv":
       return <LiveTvPage />;
+    case "free-library":
+      return <FreeLibraryPage />;
     case "history":
       return <HistoryPage />;
+    case "favorites":
+      return <FavoritesPage />;
     case "settings":
       return <SettingsPage />;
     case "downloads":
@@ -161,25 +170,67 @@ export function App() {
   const loadCapabilities = useApp((state) => state.loadCapabilities);
   const loadWatchHistory = useApp((state) => state.loadWatchHistory);
   const loadDownloads = useApp((state) => state.loadDownloads);
+  const loadFavorites = useApp((state) => state.loadFavorites);
   const watchDownloads = useApp((state) => state.watchDownloads);
   const route = useApp((state) => state.route);
   const player = useApp((state) => state.player);
+  const closePlayer = useApp((state) => state.closePlayer);
+  const goBack = useApp((state) => state.goBack);
 
   const [booted, setBooted] = useState(false);
 
   useEffect(() => {
+    const sync = () => applyDeviceProfile();
+    sync();
+    window.addEventListener("resize", sync);
+    window.addEventListener("orientationchange", sync);
+    const removeSpatialNavigation = installTvSpatialNavigation(() => useApp.getState().route.name);
+    return () => {
+      window.removeEventListener("resize", sync);
+      window.removeEventListener("orientationchange", sync);
+      removeSpatialNavigation();
+    };
+  }, []);
+
+  useEffect(() => {
+    let sub: { remove: () => void } | undefined;
+    try {
+      void CapApp.addListener("backButton", () => {
+        const backEvent = new CustomEvent("infinityplay:back", { cancelable: true });
+        window.dispatchEvent(backEvent);
+        if (backEvent.defaultPrevented) return;
+        if (useApp.getState().player) {
+          closePlayer();
+        } else if (useApp.getState().history.length > 0) {
+          goBack();
+        } else {
+          void CapApp.minimizeApp();
+        }
+      }).then((handle) => {
+        sub = handle;
+      });
+    } catch {
+      // Non-capacitor environment
+    }
+    return () => {
+      sub?.remove();
+    };
+  }, [closePlayer, goBack]);
+
+  useEffect(() => {
     // The splash lifts once the persisted state is in, so the first frame behind it is
     // the real UI rather than empty shells.
-    void Promise.allSettled([loadConfig(), loadWatchHistory(), loadDownloads(), loadCapabilities()]).then(() =>
+    void Promise.allSettled([loadConfig(), loadWatchHistory(), loadDownloads(), loadFavorites(), loadCapabilities()]).then(() =>
       setBooted(true),
     );
     // One subscription for the whole app: progress feeds both the toasts and the page.
     return watchDownloads();
-  }, [loadConfig, loadWatchHistory, loadDownloads, loadCapabilities, watchDownloads]);
+  }, [loadConfig, loadWatchHistory, loadDownloads, loadFavorites, loadCapabilities, watchDownloads]);
 
   // Every route change starts at the top, the way a browser would.
   useEffect(() => {
     document.querySelector(".main")?.scrollTo({ top: 0 });
+    window.dispatchEvent(new Event("infinityplay:focus-route"));
   }, [route]);
 
   return (
@@ -190,7 +241,11 @@ export function App() {
         <TopBar />
         <Routes />
       </main>
-      {player && <Player />}
+      {player && (
+        <Suspense fallback={<div className="player-module-loader" aria-label="Opening player"><div className="spinner" /></div>}>
+          <Player />
+        </Suspense>
+      )}
       <Toasts />
       <LiveAnnouncements />
       <Splash ready={booted} />

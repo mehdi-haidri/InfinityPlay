@@ -10,9 +10,10 @@ interface Props {
   progress?: number;
   onOpen?: (item: CatalogItem) => void;
   onRemove?: (item: CatalogItem) => void;
+  removeLabel?: string;
 }
 
-export function PosterCard({ item, progress = 0, onOpen, onRemove }: Props) {
+export function PosterCard({ item, progress = 0, onOpen, onRemove, removeLabel = "continue watching" }: Props) {
   const navigate = useApp((state) => state.navigate);
   const open = () => (onOpen ? onOpen(item) : navigate({ name: "details", id: item.id }));
 
@@ -55,8 +56,8 @@ export function PosterCard({ item, progress = 0, onOpen, onRemove }: Props) {
         <button
           className="icon-button card-remove-action"
           onClick={() => onRemove(item)}
-          aria-label={`Remove ${item.title} from continue watching`}
-          title="Remove from continue watching"
+          aria-label={`Remove ${item.title} from ${removeLabel}`}
+          title={`Remove from ${removeLabel}`}
         >
           <X size={14} />
         </button>

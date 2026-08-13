@@ -8,22 +8,32 @@ import { join } from "node:path";
 import type {
   AppConfig,
   AppInfo,
+  CatalogItem,
+  FreeMediaProvider,
   DownloadRequest,
   SeasonDownloadRequest,
   MediaType,
   Result,
   WatchHistoryItem,
   PreparedLiveStream,
+  PlaylistSource,
+  XtreamSource,
 } from "@shared/types";
 import { MovieBoxService } from "./providers/moviebox";
 import { fetchPlaylist } from "./providers/m3u";
+import { fetchEpg } from "./providers/epg";
+import { fetchXtreamChannels, fetchXtreamEpg } from "./providers/xtream";
+import { browseFreeMedia, freeMediaDetails, searchFreeMedia } from "./providers/free-media";
+import { findWatchAvailability } from "./providers/watch";
 import { fetchSubtitleAsVttDataUrl } from "./providers/subtitles";
 import {
   clearHistory,
   getConfig,
   getHistory,
+  getFavorites,
   recordHistory,
   removeHistory,
+  toggleFavorite,
   updateConfig,
 } from "./store";
 import {
@@ -47,9 +57,9 @@ import {
   isAutoUpdateSupported,
 } from "./updater";
 import { generateMediaPreview, prepareLiveStream, setDecodableCodecs, stageManifest } from "./live";
-import { toolAvailable } from "./media-tools";
+import { toolAvailable, ffmpegVersion } from "./media-tools";
 
-const moviebox = new MovieBoxService();
+const moviebox = new MovieBoxService(getConfig);
 
 function packageType(): string {
   if (!app.isPackaged) return "development";
@@ -104,9 +114,28 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   handle("subtitle:load", (url: string) => fetchSubtitleAsVttDataUrl(url));
 
-  handle("tv:playlist", (url: string, forceRefresh: boolean) =>
-    fetchPlaylist(url, forceRefresh ?? false),
+  handle("tv:playlist", (source: PlaylistSource, forceRefresh: boolean) =>
+    fetchPlaylist(source, forceRefresh ?? false),
   );
+  handle("tv:epg", (url: string, channelIds: string[]) => fetchEpg(url, channelIds));
+  handle("tv:xtream", (source: XtreamSource) => fetchXtreamChannels(source));
+  handle("tv:xtreamEpg", (source: XtreamSource, channelIds: string[]) =>
+    fetchXtreamEpg(source, channelIds),
+  );
+
+  handle("free:browse", (provider: FreeMediaProvider, page: number) =>
+    browseFreeMedia(provider, page ?? 1),
+  );
+  handle("free:search", (provider: FreeMediaProvider, query: string, page: number) =>
+    searchFreeMedia(provider, query, page ?? 1),
+  );
+  handle("free:details", (provider: FreeMediaProvider, id: string) =>
+    freeMediaDetails(provider, id),
+  );
+  handle("availability:title", (title: string, mediaType: MediaType) => {
+    const config = getConfig();
+    return findWatchAvailability(title, mediaType, config.tmdbReadToken, config.watchRegion);
+  });
   handle("media:prepareLive", (url: string, startAt: number, resolution: number): Promise<PreparedLiveStream> =>
     prepareLiveStream(url, startAt, resolution),
   );
@@ -121,6 +150,8 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   handle("history:record", (item: WatchHistoryItem) => recordHistory(item));
   handle("history:remove", (subjectId: string) => removeHistory(subjectId));
   handle("history:clear", () => clearHistory());
+  handle("favorites:list", () => getFavorites());
+  handle("favorites:toggle", (item: CatalogItem) => toggleFavorite(item));
 
   handle("download:start", (request: DownloadRequest) => startDownload(request));
   handle("download:startSeason", (request: SeasonDownloadRequest) =>
@@ -165,12 +196,14 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return {
       name: app.getName(),
       version: app.getVersion(),
+      runtime: "electron",
       electron: process.versions.electron,
       chrome: process.versions.chrome,
       node: process.versions.node,
       platform: `${process.platform}-${process.arch}`,
       packageType: packageType(),
       ffmpeg: toolAvailable("ffmpeg"),
+      ffmpegVersion: ffmpegVersion(),
       updatable: isAutoUpdateSupported(),
       gpu: `${vendor} · video decode ${decode}`,
     };
@@ -180,7 +213,13 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   handle("update:check", () => checkForUpdates());
   handle("update:install", () => installUpdate());
 
-  handle("shell:openExternal", (url: string) => shell.openExternal(url));
+  handle("shell:openExternal", (url: string) => {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      throw new Error("Only web links can be opened outside InfinityPlay.");
+    }
+    return shell.openExternal(parsed.toString());
+  });
 
   handle("window:toggleFullScreen", (value: boolean) => {
     const window = getWindow();
