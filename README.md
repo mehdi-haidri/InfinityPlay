@@ -162,15 +162,10 @@ Worth knowing before debugging something that "returns nothing":
 - The stream CDN answers 428 to browser-like `User-Agent` headers, so it is rewritten for
   media hosts only.
 
-## Author
+## Authors & Developers
 
-**EL HADRATI Othman** — [github.com/ELhadratiOth](https://github.com/ELhadratiOth) ·
-<othmanelhadrati@gmail.com>
-
-## Contributors
-
-- **Tajeddine Bourhim** — [@Scorpiontaj](https://github.com/Scorpiontaj) ·
-  <bourhimtajeddine@gmail.com>
+- **EL HADRATI Othman** — Lead Developer · [github.com/ELhadratiOth](https://github.com/ELhadratiOth) · <othmanelhadrati@gmail.com>
+- **Tajeddine Bourhim** — Co-Author & Core Developer · [github.com/Scorpiontaj](https://github.com/Scorpiontaj) · <bourhimtajeddine@gmail.com>
 
 ## Licence
 

@@ -74,25 +74,32 @@ export function registerSignedStream(manifestUrl: string, signCookie: string): s
   return `${manifestUrl}?${query}`;
 }
 
+export function getSignedQueryForUrl(url: string): string | null {
+  if (url.includes("Policy=")) return null;
+  const match = signedPrefixes.find((entry) => url.startsWith(entry.prefix));
+  return match ? match.query : null;
+}
+
 export async function installStreamSigner(): Promise<void> {
   try {
     const electron = await import("electron");
-    if (!electron?.session?.defaultSession) return;
-    
-    const filter = { urls: ["*://*.hakunaymatata.com/dash/*"] };
-    electron.session.defaultSession.webRequest.onBeforeRequest(filter, (details, callback) => {
-      if (details.url.includes("Policy=")) {
-        callback({});
-        return;
-      }
-      const match = signedPrefixes.find((entry) => details.url.startsWith(entry.prefix));
-      if (!match) {
-        callback({});
-        return;
-      }
-      const separator = details.url.includes("?") ? "&" : "?";
-      callback({ redirectURL: `${details.url}${separator}${match.query}` });
-    });
+    if (electron?.session?.defaultSession) {
+      const filter = { urls: ["*://*.hakunaymatata.com/dash/*"] };
+      electron.session.defaultSession.webRequest.onBeforeRequest(filter, (details, callback) => {
+        if (details.url.includes("Policy=")) {
+          callback({});
+          return;
+        }
+        const match = signedPrefixes.find((entry) => details.url.startsWith(entry.prefix));
+        if (!match) {
+          callback({});
+          return;
+        }
+        const separator = details.url.includes("?") ? "&" : "?";
+        callback({ redirectURL: `${details.url}${separator}${match.query}` });
+      });
+      return;
+    }
   } catch {
     // Non-electron environment
   }

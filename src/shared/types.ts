@@ -510,12 +510,24 @@ export type UpdateStatus =
   | { state: "error"; message: string }
   | { state: "unsupported"; message: string };
 
-export const AUTHOR = {
-  name: "EL HADRATI Othman",
-  email: "othmanelhadrati@gmail.com",
-  github: "https://github.com/ELhadratiOth",
-  githubHandle: "ELhadratiOth",
-} as const;
+export const AUTHORS = [
+  {
+    name: "EL HADRATI Othman",
+    email: "othmanelhadrati@gmail.com",
+    github: "https://github.com/ELhadratiOth",
+    githubHandle: "ELhadratiOth",
+    role: "Lead Developer",
+  },
+  {
+    name: "Tajeddine Bourhim",
+    email: "bourhimtajeddine@gmail.com",
+    github: "https://github.com/Scorpiontaj",
+    githubHandle: "Scorpiontaj",
+    role: "Co-Author & Core Developer",
+  },
+] as const;
+
+export const AUTHOR = AUTHORS[0];
 
 export interface InfinityPlayApi {
   catalog: {

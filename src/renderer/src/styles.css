@@ -2411,8 +2411,8 @@ body {
   }
 
   .sidebar .nav-item[aria-current="page"] {
-    color: #e50914 !important;
-    background: rgba(229, 9, 20, 0.14) !important;
+    color: var(--accent) !important;
+    background: var(--accent-soft) !important;
   }
 
   .sidebar .nav-label {
@@ -2529,17 +2529,78 @@ body {
 
 @media (max-width: 768px) {
   .hero {
-    min-height: 240px !important;
+    margin: -12px -14px 20px -14px !important;
+    min-height: 320px !important;
     height: auto !important;
-    padding: 20px 16px !important;
+    padding: 0 !important;
+    border-radius: 0 !important;
+  }
+
+  .hero-poster-wrap {
+    display: none !important;
+  }
+
+  .hero-content {
+    max-width: 100% !important;
+    padding: 24px 16px 20px 16px !important;
   }
 
   .hero-title {
-    font-size: 22px !important;
+    font-size: clamp(22px, 6vw, 30px) !important;
+    margin-bottom: 8px !important;
   }
 
   .hero-meta {
     font-size: 12px !important;
+    margin-bottom: 10px !important;
+    flex-wrap: wrap !important;
+  }
+
+  .hero-desc {
+    font-size: 13px !important;
+    line-height: 1.4 !important;
+    margin-bottom: 16px !important;
+    -webkit-line-clamp: 2 !important;
+  }
+
+  .inline-actions {
+    display: flex !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+
+  .inline-actions .btn {
+    flex: 1 !important;
+    justify-content: center !important;
+    padding: 10px 14px !important;
+    font-size: 13px !important;
+  }
+
+  .hero-dots {
+    right: 16px !important;
+    bottom: 16px !important;
+  }
+
+  .row {
+    margin-bottom: 24px !important;
+  }
+
+  .row-title {
+    font-size: 16px !important;
+  }
+
+  .row-actions {
+    display: none !important;
+  }
+
+  .row-scroll {
+    gap: 10px !important;
+    padding-bottom: 8px !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+
+  .row-scroll .poster-card-shell {
+    width: 125px !important;
   }
 
   .person-hero {
@@ -2559,10 +2620,38 @@ body {
   }
 }
 
-/* ── TV / D-Pad Remote Focus High-Contrast Highlights ────────────────────────── */
+@media (max-width: 480px) {
+  .hero {
+    min-height: 280px !important;
+  }
+
+  .row-scroll .poster-card-shell {
+    width: 115px !important;
+  }
+}
+
+@media (max-width: 1024px) {
+  .mobile-only-inline {
+    display: inline-flex !important;
+  }
+
+  .player-root {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 999999 !important;
+    background: #000 !important;
+  }
+}
+
 @media (min-width: 1025px) {
+  .mobile-only-inline {
+    display: none !important;
+  }
+
   :focus-visible {
-    outline: 3px solid #e50914 !important;
+    outline: 3px solid var(--accent) !important;
     outline-offset: 3px !important;
   }
 }

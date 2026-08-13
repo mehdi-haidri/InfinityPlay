@@ -212,10 +212,17 @@ interface MaterializedDash {
   height: number;
 }
 
+const dashManifestCache = new Map<string, MaterializedDash>();
+
 async function materializeDash(
   source: string,
   resolution: number,
 ): Promise<MaterializedDash | null> {
+  const cacheKey = `${source}_${resolution}`;
+  if (dashManifestCache.has(cacheKey)) {
+    return dashManifestCache.get(cacheKey)!;
+  }
+
   const response = await fetch(source, { signal: AbortSignal.timeout(15_000) });
   if (!response.ok) return null;
   const original = await response.text();
@@ -253,7 +260,10 @@ async function materializeDash(
   const token = randomUUID();
   const manifestPath = path.join(app.getPath("temp"), `infinityplay-${token}.mpd`);
   fs.writeFileSync(manifestPath, manifest, "utf8");
-  return { path: manifestPath, codec, duration, height: chosenHeight };
+  
+  const result = { path: manifestPath, codec, duration, height: chosenHeight };
+  dashManifestCache.set(cacheKey, result);
+  return result;
 }
 
 async function prepareDashStream(

@@ -36,6 +36,7 @@ import {
 } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { formatTime, qualityLabel } from "../lib/format";
+import { registerStreamSignature } from "../lib/streamSigner";
 import { useApp } from "../store";
 
 interface VttCue {
@@ -120,9 +121,6 @@ const HEVC_CODEC_CANDIDATES = ["1.6.L153.B0", "1.6.L150.90", "1.6.L120.90", "1.6
  * Returns a URL for the repaired manifest, or null when none is needed.
  */
 async function repairDashManifest(manifestUrl: string): Promise<string | null> {
-  if (typeof window !== "undefined" && (window as any).Capacitor?.isNativePlatform?.()) {
-    return null;
-  }
   const incomplete = /codecs="(hev1|hvc1)"/;
   // Bounded: this probe sits in front of playback, so a manifest request that stalls must
   // not leave the player waiting with no picture and no error. On timeout the original
@@ -142,11 +140,28 @@ async function repairDashManifest(manifestUrl: string): Promise<string | null> {
 
   let patched = xml.replace(new RegExp(`codecs="${family}"`, "g"), `codecs="${codec}"`);
 
-  // Relative segment paths would otherwise resolve against the blob URL.
+  // Relative segment paths would otherwise resolve against the blob URL or local proxy.
   if (!/<BaseURL>/i.test(patched)) {
     const url = new URL(manifestUrl);
     const directory = `${url.origin}${url.pathname.replace(/[^/]+$/, "")}`;
     patched = patched.replace(/(<MPD\b[^>]*>)/i, `$1<BaseURL>${directory}</BaseURL>`);
+  }
+
+  // Ensure segment templates inherit the CloudFront signature parameters
+  const parsed = new URL(manifestUrl);
+  const query = parsed.search.slice(1).replace(/&/g, "&amp;");
+  if (query) {
+    patched = patched.replace(
+      /\b(initialization|sourceURL|media|url)="([^"]+)"/gi,
+      (_match, name: string, value: string) =>
+        `${name}="${value}${value.includes("?") ? "&amp;" : "?"}${query}"`,
+    );
+  }
+
+  // On Capacitor Android, we are on http://localhost or https://localhost, NOT file://.
+  // We use a Data URL because CapacitorHttp (which we need for CORS) intercepts and breaks Blob URLs.
+  if (typeof window !== "undefined" && (window as any).Capacitor?.isNativePlatform?.()) {
+    return `data:application/dash+xml;charset=utf-8,${encodeURIComponent(patched)}`;
   }
 
   return unwrap(api.media.stageManifest(patched));
@@ -320,6 +335,12 @@ export function Player() {
     }
 
     setPreviewImage(null);
+    
+    if (typeof window !== "undefined" && (window as any).Capacitor?.isNativePlatform?.()) {
+      setPreviewLoading(false);
+      return;
+    }
+
     const sequence = ++previewRequest.current;
     const timer = window.setTimeout(() => {
       setPreviewLoading(true);
@@ -482,6 +503,31 @@ export function Player() {
 
       const player = MediaPlayer().create();
       dashRef.current = player;
+
+      try {
+        const parsed = new URL(sourceUrl);
+        const query = parsed.search.slice(1);
+        if (query && query.includes("Policy=")) {
+          registerStreamSignature(sourceUrl, query);
+          player.extend(
+            "RequestModifier",
+            function () {
+              return {
+                modifyRequestHeader: (xhr: any) => xhr,
+                modifyRequestURL: (url: string) => {
+                  if (!url || url.startsWith("data:") || url.includes("Policy=")) return url;
+                  const separator = url.includes("?") ? "&" : "?";
+                  return `${url}${separator}${query}`;
+                },
+              };
+            },
+            true,
+          );
+        }
+      } catch {
+        // Invalid URL ignore
+      }
+
       const requestedHeight = activeRelease?.kind === "dash" ? activeRelease.resolution : 0;
       player.updateSettings({
         streaming: {
@@ -507,13 +553,10 @@ export function Player() {
         player.on(MediaPlayer.events.STREAM_INITIALIZED, pinQuality);
       }
       player.on(MediaPlayer.events.ERROR, (event: any) => {
+        // dash.js reports recoverable problems here too — a segment it retried, a
+        // representation it dropped. Reporting those interrupts a stream that is still
+        // playing, so the toast is kept for failures the viewer can actually see.
         if (media.readyState >= 3 && !media.error) return;
-        // Fallback for WebView / Android when dashjs internal XHR fails: play direct URL
-        if (sourceUrl && media.src !== sourceUrl) {
-          media.src = sourceUrl;
-          media.play().catch(() => setPlaying(false));
-          return;
-        }
         notify({
           kind: "error",
           title: "Stream error",
@@ -660,6 +703,8 @@ export function Player() {
     void seekTo((prepared?.transcoded ? playbackOffset + video.currentTime : video.currentTime) + delta);
   }, [duration, playbackOffset, prepared?.transcoded, seekTo]);
 
+  const [orientationMode, setOrientationMode] = useState<"landscape" | "portrait" | "auto">("auto");
+
   const toggleFullscreen = useCallback(async () => {
     if (document.fullscreenElement) {
       await document.exitFullscreen();
@@ -669,6 +714,53 @@ export function Player() {
       setFullscreen(Boolean(document.fullscreenElement));
     }
   }, []);
+
+  const toggleMobileOrientation = useCallback(async () => {
+    const screenObj = window.screen as any;
+    const isLandscape = orientationMode === "landscape";
+
+    try {
+      if (isLandscape) {
+        setOrientationMode("portrait");
+        if (screenObj?.orientation?.unlock) {
+          try { screenObj.orientation.unlock(); } catch {}
+        }
+        if (document.fullscreenElement) {
+          await document.exitFullscreen().catch(() => undefined);
+          setFullscreen(false);
+        }
+      } else {
+        setOrientationMode("landscape");
+        if (!document.fullscreenElement && surfaceRef.current?.parentElement) {
+          await surfaceRef.current.parentElement.requestFullscreen().catch(() => undefined);
+          setFullscreen(true);
+        }
+        if (screenObj?.orientation?.lock) {
+          await screenObj.orientation.lock("landscape").catch(() => undefined);
+        }
+      }
+    } catch {
+      void toggleFullscreen();
+    }
+  }, [orientationMode, toggleFullscreen]);
+
+  useEffect(() => {
+    if (!request) return;
+    const isMobileOrTablet = window.matchMedia("(max-width: 1024px)").matches;
+    if (isMobileOrTablet) {
+      const screenObj = window.screen as any;
+      if (screenObj?.orientation?.lock) {
+        screenObj.orientation.lock("landscape").catch(() => undefined);
+        setOrientationMode("landscape");
+      }
+    }
+    return () => {
+      const screenObj = window.screen as any;
+      if (screenObj?.orientation?.unlock) {
+        try { screenObj.orientation.unlock(); } catch {}
+      }
+    };
+  }, [request]);
 
   const wake = useCallback(() => {
     setIdle(false);
@@ -1223,6 +1315,16 @@ export function Player() {
                   title="Picture in Picture (PiP)"
                 >
                   <PictureInPicture size={19} />
+                </button>
+
+                <button
+                  className="icon-button mobile-only-inline"
+                  onClick={() => void toggleMobileOrientation()}
+                  aria-label="Switch orientation / Laptop view"
+                  title="Switch to Horizontal View"
+                  style={{ color: orientationMode === "landscape" ? "var(--accent)" : undefined }}
+                >
+                  <RotateCw size={19} />
                 </button>
 
                 <button className="icon-button" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"} title={fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}>

@@ -1,10 +1,10 @@
 {
   "name": "infinityplay",
-  "version": "0.2.1",
+  "version": "0.2.4",
   "description": "Desktop app for finding and streaming movies, TV shows, anime and live TV.",
   "main": "./out/main/index.js",
   "author": {
-    "name": "EL HADRATI Othman",
+    "name": "EL HADRATI Othman & Tajeddine Bourhim",
     "email": "othmanelhadrati@gmail.com",
     "url": "https://github.com/ELhadratiOth"
   },
@@ -13,6 +13,11 @@
       "name": "Tajeddine Bourhim",
       "email": "bourhimtajeddine@gmail.com",
       "url": "https://github.com/Scorpiontaj"
+    },
+    {
+      "name": "EL HADRATI Othman",
+      "email": "othmanelhadrati@gmail.com",
+      "url": "https://github.com/ELhadratiOth"
     }
   ],
   "repository": {
