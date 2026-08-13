@@ -137,8 +137,11 @@ Unsigned mode is explicit in `electron-builder.yml`. To enable trusted distribut
 
 ### Android release signing
 
-The Android release job refuses to publish an unsigned APK. Configure these GitHub
-Actions secrets before tagging a release:
+The Android release job publishes an APK only when all four signing secrets are present.
+When they are missing or incomplete, the workflow still tests, lints, and assembles the
+debug Android build so Windows, macOS, and Linux releases are not blocked, but it does
+not attach an unsafe debug or unsigned APK. Configure these GitHub Actions secrets before
+tagging a release that must include Android:
 
 - `ANDROID_KEYSTORE_BASE64`: the release JKS file encoded with `base64 -w0`.
 - `ANDROID_KEYSTORE_PASSWORD`: the keystore password.
@@ -147,6 +150,10 @@ Actions secrets before tagging a release:
 
 Keep the original JKS backed up outside GitHub. Losing it prevents in-place updates for
 users who installed an earlier signed APK.
+
+All four secrets are one contract: setting only some of them intentionally follows the
+unsigned-validation path. The Android job prints a warning explaining why no APK was
+published.
 
 ## Project layout
 

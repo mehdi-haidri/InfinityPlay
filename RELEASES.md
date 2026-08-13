@@ -75,9 +75,10 @@ Updates install automatically. InfinityPlay checks on launch and on demand from 
 - Reworked the first Home viewport on phones: bounded dynamic hero height, mobile-centered artwork, balanced title wrapping, two-column actions, correctly positioned carousel indicators, and a responsive loading skeleton.
 
 ### Android Packaging & Release Engineering
-- Synchronized app, lockfile, Gradle, and APK metadata at version **0.2.5**.
+- Synchronized app, lockfile, Gradle, and APK metadata at version **0.2.6**.
 - Added optional Android hardware declarations for universal phone, tablet, and TV installation.
 - Added conditional signed release APK generation in GitHub Actions and documented the required signing secrets.
+- Fixed release tags failing when Android signing secrets are unavailable: CI now runs the complete Android test/lint/debug-build validation and skips only the publishable APK. When all four signing secrets are configured, the signed universal APK is still attached normally.
 - Added adaptive monochrome launcher icons, dark system bars, post-splash theming, and safer WebView settings.
 
 ### Validation
