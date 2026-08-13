@@ -68,10 +68,13 @@ interface InfinityPlayerPlugin {
     title: string;
     positionMs: number;
     subtitlesJson: string;
+    releasesJson: string;
+    headersJson: string;
+    live: boolean;
   }): Promise<NativePlayerResult>;
 }
 
-/** Android Media3 bridge for on-demand Movies and Series. */
+/** Android Media3 bridge for VOD plus header-protected HLS/IPTV streams. */
 export const nativePlayer = registerPlugin<InfinityPlayerPlugin>("InfinityPlayer");
 
 let cachedConfig: AppConfig | null = null;

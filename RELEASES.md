@@ -10,6 +10,8 @@ Updates install automatically. InfinityPlay checks on launch and on demand from 
 - Added a dedicated Android Media3 player for Movies and Series, bypassing WebView's `MEDIA_ELEMENT_ERROR: Format error` on HEVC/H.265 releases while leaving IPTV on its separate live-stream path.
 - Added native seeking, 5/15-second skip controls, playback speed, subtitle selection, track settings, buffering feedback, immersive landscape playback, and predictive-back support.
 - Native playback now returns the exact position and duration to InfinityPlay history, and reopening the title resumes from that saved position.
+- Automatic quality now selects the highest available source, so a title with a 1080p release displays **Play · 1080p** instead of being capped at 480p on Android.
+- Passed every Movie/Series release into the Android bridge and added a native quality picker for adaptive 1080p/720p/480p and direct-file sources; switching keeps the current timestamp.
 - Prefer progressive movie and episode sources on Android phones, tablets, and TV devices so the native player can open a signed file directly when available.
 - Fetch signed DASH manifests through Capacitor's native HTTP transport to avoid Android WebView CORS failures.
 - Automatically retry a failed Android movie or episode with an alternate progressive source while preserving the playback timestamp.
@@ -20,6 +22,8 @@ Updates install automatically. InfinityPlay checks on launch and on demand from 
 - Fixed Android `manifestLoadError` failures by routing HLS channels through Android's native media pipeline instead of WebView `hls.js` requests that are subject to CORS.
 - Enabled user-selected HTTP IPTV manifests and segments inside the HTTPS Capacitor shell, which is required by many public M3U sources.
 - Added bounded manifest, level, fragment, network, and media recovery for desktop HLS, followed by a clear offline/expired-channel error when retries are exhausted.
+- Preserved `http-referrer`, `http-user-agent`, and matching `#EXTVLCOPT` directives from M3U playlists, then applied them to native manifests, renditions, and media segments.
+- Expanded the Android Media3 path to HLS, DASH, progressive files, and RTSP. This fixes header-protected IPTV channels such as **2M Monde**, whose manifest returned HTTP 403 without its broadcaster headers.
 
 ### Playback Continuity & Desktop Performance
 - Quality changes now capture and persist the exact current timestamp before switching sources, then resume at that timestamp instead of restarting from the beginning.
@@ -45,6 +49,7 @@ Updates install automatically. InfinityPlay checks on launch and on demand from 
 - Improved Android Back behavior so player menus close before playback exits.
 - Added real Android `DownloadManager` downloads with progress, cancellation, persistence, and file opening.
 - Fixed Android touch scrolling by restoring a viewport-constrained main scroll container, explicit vertical touch panning, momentum scrolling, and native WebView nested scrolling.
+- Reworked the first Home viewport on phones: bounded dynamic hero height, mobile-centered artwork, balanced title wrapping, two-column actions, correctly positioned carousel indicators, and a responsive loading skeleton.
 
 ### Android Packaging & Release Engineering
 - Synchronized app, lockfile, Gradle, and APK metadata at version **0.2.5**.
@@ -57,6 +62,8 @@ Updates install automatically. InfinityPlay checks on launch and on demand from 
 - Passed Capacitor synchronization plus Android unit tests, lint, and debug APK assembly.
 - Verified responsive phone, tablet, TV, D-pad, mobile menu, overflow, and landscape player behavior in automated browser checks.
 - Reproduced the reported Amazing Spider-Man 2 480p failure in an Android Studio API 37 phone emulator, confirmed WebView rejected the HEVC source, then verified the same signed release plays through Android's native HEVC decoder with a detected duration of 2:21:35 and no playback exception.
+- Verified in the API 37 Android emulator that the same title resolves to 1080p, exposes all five source choices in the native quality picker, and plays at 1080p.
+- Verified the live 2M Monde manifest returns 403 without its playlist headers and 200 with them, then confirmed native HLS playback fetches its renditions and `.ts` segments without a Media3 playback exception.
 
 ---
 

@@ -280,7 +280,7 @@ export function Player() {
     : null;
 
   const releases = useMemo(() => request?.releases ?? [], [request]);
-  const isNativeAndroidVod = Capacitor.getPlatform() === "android" && Boolean(request && !request.live);
+  const isNativeAndroidPlayer = Capacitor.getPlatform() === "android" && Boolean(request);
 
   /**
    * `::cue` cannot be styled inline and does not read CSS custom properties in Chromium,
@@ -336,11 +336,11 @@ export function Player() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.url]);
 
-  // Android WebView rejects some HEVC/H.265 catalog MP4s with a format error even
-  // though the device has a native decoder. Keep IPTV in the web player, but hand
-  // on-demand Movies and Series to Media3 and write its final position to history.
+  // Media3 handles HEVC VOD and IPTV manifests that need Referer/User-Agent headers.
+  // WebView cannot reliably do either. The native activity also owns quality changes,
+  // subtitles and resume, returning the final VOD position when it closes.
   useEffect(() => {
-    if (!request || !isNativeAndroidVod || nativeLaunch.current === request.url) return;
+    if (!request || !isNativeAndroidPlayer || nativeLaunch.current === request.url) return;
     nativeLaunch.current = request.url;
     let cancelled = false;
     const savedPosition = config.resumeBehavior === "restart" ? 0 : Math.max(0, request.startAt ?? 0);
@@ -352,6 +352,17 @@ export function Player() {
       subtitlesJson: JSON.stringify(
         (request.subtitles ?? []).map(({ name, lang, url }) => ({ name, lang, url })),
       ),
+      releasesJson: JSON.stringify(
+        (request.releases ?? []).map(({ url, resolution, kind, format, headers }) => ({
+          url,
+          resolution,
+          kind: kind ?? "mp4",
+          format,
+          headers,
+        })),
+      ),
+      headersJson: JSON.stringify(request.headers ?? {}),
+      live: request.live,
     }).then((result) => {
       if (cancelled) return;
       const position = Math.max(0, result.positionMs / 1000);
@@ -393,7 +404,7 @@ export function Player() {
     return () => {
       cancelled = true;
     };
-  }, [request, isNativeAndroidVod, config.resumeBehavior, saveProgress, notify, closePlayer]);
+  }, [request, isNativeAndroidPlayer, config.resumeBehavior, saveProgress, notify, closePlayer]);
 
   // Netflix-style hover frames are generated lazily and bucketed every five seconds.
   // The debounce prevents pointer movement from starting an FFmpeg process per pixel.
@@ -448,7 +459,7 @@ export function Player() {
   // Probe the selected source. Unsupported x265/MPEG-2 streams become a private H.264
   // compatibility stream; its start offset makes that stream seekable from the UI.
   useEffect(() => {
-    if (!request || isNativeAndroidVod || !selectedSourceUrl || startPosition === null) return;
+    if (!request || isNativeAndroidPlayer || !selectedSourceUrl || startPosition === null) return;
     let cancelled = false;
     setWaiting(true);
     unwrap(api.media.prepareLive(selectedSourceUrl, startPosition, selectedResolution))
@@ -484,7 +495,7 @@ export function Player() {
     return () => {
       cancelled = true;
     };
-  }, [request, isNativeAndroidVod, selectedSourceUrl, selectedResolution, startPosition, notify, retryNonce]);
+  }, [request, isNativeAndroidPlayer, selectedSourceUrl, selectedResolution, startPosition, notify, retryNonce]);
 
   /**
    * Turns on the requested subtitle once a new source is up. Declared after the reset
@@ -536,7 +547,7 @@ export function Player() {
    */
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || isNativeAndroidVod || !sourceUrl) return;
+    if (!video || isNativeAndroidPlayer || !sourceUrl) return;
 
     hlsRef.current?.destroy();
     hlsRef.current = null;
@@ -695,7 +706,7 @@ export function Player() {
       dashRef.current?.destroy();
       dashRef.current = null;
     };
-  }, [sourceUrl, request?.live, isNativeAndroidVod, notify]);
+  }, [sourceUrl, request?.live, isNativeAndroidPlayer, notify]);
 
   useEffect(() => {
     if (sleepMinutes <= 0 || !request) return;

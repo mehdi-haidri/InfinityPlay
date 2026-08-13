@@ -68,8 +68,9 @@ export function parseM3u(content: string): Channel[] {
       if (separator > 0) {
         const name = directive.slice(0, separator).trim().toLowerCase();
         const value = directive.slice(separator + 1).trim();
-        if (name === "http-referrer" && value) pending.headers.Referer = value;
-        if (name === "http-user-agent" && value) pending.headers["User-Agent"] = value;
+        const headers = pending.headers ?? (pending.headers = {});
+        if (name === "http-referrer" && value) headers.Referer = value;
+        if (name === "http-user-agent" && value) headers["User-Agent"] = value;
       }
       continue;
     }
