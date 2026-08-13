@@ -298,6 +298,8 @@ export interface Channel {
   /** ISO 3166-1 alpha-2, upper case. Empty when the playlist does not say. */
   country: string;
   streamUrl: string;
+  /** Per-channel HTTP headers declared by EXTINF/EXTVLCOPT (for example Referer). */
+  headers?: Record<string, string>;
 }
 
 export interface PreparedLiveStream {
@@ -360,6 +362,11 @@ export interface WatchHistoryItem {
   /** Total media length in seconds, 0 when unknown. */
   duration: number;
   timestamp: number;
+}
+
+/** A catalog item saved by the viewer, with stable local ordering metadata. */
+export interface FavoriteItem extends CatalogItem {
+  addedAt: number;
 }
 
 export interface AppConfig {
@@ -563,6 +570,10 @@ export interface InfinityPlayApi {
     record: (item: WatchHistoryItem) => Promise<Result<WatchHistoryItem[]>>;
     remove: (subjectId: string) => Promise<Result<WatchHistoryItem[]>>;
     clear: () => Promise<Result<WatchHistoryItem[]>>;
+  };
+  favorites: {
+    list: () => Promise<Result<FavoriteItem[]>>;
+    toggle: (item: CatalogItem) => Promise<Result<FavoriteItem[]>>;
   };
   downloads: {
     start: (request: DownloadRequest) => Promise<Result<DownloadRecord>>;

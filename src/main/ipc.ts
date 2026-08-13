@@ -8,6 +8,7 @@ import { join } from "node:path";
 import type {
   AppConfig,
   AppInfo,
+  CatalogItem,
   DownloadRequest,
   SeasonDownloadRequest,
   MediaType,
@@ -22,8 +23,10 @@ import {
   clearHistory,
   getConfig,
   getHistory,
+  getFavorites,
   recordHistory,
   removeHistory,
+  toggleFavorite,
   updateConfig,
 } from "./store";
 import {
@@ -121,6 +124,8 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   handle("history:record", (item: WatchHistoryItem) => recordHistory(item));
   handle("history:remove", (subjectId: string) => removeHistory(subjectId));
   handle("history:clear", () => clearHistory());
+  handle("favorites:list", () => getFavorites());
+  handle("favorites:toggle", (item: CatalogItem) => toggleFavorite(item));
 
   handle("download:start", (request: DownloadRequest) => startDownload(request));
   handle("download:startSeason", (request: SeasonDownloadRequest) =>

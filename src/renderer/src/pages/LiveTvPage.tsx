@@ -93,6 +93,7 @@ export function LiveTvPage() {
       url: channel.streamUrl,
       live: true,
       posterUrl: channel.logo || null,
+      headers: channel.headers,
     });
   };
 

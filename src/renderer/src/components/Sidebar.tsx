@@ -1,6 +1,7 @@
 import {
   Clock,
   Home,
+  Heart,
   Info,
   MoreHorizontal,
   PanelLeftClose,
@@ -18,6 +19,7 @@ const ITEMS: { route: Route; label: string; icon: ComponentType<{ size?: string 
   { route: { name: "search", query: "" }, label: "Search", icon: Search },
   { route: { name: "livetv" }, label: "Live TV", icon: LiveIcon },
   { route: { name: "history" }, label: "Continue watching", icon: Clock },
+  { route: { name: "favorites" }, label: "Favorites", icon: Heart },
   { route: { name: "downloads" }, label: "Downloads", icon: DownloadIcon },
   { route: { name: "settings" }, label: "Settings", icon: Settings },
 ];
@@ -56,7 +58,7 @@ export function Sidebar() {
         <button
           key={label}
           className="nav-item"
-          data-mobile-secondary={target.name === "downloads" || target.name === "settings" || undefined}
+          data-mobile-secondary={target.name === "downloads" || target.name === "settings" || target.name === "favorites" || undefined}
           data-focus-key={`nav-${target.name}`}
           data-focus-initial={target.name === "home" || undefined}
           aria-current={route.name === target.name ? "page" : undefined}
@@ -74,7 +76,7 @@ export function Sidebar() {
       <button
         className="nav-item nav-item-more"
         data-open={moreOpen}
-        aria-current={["downloads", "settings", "about"].includes(route.name) ? "page" : undefined}
+        aria-current={["downloads", "settings", "favorites", "about"].includes(route.name) ? "page" : undefined}
         aria-expanded={moreOpen}
         aria-controls="mobile-more-menu"
         onClick={() => setMoreOpen((value) => !value)}
@@ -101,8 +103,8 @@ export function Sidebar() {
           <div id="mobile-more-menu" className="mobile-more-menu" role="dialog" aria-label="More destinations" onClick={(event) => event.stopPropagation()}>
             <div className="mobile-more-handle" />
             <div className="mobile-more-title">More</div>
-            {[...ITEMS.filter((item) => item.route.name === "downloads" || item.route.name === "settings"), { route: { name: "about" } as Route, label: "About", icon: Info }].map(({ route: target, label, icon: Icon }) => (
-              <button key={label} className="mobile-more-item" autoFocus={label === "Downloads"} onClick={() => { setMoreOpen(false); navigate(target); }}>
+            {[...ITEMS.filter((item) => item.route.name === "favorites" || item.route.name === "downloads" || item.route.name === "settings"), { route: { name: "about" } as Route, label: "About", icon: Info }].map(({ route: target, label, icon: Icon }) => (
+              <button key={label} className="mobile-more-item" autoFocus={label === "Favorites"} onClick={() => { setMoreOpen(false); navigate(target); }}>
                 <Icon size={20} />
                 <span>{label}</span>
               </button>

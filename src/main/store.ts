@@ -12,6 +12,8 @@ import {
   type AppConfig,
   type PlaylistSource,
   type DownloadRecord,
+  type CatalogItem,
+  type FavoriteItem,
   type WatchHistoryItem,
 } from "@shared/types";
 
@@ -107,6 +109,23 @@ export const removeHistory = (subjectId: string): WatchHistoryItem[] =>
   historyFile.write(historyFile.read().filter((entry) => entry.subjectId !== subjectId));
 
 export const clearHistory = (): WatchHistoryItem[] => historyFile.write([]);
+
+const favoritesFile = new JsonFile<FavoriteItem[]>("favorites.json", [], (raw) =>
+  Array.isArray(raw) ? (raw as FavoriteItem[]) : [],
+);
+
+export const getFavorites = (): FavoriteItem[] =>
+  [...favoritesFile.read()].sort((a, b) => b.addedAt - a.addedAt);
+
+export function toggleFavorite(item: CatalogItem): FavoriteItem[] {
+  const current = favoritesFile.read();
+  const exists = current.some((entry) => entry.id === item.id);
+  return favoritesFile.write(
+    exists
+      ? current.filter((entry) => entry.id !== item.id)
+      : [{ ...item, addedAt: Date.now() }, ...current],
+  );
+}
 
 const downloadsFile = new JsonFile<DownloadRecord[]>("downloads.json", [], (raw) =>
   Array.isArray(raw) ? (raw as DownloadRecord[]) : [],

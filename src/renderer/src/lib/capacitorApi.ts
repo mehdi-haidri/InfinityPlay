@@ -8,6 +8,7 @@ import type {
   AppInfo,
   AudioVariant,
   CatalogItem,
+  FavoriteItem,
   Channel,
   DownloadRecord,
   DownloadRequest,
@@ -33,6 +34,7 @@ const STORAGE_KEYS = {
   CONFIG: "infinityplay_config",
   HISTORY: "infinityplay_history",
   DOWNLOADS: "infinityplay_downloads",
+  FAVORITES: "infinityplay_favorites",
 };
 
 interface NativeDownloadStatus {
@@ -51,6 +53,26 @@ interface InfinityDownloadsPlugin {
 }
 
 const nativeDownloads = registerPlugin<InfinityDownloadsPlugin>("InfinityDownloads");
+
+export interface NativePlayerResult {
+  positionMs: number;
+  durationMs: number;
+  ended: boolean;
+  error: string;
+  cancelled: boolean;
+}
+
+interface InfinityPlayerPlugin {
+  open(options: {
+    url: string;
+    title: string;
+    positionMs: number;
+    subtitlesJson: string;
+  }): Promise<NativePlayerResult>;
+}
+
+/** Android Media3 bridge for on-demand Movies and Series. */
+export const nativePlayer = registerPlugin<InfinityPlayerPlugin>("InfinityPlayer");
 
 let cachedConfig: AppConfig | null = null;
 
@@ -98,6 +120,21 @@ async function saveStoredHistory(items: WatchHistoryItem[]): Promise<WatchHistor
     key: STORAGE_KEYS.HISTORY,
     value: JSON.stringify(items),
   });
+  return items;
+}
+
+async function getStoredFavorites(): Promise<FavoriteItem[]> {
+  try {
+    const { value } = await Preferences.get({ key: STORAGE_KEYS.FAVORITES });
+    if (value) return JSON.parse(value);
+  } catch {
+    // Keep the catalog usable if preferences are temporarily unavailable.
+  }
+  return [];
+}
+
+async function saveStoredFavorites(items: FavoriteItem[]): Promise<FavoriteItem[]> {
+  await Preferences.set({ key: STORAGE_KEYS.FAVORITES, value: JSON.stringify(items) });
   return items;
 }
 
@@ -246,6 +283,19 @@ export const createCapacitorApi = (): InfinityPlayApi => {
           return saveStoredHistory(filtered);
         }),
       clear: () => wrapResult(() => saveStoredHistory([])),
+    },
+    favorites: {
+      list: () => wrapResult(() => getStoredFavorites()),
+      toggle: (item: CatalogItem) =>
+        wrapResult(async () => {
+          const favorites = await getStoredFavorites();
+          const exists = favorites.some((entry) => entry.id === item.id);
+          return saveStoredFavorites(
+            exists
+              ? favorites.filter((entry) => entry.id !== item.id)
+              : [{ ...item, addedAt: Date.now() }, ...favorites],
+          );
+        }),
     },
     downloads: {
       start: (request: DownloadRequest) =>

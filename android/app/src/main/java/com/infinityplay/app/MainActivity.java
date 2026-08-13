@@ -4,6 +4,7 @@ import android.os.Bundle;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.view.View;
+import android.view.WindowManager;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
@@ -37,7 +38,9 @@ public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(DownloadsPlugin.class);
+        registerPlugin(NativePlayerPlugin.class);
         super.onCreate(savedInstanceState);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         applyTelevisionMode();
     }
 
@@ -46,12 +49,16 @@ public class MainActivity extends BridgeActivity {
         super.onStart();
         WebView webView = getBridge().getWebView();
         if (webView != null) {
+            webView.setNestedScrollingEnabled(true);
+            webView.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
             WebSettings settings = webView.getSettings();
             settings.setMediaPlaybackRequiresUserGesture(false);
             settings.setDomStorageEnabled(true);
             settings.setAllowFileAccess(true);
             settings.setAllowContentAccess(true);
-            settings.setMixedContentMode(WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE);
+            // Public M3U playlists still contain HTTP manifests and segments. Playback is
+            // user-initiated, so permit those media requests inside the HTTPS app shell.
+            settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
             
             // Identify the native host and TV profile without relying on viewport guesses.
             String defaultUserAgent = settings.getUserAgentString();

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Hls from "hls.js";
 import { MediaPlayer, type MediaPlayerClass } from "dashjs";
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
 import {
   Captions,
   Check,
@@ -35,6 +36,7 @@ import {
   type SubtitleEdgeStyle,
 } from "@shared/types";
 import { api, unwrap } from "../lib/api";
+import { nativePlayer } from "../lib/capacitorApi";
 import { formatTime, qualityLabel } from "../lib/format";
 import { registerStreamSignature } from "../lib/streamSigner";
 import { useApp } from "../store";
@@ -95,7 +97,8 @@ const IDLE_MS = 2600;
 const SEEK_STEP = 10;
 const PROGRESS_SAVE_MS = 5000;
 
-type MenuTab = "quality" | "subtitles" | "subtitle-style" | "speed" | null;
+type MenuTab = "quality" | "subtitles" | "subtitle-style" | null;
+type VideoFit = "contain" | "cover" | "fill";
 
 /**
  * Full HEVC codec strings to try, widest first. Chromium answers `isTypeSupported` on the
@@ -125,10 +128,16 @@ async function repairDashManifest(manifestUrl: string): Promise<string | null> {
   // Bounded: this probe sits in front of playback, so a manifest request that stalls must
   // not leave the player waiting with no picture and no error. On timeout the original
   // URL is used and dash.js reports anything genuinely wrong.
-  const response = await fetch(manifestUrl, { signal: AbortSignal.timeout(6000) });
-  if (!response.ok) return null;
-
-  const xml = await response.text();
+  let xml = "";
+  if (Capacitor.isNativePlatform()) {
+    const response = await CapacitorHttp.get({ url: manifestUrl, readTimeout: 6000, connectTimeout: 6000 });
+    if (response.status < 200 || response.status >= 300) return null;
+    xml = typeof response.data === "string" ? response.data : String(response.data ?? "");
+  } else {
+    const response = await fetch(manifestUrl, { signal: AbortSignal.timeout(6000) });
+    if (!response.ok) return null;
+    xml = await response.text();
+  }
   const match = xml.match(incomplete);
   if (!match) return null;
 
@@ -179,6 +188,7 @@ export function Player() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
+  const hlsRetryTimer = useRef<number | undefined>(undefined);
   const dashRef = useRef<MediaPlayerClass | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const idleTimer = useRef<number | undefined>(undefined);
@@ -186,6 +196,8 @@ export function Player() {
   const draggingScrub = useRef(false);
   const previewRequest = useRef(0);
   const previewCache = useRef(new Map<string, string | null>());
+  const androidFallbackTried = useRef(false);
+  const nativeLaunch = useRef("");
 
   const [sourceUrl, setSourceUrl] = useState("");
   const [selectedSourceUrl, setSelectedSourceUrl] = useState("");
@@ -206,8 +218,9 @@ export function Player() {
     dataUrl: string;
     vttText?: string;
   } | null>(null);
-  const [subPosition, setSubPosition] = useState<{ x: number; y: number }>({ x: 50, y: 86 });
-  const draggingSub = useRef(false);
+  const subPosition = config.subtitlePosition === "top" ? 28 : config.subtitlePosition === "middle" ? 54 : 86;
+  const [videoFit, setVideoFit] = useState<VideoFit>("contain");
+  const [sleepMinutes, setSleepMinutes] = useState(0);
 
   const cues = useMemo(() => {
     if (!subtitle?.vttText) return [];
@@ -267,6 +280,7 @@ export function Player() {
     : null;
 
   const releases = useMemo(() => request?.releases ?? [], [request]);
+  const isNativeAndroidVod = Capacitor.getPlatform() === "android" && Boolean(request && !request.live);
 
   /**
    * `::cue` cannot be styled inline and does not read CSS custom properties in Chromium,
@@ -317,9 +331,69 @@ export function Player() {
     setPreviewImage(null);
     previewCache.current.clear();
     lastSaved.current = 0;
+    androidFallbackTried.current = false;
     // Request identity is intentionally the media URL; metadata updates must not restart it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.url]);
+
+  // Android WebView rejects some HEVC/H.265 catalog MP4s with a format error even
+  // though the device has a native decoder. Keep IPTV in the web player, but hand
+  // on-demand Movies and Series to Media3 and write its final position to history.
+  useEffect(() => {
+    if (!request || !isNativeAndroidVod || nativeLaunch.current === request.url) return;
+    nativeLaunch.current = request.url;
+    let cancelled = false;
+    const savedPosition = config.resumeBehavior === "restart" ? 0 : Math.max(0, request.startAt ?? 0);
+
+    void nativePlayer.open({
+      url: request.url,
+      title: request.subtitleLine ? `${request.title} · ${request.subtitleLine}` : request.title,
+      positionMs: Math.round(savedPosition * 1000),
+      subtitlesJson: JSON.stringify(
+        (request.subtitles ?? []).map(({ name, lang, url }) => ({ name, lang, url })),
+      ),
+    }).then((result) => {
+      if (cancelled) return;
+      const position = Math.max(0, result.positionMs / 1000);
+      const total = Math.max(0, result.durationMs / 1000);
+      if (request.subjectId && total > 0) {
+        void saveProgress({
+          provider: "moviebox",
+          subjectId: request.subjectId,
+          title: request.title,
+          posterUrl: request.posterUrl,
+          mediaType: request.mediaType ?? "movie",
+          year: request.year ?? "",
+          season: request.season ?? 0,
+          episode: request.episode ?? 0,
+          position: result.ended ? total : position,
+          duration: total,
+          timestamp: Date.now(),
+        });
+      }
+      if (result.error) {
+        notify({
+          kind: "error",
+          title: "Android playback stopped",
+          body: result.error,
+        });
+      }
+      closePlayer();
+    }).catch((error) => {
+      if (cancelled) return;
+      nativeLaunch.current = "";
+      notify({
+        kind: "error",
+        title: "Could not open Android player",
+        body: error instanceof Error ? error.message : String(error),
+      });
+      closePlayer();
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [request, isNativeAndroidVod, config.resumeBehavior, saveProgress, notify, closePlayer]);
 
   // Netflix-style hover frames are generated lazily and bucketed every five seconds.
   // The debounce prevents pointer movement from starting an FFmpeg process per pixel.
@@ -374,7 +448,7 @@ export function Player() {
   // Probe the selected source. Unsupported x265/MPEG-2 streams become a private H.264
   // compatibility stream; its start offset makes that stream seekable from the UI.
   useEffect(() => {
-    if (!request || !selectedSourceUrl || startPosition === null) return;
+    if (!request || isNativeAndroidVod || !selectedSourceUrl || startPosition === null) return;
     let cancelled = false;
     setWaiting(true);
     unwrap(api.media.prepareLive(selectedSourceUrl, startPosition, selectedResolution))
@@ -410,7 +484,7 @@ export function Player() {
     return () => {
       cancelled = true;
     };
-  }, [request, selectedSourceUrl, selectedResolution, startPosition, notify, retryNonce]);
+  }, [request, isNativeAndroidVod, selectedSourceUrl, selectedResolution, startPosition, notify, retryNonce]);
 
   /**
    * Turns on the requested subtitle once a new source is up. Declared after the reset
@@ -462,10 +536,11 @@ export function Player() {
    */
   useEffect(() => {
     const video = videoRef.current;
-    if (!video || !sourceUrl) return;
+    if (!video || isNativeAndroidVod || !sourceUrl) return;
 
     hlsRef.current?.destroy();
     hlsRef.current = null;
+    window.clearTimeout(hlsRetryTimer.current);
     dashRef.current?.destroy();
     dashRef.current = null;
 
@@ -474,14 +549,49 @@ export function Player() {
     const isHls = /\.m3u8(\?|$)/i.test(sourceUrl);
     const isDash = /\.mpd(\?|$)/i.test(sourceUrl);
 
-    if (isHls && Hls.isSupported()) {
-      const hls = new Hls({ enableWorker: true, lowLatencyMode: true });
+    if (isHls && Capacitor.isNativePlatform()) {
+      // Android's media stack can fetch HLS without WebView XHR/CORS restrictions.
+      // Feeding the same URL to hls.js causes manifestLoadError on many public CDNs.
+      video.src = sourceUrl;
+      video.play().catch(() => setPlaying(false));
+    } else if (isHls && Hls.isSupported()) {
+      let networkRetries = 0;
+      const hls = new Hls({
+        enableWorker: true,
+        lowLatencyMode: request?.live === true,
+        backBufferLength: request?.live ? 30 : 90,
+        maxBufferLength: request?.live ? 30 : 60,
+        manifestLoadingMaxRetry: 4,
+        manifestLoadingRetryDelay: 800,
+        manifestLoadingMaxRetryTimeout: 8000,
+        levelLoadingMaxRetry: 4,
+        fragLoadingMaxRetry: 5,
+      });
       hlsRef.current = hls;
       hls.attachMedia(video);
       hls.loadSource(sourceUrl);
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
-        notify({ kind: "error", title: "Stream error", body: data.details });
+        if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRetries < 2) {
+          networkRetries += 1;
+          window.clearTimeout(hlsRetryTimer.current);
+          hlsRetryTimer.current = window.setTimeout(() => {
+            if (cancelled) return;
+            hls.loadSource(sourceUrl);
+            hls.startLoad();
+          }, networkRetries * 1200);
+          return;
+        }
+        if (data.type === Hls.ErrorTypes.MEDIA_ERROR) {
+          hls.recoverMediaError();
+          return;
+        }
+        setWaiting(false);
+        setPlaybackError(
+          data.details === "manifestLoadError"
+            ? "This channel's playlist could not be reached. It may be offline, expired, or blocking this network."
+            : `The live stream stopped: ${data.details}.`,
+        );
       });
     } else if (isDash) {
       void startDash(video);
@@ -534,8 +644,15 @@ export function Player() {
       const requestedHeight = activeRelease?.kind === "dash" ? activeRelease.resolution : 0;
       player.updateSettings({
         streaming: {
-          abr: { autoSwitchBitrate: { video: requestedHeight === 0 } },
-          buffer: { fastSwitchEnabled: true },
+          // A selected quality is the preferred start, not a permanent bandwidth trap.
+          // Keeping ABR available lets desktop playback step down before it stalls.
+          abr: { autoSwitchBitrate: { video: true } },
+          buffer: {
+            fastSwitchEnabled: false,
+            bufferTimeDefault: 24,
+            bufferTimeAtTopQuality: 36,
+            bufferTimeAtTopQualityLongForm: 48,
+          },
         },
       });
       if (requestedHeight > 0) {
@@ -572,12 +689,23 @@ export function Player() {
 
     return () => {
       cancelled = true;
+      window.clearTimeout(hlsRetryTimer.current);
       hlsRef.current?.destroy();
       hlsRef.current = null;
       dashRef.current?.destroy();
       dashRef.current = null;
     };
-  }, [sourceUrl, request?.live, activeRelease?.kind, activeRelease?.resolution, notify]);
+  }, [sourceUrl, request?.live, isNativeAndroidVod, notify]);
+
+  useEffect(() => {
+    if (sleepMinutes <= 0 || !request) return;
+    const timer = window.setTimeout(() => {
+      videoRef.current?.pause();
+      setSleepMinutes(0);
+      notify({ kind: "info", title: "Sleep timer", body: "Playback paused." });
+    }, sleepMinutes * 60_000);
+    return () => window.clearTimeout(timer);
+  }, [sleepMinutes, request, notify]);
 
   const persistProgress = useCallback(
     (position: number, total: number, force = false) => {
@@ -948,16 +1076,21 @@ export function Player() {
   };
 
   const chooseRelease = async (release: Release) => {
-    const resumeAt = current;
+    const video = videoRef.current;
+    const resumeAt = prepared?.transcoded
+      ? playbackOffset + (video?.currentTime ?? 0)
+      : video?.currentTime ?? current;
+    if (duration > 0) persistProgress(resumeAt, duration, true);
     setActiveRelease(release);
     setSelectedResolution(release.resolution);
     setMenu(null);
     setWaiting(true);
+    setPlaybackError(null);
     if (release.kind === "dash" && release.url === selectedSourceUrl && dashRef.current) {
       const choices = dashRef.current.getRepresentationsByType("video");
       const exact = choices.find((choice) => choice.height === release.resolution);
-      dashRef.current.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: false } } } });
-      if (exact) dashRef.current.setRepresentationForTypeById("video", exact.id, true);
+      dashRef.current.updateSettings({ streaming: { abr: { autoSwitchBitrate: { video: true } } } });
+      if (exact) dashRef.current.setRepresentationForTypeById("video", exact.id, false);
       setWaiting(false);
       return;
     }
@@ -989,6 +1122,28 @@ export function Player() {
         body: error instanceof Error ? error.message : undefined,
       });
     }
+  };
+
+  const handlePlaybackError = () => {
+    setWaiting(false);
+    const fallback = Capacitor.isNativePlatform() && !request.live && !androidFallbackTried.current
+      ? releases.find(
+          (release) =>
+            release.kind !== "dash" &&
+            (release.url !== activeRelease?.url || release.resolution !== activeRelease?.resolution),
+        )
+      : undefined;
+    if (fallback) {
+      androidFallbackTried.current = true;
+      notify({
+        kind: "info",
+        title: "Trying an Android-compatible source",
+        body: `${qualityLabel(fallback.resolution)} progressive playback`,
+      });
+      void chooseRelease(fallback);
+      return;
+    }
+    setPlaybackError("The source rejected the request or this device cannot decode it.");
   };
 
   const displayedCurrent = scrubPreview ?? current;
@@ -1034,6 +1189,7 @@ export function Player() {
       >
         <video
           ref={videoRef}
+          style={{ objectFit: videoFit }}
           onPlay={() => setPlaying(true)}
           onPause={() => setPlaying(false)}
           onLoadedMetadata={onLoadedMetadata}
@@ -1045,10 +1201,7 @@ export function Player() {
             setPlaying(false);
             void playNextEpisode();
           }}
-          onError={() => {
-            setWaiting(false);
-            setPlaybackError("The source rejected the request or this device cannot decode it.");
-          }}
+          onError={handlePlaybackError}
           playsInline
         >
           {subtitle && (
@@ -1063,37 +1216,19 @@ export function Player() {
           )}
         </video>
 
-        {/* Custom Draggable ("Glissable") Subtitle Overlay */}
+        {/* A fixed overlay avoids pointer movement changing a chosen subtitle position. */}
         {displayCueText && (
           <div
             style={{
               position: "absolute",
-              left: `${subPosition.x}%`,
-              top: `${subPosition.y}%`,
+              left: "50%",
+              top: `${subPosition}%`,
               transform: "translate(-50%, -50%)",
-              cursor: draggingSub.current ? "grabbing" : "grab",
               zIndex: 35,
               userSelect: "none",
-              touchAction: "none",
-              pointerEvents: "auto",
+              pointerEvents: "none",
             }}
-            onPointerDown={(e) => {
-              draggingSub.current = true;
-              e.currentTarget.setPointerCapture(e.pointerId);
-            }}
-            onPointerMove={(e) => {
-              if (!draggingSub.current || !surfaceRef.current) return;
-              const rect = surfaceRef.current.getBoundingClientRect();
-              const x = Math.min(Math.max(((e.clientX - rect.left) / rect.width) * 100, 5), 95);
-              const y = Math.min(Math.max(((e.clientY - rect.top) / rect.height) * 100, 5), 95);
-              setSubPosition({ x, y });
-            }}
-            onPointerUp={(e) => {
-              if (!draggingSub.current) return;
-              draggingSub.current = false;
-              e.currentTarget.releasePointerCapture(e.pointerId);
-            }}
-            title="Drag to reposition subtitles anywhere on screen"
+            aria-live="off"
           >
             <div
               style={{
@@ -1134,8 +1269,7 @@ export function Player() {
                 whiteSpace: "pre-wrap",
                 lineHeight: 1.35,
                 maxWidth: isTv ? "78vw" : "88vw",
-                boxShadow: draggingSub.current ? "0 0 16px rgba(255,255,255,0.5)" : undefined,
-                border: draggingSub.current ? "1px dashed rgba(255,255,255,0.6)" : "1px solid transparent",
+                border: "1px solid transparent",
               }}
             >
               {displayCueText}
@@ -1385,11 +1519,31 @@ export function Player() {
 
               <div className="player-menu-label">Speed</div>
               {[0.5, 0.75, 1, 1.25, 1.5, 1.75, 2].map((value) => (
-                <button key={value} data-active={rate === value} onClick={() => setRate(value)}>
+                <button key={value} data-active={rate === value} onClick={() => { setRate(value); setMenu(null); }}>
                   {rate === value ? <Check size={14} /> : <span style={{ width: 14 }} />}
                   {value}×
                 </button>
               ))}
+
+              <div className="player-menu-label">Picture</div>
+              {(["contain", "cover", "fill"] as VideoFit[]).map((value) => (
+                <button key={value} data-active={videoFit === value} onClick={() => { setVideoFit(value); setMenu(null); }}>
+                  {videoFit === value ? <Check size={14} /> : <span style={{ width: 14 }} />}
+                  {value === "contain" ? "Fit screen" : value === "cover" ? "Fill and crop" : "Stretch"}
+                </button>
+              ))}
+
+              {!request.live && (
+                <>
+                  <div className="player-menu-label">Sleep timer</div>
+                  {[0, 15, 30, 60].map((value) => (
+                    <button key={value} data-active={sleepMinutes === value} onClick={() => { setSleepMinutes(value); setMenu(null); }}>
+                      {sleepMinutes === value ? <Check size={14} /> : <span style={{ width: 14 }} />}
+                      {value === 0 ? "Off" : `${value} minutes`}
+                    </button>
+                  ))}
+                </>
+              )}
             </div>
           )}
 
@@ -1533,13 +1687,13 @@ export function Player() {
               <div className="cue-control">
                 <span>Position</span>
                 <div className="cue-segments">
-                  {([28, 54, 86] as const).map((y) => (
+                  {(["top", "middle", "bottom"] as const).map((position) => (
                     <button
-                      key={y}
-                      data-active={Math.abs(subPosition.y - y) < 2}
-                      onClick={() => setSubPosition({ x: 50, y })}
+                      key={position}
+                      data-active={config.subtitlePosition === position}
+                      onClick={() => void patchConfig({ subtitlePosition: position })}
                     >
-                      {y === 28 ? "Top" : y === 54 ? "Middle" : "Bottom"}
+                      {position[0].toUpperCase() + position.slice(1)}
                     </button>
                   ))}
                 </div>
@@ -1548,13 +1702,13 @@ export function Player() {
               <button
                 className="player-menu-reset"
                 onClick={() => {
-                  setSubPosition({ x: 50, y: 86 });
                   void patchConfig({
                     subtitleSize: 100,
                     subtitleColor: "#ffffff",
                     subtitleBackground: "box",
                     subtitleFontFamily: "sans-serif",
                     subtitleEdgeStyle: "drop-shadow",
+                    subtitlePosition: "bottom",
                   });
                 }}
               >

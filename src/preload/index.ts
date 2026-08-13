@@ -5,6 +5,7 @@ import type {
   AudioVariant,
   DownloadRecord,
   DownloadRequest,
+  FavoriteItem,
   CatalogItem,
   Channel,
   HomePage,
@@ -66,6 +67,10 @@ const api = {
     record: (item: WatchHistoryItem) => invoke<WatchHistoryItem[]>("history:record", item),
     remove: (subjectId: string) => invoke<WatchHistoryItem[]>("history:remove", subjectId),
     clear: () => invoke<WatchHistoryItem[]>("history:clear"),
+  },
+  favorites: {
+    list: () => invoke<FavoriteItem[]>("favorites:list"),
+    toggle: (item: CatalogItem) => invoke<FavoriteItem[]>("favorites:toggle", item),
   },
   downloads: {
     start: (request: DownloadRequest) => invoke<DownloadRecord>("download:start", request),

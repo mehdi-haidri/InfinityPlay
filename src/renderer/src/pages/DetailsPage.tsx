@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AudioLines, Captions, Download, Play, Star, Trash2 } from "lucide-react";
+import { AudioLines, Captions, Download, Heart, Play, Star, Trash2 } from "lucide-react";
 import {
   HIDDEN_AUDIO_LANGUAGES,
   ORIGINAL_AUDIO,
@@ -36,6 +36,8 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
   const forgetTitle = useApp((state) => state.forgetTitle);
   const defaultResolution = useApp((state) => state.config.defaultResolution);
   const ffmpeg = useApp((state) => state.ffmpeg);
+  const favorites = useApp((state) => state.favorites);
+  const toggleFavorite = useApp((state) => state.toggleFavorite);
 
   const preferredSubtitle = useApp((state) => state.config.preferredSubtitle);
 
@@ -136,7 +138,13 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
     if (!sourcesReady) return null;
     const list = releases.data ?? [];
     if (list.length === 0) return null;
-    return list.find((release) => release.resolution === defaultResolution) ?? list[0];
+    // Automatic means best available. Android now uses Media3 rather than WebView, so
+    // it can select the 1080p adaptive source instead of being artificially capped at
+    // the first progressive (typically 480p) file.
+    const sorted = [...list].sort((a, b) => b.resolution - a.resolution);
+    return defaultResolution > 0
+      ? sorted.find((release) => release.resolution === defaultResolution) ?? sorted[0]
+      : sorted[0];
   }, [releases.data, defaultResolution, sourcesReady]);
 
   // Captions are keyed on a progressive release's `resourceId`. The adaptive stream
@@ -173,6 +181,7 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
   if (!details.data) return <div className="page"><EmptyState title="Title unavailable" /></div>;
 
   const media = details.data;
+  const isFavorite = favorites.some((entry) => entry.id === media.id);
   const activeSeason = media.seasons.find((entry) => entry.number === season) ?? media.seasons[0];
   const resume = findProgress(watchHistory, id, isSeries ? season : 0, isSeries ? episode : 0);
 
@@ -380,6 +389,15 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
               onClick={() => preferred && download(preferred)}
             >
               <Download size={17} /> Download
+            </button>
+            <button
+              className="btn btn-ghost"
+              data-active={isFavorite || undefined}
+              onClick={() => void toggleFavorite(media)}
+              aria-pressed={isFavorite}
+            >
+              <Heart size={17} fill={isFavorite ? "currentColor" : "none"} />
+              {isFavorite ? "Favorited" : "Favorite"}
             </button>
             {watchHistory.some((entry) => entry.subjectId === id) && (
               <button className="btn btn-ghost" onClick={() => void forgetTitle(id)}>

@@ -259,8 +259,13 @@ button {
 
 .main {
   position: relative;
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  touch-action: pan-y pinch-zoom;
+  -webkit-overflow-scrolling: touch;
 }
 
 .skip-link {
@@ -671,6 +676,12 @@ button {
   display: flex;
   align-items: flex-end;
   overflow: hidden;
+}
+
+.home-hero-skeleton {
+  height: 360px;
+  margin: -76px -28px 28px;
+  border-radius: 0;
 }
 
 .hero-bg {
@@ -2386,7 +2397,19 @@ html[data-device="phone"] {
 
 html[data-device="phone"] .app {
   display: block;
+  height: 100dvh;
+  min-height: 0;
   padding-bottom: calc(68px + var(--safe-bottom));
+  overflow: hidden;
+}
+
+html[data-device="phone"] .main {
+  height: calc(100dvh - 68px - var(--safe-bottom));
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  touch-action: pan-y pinch-zoom;
+  -webkit-overflow-scrolling: touch;
 }
 
 html[data-device="phone"] .sidebar {
@@ -2481,15 +2504,36 @@ html[data-device="phone"] .grid { grid-template-columns: repeat(3, minmax(0, 1fr
 html[data-device="phone"] .row { margin-bottom: 28px; }
 html[data-device="phone"] .row-actions { display: none; }
 html[data-device="phone"] .row-scroll { gap: 10px; margin-inline: -14px; padding-inline: 14px; scroll-snap-type: x proximity; }
+html[data-device="phone"] .row-scroll,
+html[data-device="tablet"] .row-scroll { touch-action: pan-x pan-y pinch-zoom; -webkit-overflow-scrolling: touch; }
 html[data-device="phone"] .row-scroll .poster-card-shell { width: clamp(116px, 34vw, 142px); scroll-snap-align: start; }
-html[data-device="phone"] .hero { margin: -68px -14px 24px; height: min(68dvh, 520px) !important; min-height: 380px; }
+html[data-device="phone"] .hero {
+  margin: -68px -14px 24px;
+  height: clamp(400px, 62dvh, 510px) !important;
+  min-height: 0;
+}
+html[data-device="phone"] .home-hero-skeleton {
+  height: clamp(360px, 56dvh, 460px);
+  margin: -68px -14px 24px;
+}
 html[data-device="phone"] .hero-poster-wrap { display: none; }
-html[data-device="phone"] .hero-content { max-width: 100%; padding: 0 16px 28px; }
-html[data-device="phone"] .hero-title { font-size: clamp(28px, 9vw, 40px) !important; }
+html[data-device="phone"] .hero-featured .hero-bg-poster {
+  inset: -8%;
+  background-position: 50% 22%;
+  filter: blur(18px) saturate(0.82) brightness(0.58);
+}
+html[data-device="phone"] .hero-content { width: 100%; max-width: 100%; padding: 0 16px 52px; }
+html[data-device="phone"] .hero-title {
+  max-width: 12ch;
+  font-size: clamp(27px, 8.4vw, 38px) !important;
+  line-height: 1.02;
+  text-wrap: balance;
+}
+html[data-device="phone"] .hero-meta { flex-wrap: wrap; gap: 5px 8px; }
 html[data-device="phone"] .hero-desc { -webkit-line-clamp: 2; font-size: 13px; }
-html[data-device="phone"] .hero-dots { right: 16px; bottom: 18px; }
-html[data-device="phone"] .inline-actions { flex-wrap: wrap; }
-html[data-device="phone"] .inline-actions .btn { min-height: 44px; flex: 1 1 130px; }
+html[data-device="phone"] .hero-dots { right: auto; left: 16px; bottom: 18px; }
+html[data-device="phone"] .inline-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+html[data-device="phone"] .inline-actions .btn { width: 100%; min-width: 0; min-height: 46px; padding-inline: 12px; }
 html[data-device="phone"] .details-body,
 html[data-device="phone"] .tv-layout { grid-template-columns: minmax(0, 1fr); gap: 20px; }
 html[data-device="phone"] .setting { flex-direction: column; align-items: stretch; gap: 10px; padding: 14px 0; }
@@ -2638,5 +2682,5 @@ html[data-device="tv"] .mobile-only-inline { display: none; }
 
 @media (max-width: 390px) {
   html[data-device="phone"] .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  html[data-device="phone"] .hero { min-height: 340px; }
+  html[data-device="phone"] .hero { height: clamp(390px, 60dvh, 470px) !important; }
 }

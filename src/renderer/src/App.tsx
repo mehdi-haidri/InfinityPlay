@@ -13,6 +13,7 @@ import { HistoryPage } from "./pages/HistoryPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { AboutPage } from "./pages/AboutPage";
 import { DownloadsPage } from "./pages/DownloadsPage";
+import { FavoritesPage } from "./pages/FavoritesPage";
 import { PersonPage } from "./pages/PersonPage";
 import { formatBytes } from "./lib/format";
 import { useApp } from "./store";
@@ -49,6 +50,8 @@ function Routes() {
       return <LiveTvPage />;
     case "history":
       return <HistoryPage />;
+    case "favorites":
+      return <FavoritesPage />;
     case "settings":
       return <SettingsPage />;
     case "downloads":
@@ -163,6 +166,7 @@ export function App() {
   const loadCapabilities = useApp((state) => state.loadCapabilities);
   const loadWatchHistory = useApp((state) => state.loadWatchHistory);
   const loadDownloads = useApp((state) => state.loadDownloads);
+  const loadFavorites = useApp((state) => state.loadFavorites);
   const watchDownloads = useApp((state) => state.watchDownloads);
   const route = useApp((state) => state.route);
   const player = useApp((state) => state.player);
@@ -212,12 +216,12 @@ export function App() {
   useEffect(() => {
     // The splash lifts once the persisted state is in, so the first frame behind it is
     // the real UI rather than empty shells.
-    void Promise.allSettled([loadConfig(), loadWatchHistory(), loadDownloads(), loadCapabilities()]).then(() =>
+    void Promise.allSettled([loadConfig(), loadWatchHistory(), loadDownloads(), loadFavorites(), loadCapabilities()]).then(() =>
       setBooted(true),
     );
     // One subscription for the whole app: progress feeds both the toasts and the page.
     return watchDownloads();
-  }, [loadConfig, loadWatchHistory, loadDownloads, loadCapabilities, watchDownloads]);
+  }, [loadConfig, loadWatchHistory, loadDownloads, loadFavorites, loadCapabilities, watchDownloads]);
 
   // Every route change starts at the top, the way a browser would.
   useEffect(() => {

@@ -5,6 +5,7 @@ import type {
   Channel,
   DownloadRecord,
   DownloadRequest,
+  FavoriteItem,
   Release,
   SubtitleOption,
   WatchHistoryItem,
@@ -24,6 +25,7 @@ export type Route =
   | { name: "person"; id: string; personName: string; avatarUrl: string | null }
   | { name: "livetv" }
   | { name: "history" }
+  | { name: "favorites" }
   | { name: "settings" }
   | { name: "downloads" }
   | { name: "about" };
@@ -50,6 +52,8 @@ export interface PlayerRequest {
   episodeCount?: number;
   /** Subtitle to switch on at start; falls back to `config.preferredSubtitle`. */
   initialSubtitle?: string;
+  /** HTTP headers required by protected IPTV manifests and their media segments. */
+  headers?: Record<string, string>;
 }
 
 export interface Toast {
@@ -88,6 +92,10 @@ interface AppState {
   saveProgress: (entry: WatchHistoryItem) => Promise<void>;
   forgetTitle: (subjectId: string) => Promise<void>;
   clearWatchHistory: () => Promise<void>;
+
+  favorites: FavoriteItem[];
+  loadFavorites: () => Promise<void>;
+  toggleFavorite: (item: CatalogItem) => Promise<void>;
 
   player: PlayerRequest | null;
   openPlayer: (request: PlayerRequest) => void;
@@ -248,6 +256,32 @@ export const useApp = create<AppState>((set, get) => ({
       set({ watchHistory: await unwrap(api.history.clear()) });
     } catch {
       /* ignored */
+    }
+  },
+
+  favorites: [],
+
+  loadFavorites: async () => {
+    try {
+      set({ favorites: await unwrap(api.favorites.list()) });
+    } catch {
+      set({ favorites: [] });
+    }
+  },
+
+  toggleFavorite: async (item) => {
+    const previous = get().favorites;
+    const exists = previous.some((entry) => entry.id === item.id);
+    set({
+      favorites: exists
+        ? previous.filter((entry) => entry.id !== item.id)
+        : [{ ...item, addedAt: Date.now() }, ...previous],
+    });
+    try {
+      set({ favorites: await unwrap(api.favorites.toggle(item)) });
+    } catch {
+      set({ favorites: previous });
+      get().notify({ kind: "error", title: "Could not update favorites" });
     }
   },
 

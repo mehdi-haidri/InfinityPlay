@@ -50,7 +50,27 @@ export function parseM3u(content: string): Channel[] {
         group: extractAttribute(line, 'group-title="') || "Uncategorized",
         country: channelCountry(line, tvgId),
         name: commaIdx === -1 ? "" : line.slice(commaIdx + 1).trim(),
+        headers: {
+          ...(extractAttribute(line, 'http-referrer="')
+            ? { Referer: extractAttribute(line, 'http-referrer="') }
+            : {}),
+          ...(extractAttribute(line, 'http-user-agent="')
+            ? { "User-Agent": extractAttribute(line, 'http-user-agent="') }
+            : {}),
+        },
       };
+      continue;
+    }
+
+    if (line.startsWith("#EXTVLCOPT:") && pending) {
+      const directive = line.slice("#EXTVLCOPT:".length);
+      const separator = directive.indexOf("=");
+      if (separator > 0) {
+        const name = directive.slice(0, separator).trim().toLowerCase();
+        const value = directive.slice(separator + 1).trim();
+        if (name === "http-referrer" && value) pending.headers.Referer = value;
+        if (name === "http-user-agent" && value) pending.headers["User-Agent"] = value;
+      }
       continue;
     }
 

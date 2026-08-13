@@ -50,6 +50,12 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
+    // Movies and series use Media3 on Android. WebView's HTML video element rejects
+    // several catalog HEVC/H.265 MP4 files even when Android has a native decoder.
+    implementation "androidx.media3:media3-exoplayer:1.8.0"
+    implementation "androidx.media3:media3-exoplayer-dash:1.8.0"
+    implementation "androidx.media3:media3-exoplayer-hls:1.8.0"
+    implementation "androidx.media3:media3-ui:1.8.0"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
