@@ -4,7 +4,12 @@ Updates install automatically. InfinityPlay checks on launch and on demand from 
 
 ---
 
-## 0.2.6 (Latest Update)
+## 0.2.7 (Latest Update)
+
+### Release workflow reliability
+- Fixed release tags failing when Android signing secrets are unavailable. CI now runs the complete Android test, lint, and debug-build validation while skipping only the publishable APK.
+- Signed Android publishing remains enabled when all four signing secrets are configured; missing or partial credentials can no longer block the Windows, macOS, and Linux release jobs.
+- Added decoded-keystore validation and ensured that CI never uploads an unsigned or debug APK as a public release asset.
 
 ### Richer Android and cross-platform playback controls
 - Added Android Picture-in-Picture support with a native **PiP** action, 16:9 mini-player sizing, uninterrupted playback when the activity enters PiP, and automatic hiding of full controls inside the floating window.
@@ -75,10 +80,9 @@ Updates install automatically. InfinityPlay checks on launch and on demand from 
 - Reworked the first Home viewport on phones: bounded dynamic hero height, mobile-centered artwork, balanced title wrapping, two-column actions, correctly positioned carousel indicators, and a responsive loading skeleton.
 
 ### Android Packaging & Release Engineering
-- Synchronized app, lockfile, Gradle, and APK metadata at version **0.2.6**.
+- Synchronized app, lockfile, Gradle, and APK metadata at version **0.2.7**.
 - Added optional Android hardware declarations for universal phone, tablet, and TV installation.
 - Added conditional signed release APK generation in GitHub Actions and documented the required signing secrets.
-- Fixed release tags failing when Android signing secrets are unavailable: CI now runs the complete Android test/lint/debug-build validation and skips only the publishable APK. When all four signing secrets are configured, the signed universal APK is still attached normally.
 - Added adaptive monochrome launcher icons, dark system bars, post-splash theming, and safer WebView settings.
 
 ### Validation
@@ -105,7 +109,7 @@ Updates install automatically. InfinityPlay checks on launch and on demand from 
 ### Mobile & Tablet UI & Responsive Design
 - **Automatic Horizontal View**: The player automatically requests landscape screen orientation when playing media on mobile or tablet devices (`<= 1024px`).
 - **In-Player Orientation Toggle**: Added a dedicated **Rotate View button (`<RotateCw />`)** in the player control bar to seamlessly toggle between Landscape (Horizontal laptop-style view) and Portrait (Vertical view) on mobile/tablet screens.
-- **Home Page Responsiveness**: 
+- **Home Page Responsiveness**:
   - Optimized hero featured section on mobile by removing overlapping floating posters to maximize title & description readability.
   - Added fluid typography and full-width touch targets for "Watch now" and "More info" action buttons.
   - Touch-optimized poster rows with smooth horizontal scrolling (`-webkit-overflow-scrolling: touch`) and 2.5 visible cards per row on mobile screens.
