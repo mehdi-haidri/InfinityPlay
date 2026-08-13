@@ -120,6 +120,9 @@ const HEVC_CODEC_CANDIDATES = ["1.6.L153.B0", "1.6.L150.90", "1.6.L120.90", "1.6
  * Returns a URL for the repaired manifest, or null when none is needed.
  */
 async function repairDashManifest(manifestUrl: string): Promise<string | null> {
+  if (typeof window !== "undefined" && (window as any).Capacitor?.isNativePlatform?.()) {
+    return null;
+  }
   const incomplete = /codecs="(hev1|hvc1)"/;
   // Bounded: this probe sits in front of playback, so a manifest request that stalls must
   // not leave the player waiting with no picture and no error. On timeout the original
@@ -504,10 +507,13 @@ export function Player() {
         player.on(MediaPlayer.events.STREAM_INITIALIZED, pinQuality);
       }
       player.on(MediaPlayer.events.ERROR, (event: any) => {
-        // dash.js reports recoverable problems here too — a segment it retried, a
-        // representation it dropped. Reporting those interrupts a stream that is still
-        // playing, so the toast is kept for failures the viewer can actually see.
         if (media.readyState >= 3 && !media.error) return;
+        // Fallback for WebView / Android when dashjs internal XHR fails: play direct URL
+        if (sourceUrl && media.src !== sourceUrl) {
+          media.src = sourceUrl;
+          media.play().catch(() => setPlaying(false));
+          return;
+        }
         notify({
           kind: "error",
           title: "Stream error",
@@ -525,7 +531,29 @@ export function Player() {
       dashRef.current?.destroy();
       dashRef.current = null;
     };
-  }, [sourceUrl, notify, activeRelease?.kind, activeRelease?.resolution]);
+  }, [sourceUrl, request?.live, activeRelease?.kind, activeRelease?.resolution, notify]);
+
+  // Automatically lock screen orientation to landscape on mobile when player opens
+  useEffect(() => {
+    if (!request) return;
+    try {
+      if (window.screen?.orientation?.lock) {
+        window.screen.orientation.lock("landscape").catch(() => {});
+      }
+    } catch {
+      /* ignore */
+    }
+
+    return () => {
+      try {
+        if (window.screen?.orientation?.unlock) {
+          window.screen.orientation.unlock();
+        }
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [request]);
 
   const persistProgress = useCallback(
     (position: number, total: number, force = false) => {
@@ -697,6 +725,9 @@ export function Player() {
       }
       wake();
     };
+
+    const isMobileTouch = window.matchMedia("(pointer: coarse)").matches && window.innerWidth <= 768;
+    if (isMobileTouch) return;
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);

@@ -22,11 +22,14 @@ public class MainActivity extends BridgeActivity {
             settings.setJavaScriptEnabled(true);
             settings.setAllowFileAccess(true);
             settings.setAllowContentAccess(true);
+            settings.setAllowUniversalAccessFromFileURLs(true);
+            settings.setAllowFileAccessFromFileURLs(true);
+            settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
             
             // Set User-Agent to Android Chrome to ensure CDN compatibility
             String defaultUserAgent = settings.getUserAgentString();
-            if (defaultUserAgent != null && !defaultUserAgent.contains("Chrome/")) {
-                settings.setUserAgentString("Mozilla/5.0 (Linux; Android 14; SM-G998B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36");
+            if (defaultUserAgent != null) {
+                settings.setUserAgentString(defaultUserAgent + " InfinityPlay/0.2.1");
             }
         }
     }

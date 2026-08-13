@@ -5,6 +5,7 @@
  * `connection` and `x-forwarded-for`, which a renderer fetch is forbidden to send.
  */
 import { buildSignedHeaders, generateClientIdentity, type ClientIdentity } from "./crypto";
+import { Capacitor, CapacitorHttp } from "@capacitor/core";
 
 const HOST_POOL = [
   "https://api6.aoneroom.com",
@@ -61,17 +62,6 @@ export class MovieBoxClient {
     this.activeBaseIdx = 0;
   }
 
-  private absorbXUser(response: Response): void {
-    const raw = response.headers.get("x-user");
-    if (!raw) return;
-    try {
-      const token = JSON.parse(raw)?.token;
-      if (typeof token === "string" && token.length > 0) this.token = token;
-    } catch {
-      // Malformed header: keep the existing token rather than dropping the session.
-    }
-  }
-
   private async requestHosts(method: string, pathAndQuery: string, body: string | null): Promise<Json> {
     const start = this.activeBaseIdx;
 
@@ -81,19 +71,45 @@ export class MovieBoxClient {
       const url = HOST_POOL[idx] + pathAndQuery;
 
       try {
-        const response = await fetch(url, {
-          method,
-          headers: buildSignedHeaders(method, url, body, this.token, this.identity),
-          body: body ?? undefined,
-          signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        });
+        let status = 0;
+        let payload: any = null;
+        let xUserHeader: any = null;
+        const headers = buildSignedHeaders(method, url, body, this.token, this.identity);
 
-        this.absorbXUser(response);
+        if (Capacitor.isNativePlatform()) {
+          const res = await CapacitorHttp.request({
+            method,
+            url,
+            headers,
+            data: body ? JSON.parse(body) : undefined,
+          });
+          status = res.status;
+          payload = res.data;
+          xUserHeader = res.headers ? (res.headers["x-user"] || res.headers["X-User"] || res.headers["X-USER"]) : null;
+        } else {
+          const response = await fetch(url, {
+            method,
+            headers,
+            body: body ?? undefined,
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+          });
+          status = response.status;
+          xUserHeader = response.headers.get("x-user");
+          payload = await response.json();
+        }
 
-        if (RETRY_STATUS_CODES.has(response.status) || !response.ok) continue;
+        if (xUserHeader) {
+          try {
+            const rawToken = typeof xUserHeader === "string" ? JSON.parse(xUserHeader)?.token : xUserHeader?.token;
+            if (typeof rawToken === "string" && rawToken.length > 0) this.token = rawToken;
+          } catch {
+            // Keep token
+          }
+        }
+
+        if (RETRY_STATUS_CODES.has(status) || status < 200 || status >= 300) continue;
 
         this.activeBaseIdx = idx;
-        const payload = (await response.json()) as Json;
         return payload?.data !== undefined ? payload.data : payload;
       } catch {
         // Timeout, DNS, TLS or malformed JSON — move to the next host.

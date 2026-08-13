@@ -2357,51 +2357,213 @@ body {
   outline-offset: 2px !important;
 }
 
-/* Responsive Mobile Layout adjustments */
+/* Responsive Mobile & Android Layout Adjustments */
 @media (max-width: 768px) {
   :root {
     --sidebar-w: 0px;
     --topbar-h: 56px;
   }
 
+  .app {
+    grid-template-columns: 1fr !important;
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
+  }
+
   .sidebar {
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
-    top: auto;
-    width: 100%;
-    height: 60px;
-    flex-direction: row;
-    justify-content: space-around;
-    padding: 6px 12px;
-    border-right: none;
-    border-top: 1px solid var(--border);
-    z-index: 1000;
-    background: var(--bg-elevated);
+    position: fixed !important;
+    bottom: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    top: auto !important;
+    width: 100% !important;
+    height: calc(58px + env(safe-area-inset-bottom, 0px)) !important;
+    flex-direction: row !important;
+    justify-content: space-around !important;
+    align-items: center !important;
+    padding: 4px 6px calc(4px + env(safe-area-inset-bottom, 0px)) 6px !important;
+    border-right: none !important;
+    border-top: 1px solid rgba(255, 255, 255, 0.12) !important;
+    z-index: 1000 !important;
+    background: rgba(14, 16, 22, 0.96) !important;
+    backdrop-filter: blur(20px) !important;
+    -webkit-backdrop-filter: blur(20px) !important;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5) !important;
   }
 
-  .sidebar-brand,
-  .sidebar-footer {
-    display: none;
+  .sidebar .brand,
+  .sidebar .sidebar-toggle,
+  .sidebar-bottom {
+    display: none !important;
   }
 
-  .sidebar-nav {
-    flex-direction: row;
-    width: 100%;
-    justify-content: space-around;
-    align-items: center;
+  .sidebar .nav-item {
+    flex: 1 !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    padding: 6px 2px !important;
+    height: 100% !important;
+    gap: 3px !important;
+    border-radius: 8px !important;
+    background: transparent !important;
+    font-size: 10px !important;
+    color: var(--fg-muted) !important;
   }
 
-  .sidebar-link {
-    flex-direction: column;
-    padding: 4px 8px;
-    font-size: 10px;
-    gap: 2px;
+  .sidebar .nav-item[aria-current="page"] {
+    color: #e50914 !important;
+    background: rgba(229, 9, 20, 0.14) !important;
   }
 
-  .main {
-    padding-bottom: 70px;
+  .sidebar .nav-label {
+    display: block !important;
+    font-size: 10px !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    letter-spacing: -0.2px !important;
+  }
+
+  .main-content,
+  .page {
+    padding: 12px 14px 80px 14px !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+  }
+
+  /* Responsive poster grid for phone screens */
+  .poster-grid,
+  .catalog-grid,
+  .grid-container {
+    grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)) !important;
+    gap: 10px !important;
+  }
+
+  .hero-banner {
+    height: 240px !important;
+    border-radius: 12px !important;
+  }
+
+  .top-bar {
+    padding: 8px 12px !important;
+    gap: 8px !important;
+  }
+
+  /* Settings page mobile & Android responsiveness */
+  .page-narrow {
+    max-width: 100% !important;
+    padding: 12px 14px 90px 14px !important;
+  }
+
+  .setting {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 10px !important;
+    padding: 14px 0 !important;
+  }
+
+  .setting > select,
+  .setting > input,
+  .setting .input {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    min-height: 42px !important;
+  }
+
+  .setting-label {
+    font-size: 15px !important;
+  }
+
+  .setting-hint {
+    font-size: 12px !important;
+    line-height: 1.4 !important;
+  }
+
+  .cue-control {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+
+  .cue-swatches,
+  .cue-segments,
+  .cue-stepper {
+    flex-wrap: wrap !important;
+  }
+
+  .panel-section {
+    padding: 16px 14px !important;
+    margin-bottom: 16px !important;
+  }
+
+  /* Mobile Player Full-Screen Landscape Overlay */
+  body:has(.player-root) .sidebar,
+  body:has(.player-root) .top-bar {
+    display: none !important;
+  }
+
+  .player-root {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    z-index: 99999 !important;
+    background: #000 !important;
+  }
+}
+
+/* ── Responsive Tablet & Mobile Enhancements ───────────────────────────────── */
+@media (max-width: 1024px) {
+  .details-body {
+    grid-template-columns: 1fr !important;
+  }
+
+  .person-hero {
+    grid-template-columns: 140px minmax(0, 1fr) !important;
+    gap: 20px !important;
+  }
+}
+
+@media (max-width: 768px) {
+  .hero {
+    min-height: 240px !important;
+    height: auto !important;
+    padding: 20px 16px !important;
+  }
+
+  .hero-title {
+    font-size: 22px !important;
+  }
+
+  .hero-meta {
+    font-size: 12px !important;
+  }
+
+  .person-hero {
+    grid-template-columns: 1fr !important;
+    text-align: center !important;
+    padding: 16px !important;
+  }
+
+  .person-portrait {
+    margin: 0 auto !important;
+    width: 120px !important;
+    height: 120px !important;
+  }
+
+  .tv-layout {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ── TV / D-Pad Remote Focus High-Contrast Highlights ────────────────────────── */
+@media (min-width: 1025px) {
+  :focus-visible {
+    outline: 3px solid #e50914 !important;
+    outline-offset: 3px !important;
   }
 }
 
