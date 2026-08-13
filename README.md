@@ -46,6 +46,17 @@ sudo dnf install ./InfinityPlay-*-linux-x64.rpm
 sudo pacman -U ./InfinityPlay-*-linux-x64.pkg.tar.zst
 ```
 
+### Android phones, tablets, and TV
+
+The same universal APK adapts to touch phones, tablets, and D-pad Android TV devices.
+Download `InfinityPlay-*-android-universal.apk` from the latest release. On phones and
+tablets, allow installation from your browser or file manager when Android asks. On TV,
+send the APK with ADB or a trusted file-transfer app, install it, then launch InfinityPlay
+from the TV apps row. The TV interface requires only D-pad, Select, and Back.
+
+Release APKs are signed. Android accepts an update over an existing installation only when
+both APKs use the same signing key; keep that key private and backed up.
+
 Installed Windows and supported Linux packages can update from GitHub Releases through
 the About page.
 
@@ -97,6 +108,7 @@ npm run dev
 | `npm run dev` | Hot-reloading dev build |
 | `npm start` | Production preview |
 | `npm run typecheck` | Type-checks main + preload and the renderer |
+| `npm run cap:sync` | Builds the shared renderer and syncs the Android project |
 | `npm run dist:win` | Build the x64 NSIS installer on Windows |
 | `npm run dist:mac` | Build unsigned x64 and arm64 DMG + ZIP packages on macOS |
 | `npm run dist:linux` | Build x64 AppImage, DEB, RPM and Arch packages on Linux |
@@ -122,6 +134,19 @@ Unsigned mode is explicit in `electron-builder.yml`. To enable trusted distribut
    `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`) as GitHub Actions secrets.
 4. Remove the unsigned-macOS guard in `src/main/updater.ts` only after a signed and
    notarized update has been verified end to end.
+
+### Android release signing
+
+The Android release job refuses to publish an unsigned APK. Configure these GitHub
+Actions secrets before tagging a release:
+
+- `ANDROID_KEYSTORE_BASE64`: the release JKS file encoded with `base64 -w0`.
+- `ANDROID_KEYSTORE_PASSWORD`: the keystore password.
+- `ANDROID_KEY_ALIAS`: the signing-key alias.
+- `ANDROID_KEY_PASSWORD`: the signing-key password.
+
+Keep the original JKS backed up outside GitHub. Losing it prevents in-place updates for
+users who installed an earlier signed APK.
 
 ## Project layout
 

@@ -1,6 +1,8 @@
 import { Preferences } from "@capacitor/preferences";
 import { Browser } from "@capacitor/browser";
 import { Filesystem, Directory } from "@capacitor/filesystem";
+import { App as CapApp } from "@capacitor/app";
+import { registerPlugin } from "@capacitor/core";
 import type {
   AppConfig,
   AppInfo,
@@ -32,6 +34,23 @@ const STORAGE_KEYS = {
   HISTORY: "infinityplay_history",
   DOWNLOADS: "infinityplay_downloads",
 };
+
+interface NativeDownloadStatus {
+  state: DownloadRecord["state"];
+  receivedBytes: number;
+  totalBytes: number;
+  fileUrl: string;
+  failureReason: string;
+}
+
+interface InfinityDownloadsPlugin {
+  start(options: { url: string; title: string }): Promise<{ id: string }>;
+  status(options: { id: string }): Promise<NativeDownloadStatus>;
+  cancel(options: { id: string }): Promise<void>;
+  open(options: { id: string }): Promise<void>;
+}
+
+const nativeDownloads = registerPlugin<InfinityDownloadsPlugin>("InfinityDownloads");
 
 let cachedConfig: AppConfig | null = null;
 
@@ -103,6 +122,7 @@ async function saveStoredDownloads(records: DownloadRecord[]): Promise<DownloadR
 const moviebox = new MovieBoxService(getSyncConfig);
 
 const downloadListeners = new Set<(record: DownloadRecord) => void>();
+let downloadPoll: number | undefined;
 
 function notifyDownloadProgress(record: DownloadRecord) {
   for (const listener of downloadListeners) {
@@ -111,6 +131,42 @@ function notifyDownloadProgress(record: DownloadRecord) {
     } catch {
       // Listener error
     }
+  }
+}
+
+async function refreshNativeDownloads(): Promise<DownloadRecord[]> {
+  const records = await getStoredDownloads();
+  let anyChanged = false;
+  const updated = await Promise.all(records.map(async (record) => {
+    if (!["progressing", "paused"].includes(record.state)) return record;
+    try {
+      const status = await nativeDownloads.status({ id: record.id });
+      const next: DownloadRecord = {
+        ...record,
+        ...status,
+        completedAt: status.state === "completed" ? Date.now() : record.completedAt,
+        fileExists: status.state === "completed",
+      };
+      if (JSON.stringify(next) !== JSON.stringify(record)) {
+        anyChanged = true;
+        notifyDownloadProgress(next);
+      }
+      return next;
+    } catch {
+      return record;
+    }
+  }));
+  if (anyChanged) await saveStoredDownloads(updated);
+  return updated;
+}
+
+function syncDownloadPoll() {
+  if (downloadListeners.size > 0 && downloadPoll === undefined) {
+    void refreshNativeDownloads();
+    downloadPoll = window.setInterval(() => void refreshNativeDownloads(), 1500);
+  } else if (downloadListeners.size === 0 && downloadPoll !== undefined) {
+    window.clearInterval(downloadPoll);
+    downloadPoll = undefined;
   }
 }
 
@@ -195,19 +251,23 @@ export const createCapacitorApi = (): InfinityPlayApi => {
       start: (request: DownloadRequest) =>
         wrapResult(async () => {
           const downloads = await getStoredDownloads();
-          const id = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+          const episodeSuffix = request.season > 0
+            ? `-S${String(request.season).padStart(2, "0")}E${String(request.episode).padStart(2, "0")}`
+            : "";
+          const filename = `${request.title}${episodeSuffix}-${request.resolution || "auto"}p.mp4`;
+          const { id } = await nativeDownloads.start({ url: request.url, title: filename });
           const record: DownloadRecord = {
             ...request,
             id,
-            filename: `${request.title}.mp4`,
-            savePath: request.url,
-            fileUrl: request.url,
+            filename,
+            savePath: "Android/InfinityPlay/Movies",
+            fileUrl: "",
             receivedBytes: 0,
-            totalBytes: 100,
-            state: "completed",
+            totalBytes: 0,
+            state: "progressing",
             startedAt: Date.now(),
-            completedAt: Date.now(),
-            fileExists: true,
+            completedAt: null,
+            fileExists: false,
             subtitles: [],
           };
           downloads.unshift(record);
@@ -218,11 +278,12 @@ export const createCapacitorApi = (): InfinityPlayApi => {
       startSeason: () => wrapResult(async () => 0),
       clearQueue: () => wrapResult(async () => 0),
       queueSize: () => wrapResult(async () => 0),
-      list: () => wrapResult(() => getStoredDownloads()),
+      list: () => wrapResult(() => refreshNativeDownloads()),
       pause: () => wrapResult(async () => false),
       resume: () => wrapResult(async () => false),
       cancel: (id: string) =>
         wrapResult(async () => {
+          await nativeDownloads.cancel({ id });
           const downloads = await getStoredDownloads();
           const remaining = downloads.filter((d) => d.id !== id);
           await saveStoredDownloads(remaining);
@@ -230,6 +291,7 @@ export const createCapacitorApi = (): InfinityPlayApi => {
         }),
       remove: (id: string) =>
         wrapResult(async () => {
+          await nativeDownloads.cancel({ id }).catch(() => undefined);
           const downloads = await getStoredDownloads();
           const remaining = downloads.filter((d) => d.id !== id);
           return saveStoredDownloads(remaining);
@@ -240,27 +302,26 @@ export const createCapacitorApi = (): InfinityPlayApi => {
         }),
       open: (id: string) =>
         wrapResult(async () => {
-          const downloads = await getStoredDownloads();
-          const item = downloads.find((d) => d.id === id);
-          if (item?.fileUrl) {
-            await Browser.open({ url: item.fileUrl });
-            return "";
-          }
-          return "File not found";
+          await nativeDownloads.open({ id });
+          return "";
         }),
       reveal: () => wrapResult(async () => false),
       onProgress: (listener: (record: DownloadRecord) => void) => {
         downloadListeners.add(listener);
+        syncDownloadPoll();
         return () => {
           downloadListeners.delete(listener);
+          syncDownloadPoll();
         };
       },
     },
     app: {
       info: () =>
-        wrapResult(async (): Promise<AppInfo> => ({
-          name: "InfinityPlay",
-          version: "0.2.1",
+        wrapResult(async (): Promise<AppInfo> => {
+          const nativeInfo = await CapApp.getInfo();
+          return {
+          name: nativeInfo.name || "InfinityPlay",
+          version: nativeInfo.version,
           electron: "N/A (Capacitor/Android)",
           chrome: navigator.userAgent.match(/Chrome\/(\d+\.\d+\.\d+\.\d+)/)?.[1] ?? "WebView",
           node: "N/A",
@@ -270,11 +331,12 @@ export const createCapacitorApi = (): InfinityPlayApi => {
           ffmpeg: false,
           ffmpegVersion: "",
           gpu: "Android Mobile GPU",
-        })),
+        };
+        }),
     },
     updates: {
-      status: () => wrapResult(async () => ({ state: "up-to-date", version: "0.2.1" })),
-      check: () => wrapResult(async () => ({ state: "up-to-date", version: "0.2.1" })),
+      status: () => wrapResult(async () => ({ state: "up-to-date", version: (await CapApp.getInfo()).version })),
+      check: () => wrapResult(async () => ({ state: "up-to-date", version: (await CapApp.getInfo()).version })),
       install: () => wrapResult(async () => false),
       onStatus: () => () => {},
     },

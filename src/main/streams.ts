@@ -82,10 +82,11 @@ export function getSignedQueryForUrl(url: string): string | null {
 
 export async function installStreamSigner(): Promise<void> {
   try {
-    const electron = await import("electron");
+    const electronModule = "electron";
+    const electron = await import(/* @vite-ignore */ electronModule);
     if (electron?.session?.defaultSession) {
       const filter = { urls: ["*://*.hakunaymatata.com/dash/*"] };
-      electron.session.defaultSession.webRequest.onBeforeRequest(filter, (details, callback) => {
+      electron.session.defaultSession.webRequest.onBeforeRequest(filter, (details: { url: string }, callback: (response: { redirectURL?: string }) => void) => {
         if (details.url.includes("Policy=")) {
           callback({});
           return;

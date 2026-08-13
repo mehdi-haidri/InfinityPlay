@@ -6,6 +6,7 @@ import { md5 } from "js-md5";
 import type { Channel } from "@shared/types";
 
 const FETCH_TIMEOUT_MS = 30_000;
+const NODE_FS_MODULE = "node:fs/promises";
 
 function extractAttribute(line: string, attribute: string): string {
   const start = line.indexOf(attribute);
@@ -75,7 +76,7 @@ export async function fetchPlaylist(source: string, _forceRefresh = false): Prom
 
   if (!isRemote) {
     try {
-      const fs = await import("node:fs/promises");
+      const fs = await import(/* @vite-ignore */ NODE_FS_MODULE);
       return parseM3u(await fs.readFile(trimmed, "utf8"));
     } catch {
       throw new Error("Local playlist files are not supported on this device.");

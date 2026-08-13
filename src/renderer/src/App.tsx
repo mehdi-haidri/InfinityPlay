@@ -16,6 +16,7 @@ import { DownloadsPage } from "./pages/DownloadsPage";
 import { PersonPage } from "./pages/PersonPage";
 import { formatBytes } from "./lib/format";
 import { useApp } from "./store";
+import { applyDeviceProfile, installTvSpatialNavigation } from "./lib/device";
 
 function Routes() {
   const route = useApp((state) => state.route);
@@ -171,9 +172,25 @@ export function App() {
   const [booted, setBooted] = useState(false);
 
   useEffect(() => {
+    const sync = () => applyDeviceProfile();
+    sync();
+    window.addEventListener("resize", sync);
+    window.addEventListener("orientationchange", sync);
+    const removeSpatialNavigation = installTvSpatialNavigation(() => useApp.getState().route.name);
+    return () => {
+      window.removeEventListener("resize", sync);
+      window.removeEventListener("orientationchange", sync);
+      removeSpatialNavigation();
+    };
+  }, []);
+
+  useEffect(() => {
     let sub: { remove: () => void } | undefined;
     try {
       void CapApp.addListener("backButton", () => {
+        const backEvent = new CustomEvent("infinityplay:back", { cancelable: true });
+        window.dispatchEvent(backEvent);
+        if (backEvent.defaultPrevented) return;
         if (useApp.getState().player) {
           closePlayer();
         } else if (useApp.getState().history.length > 0) {
@@ -205,6 +222,7 @@ export function App() {
   // Every route change starts at the top, the way a browser would.
   useEffect(() => {
     document.querySelector(".main")?.scrollTo({ top: 0 });
+    window.dispatchEvent(new Event("infinityplay:focus-route"));
   }, [route]);
 
   return (

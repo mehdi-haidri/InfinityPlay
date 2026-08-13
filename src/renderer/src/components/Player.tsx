@@ -253,6 +253,8 @@ export function Player() {
   const [fullscreen, setFullscreen] = useState(false);
   const [hint, setHint] = useState<{ id: number; icon: "play" | "pause" } | null>(null);
   const [waiting, setWaiting] = useState(false);
+  const [playbackError, setPlaybackError] = useState<string | null>(null);
+  const [retryNonce, setRetryNonce] = useState(0);
   const [prepared, setPrepared] = useState<PreparedLiveStream | null>(null);
   const [playbackOffset, setPlaybackOffset] = useState(0);
   const [startPosition, setStartPosition] = useState<number | null>(0);
@@ -301,6 +303,7 @@ export function Player() {
           : saved,
     );
     setWaiting(false);
+    setPlaybackError(null);
     setActiveRelease(
       releases.find(
         (release) => release.url === request.url && (!request.resolution || release.resolution === request.resolution),
@@ -407,7 +410,7 @@ export function Player() {
     return () => {
       cancelled = true;
     };
-  }, [request, selectedSourceUrl, selectedResolution, startPosition, notify]);
+  }, [request, selectedSourceUrl, selectedResolution, startPosition, notify, retryNonce]);
 
   /**
    * Turns on the requested subtitle once a new source is up. Declared after the reset
@@ -576,28 +579,6 @@ export function Player() {
     };
   }, [sourceUrl, request?.live, activeRelease?.kind, activeRelease?.resolution, notify]);
 
-  // Automatically lock screen orientation to landscape on mobile when player opens
-  useEffect(() => {
-    if (!request) return;
-    try {
-      if (window.screen?.orientation?.lock) {
-        window.screen.orientation.lock("landscape").catch(() => {});
-      }
-    } catch {
-      /* ignore */
-    }
-
-    return () => {
-      try {
-        if (window.screen?.orientation?.unlock) {
-          window.screen.orientation.unlock();
-        }
-      } catch {
-        /* ignore */
-      }
-    };
-  }, [request]);
-
   const persistProgress = useCallback(
     (position: number, total: number, force = false) => {
       if (!request || request.live || !request.subjectId) return;
@@ -640,15 +621,16 @@ export function Player() {
    * Rolls the player straight into the next episode of the same season when the
    * `autoplayNext` setting is on. Silent when there is no next episode or no source.
    */
-  const playNextEpisode = useCallback(async () => {
-    if (!request || request.live || !config.autoplayNext) return;
+  const playAdjacentEpisode = useCallback(async (step: -1 | 1, autoplay = false) => {
+    if (!request || request.live || (autoplay && !config.autoplayNext)) return;
     const { subjectId, season: currentSeason, episode: currentEpisode, episodeCount } = request;
     if (!subjectId || !currentSeason || !currentEpisode || !episodeCount) return;
-    if (currentEpisode >= episodeCount) return;
+    const targetEpisode = currentEpisode + step;
+    if (targetEpisode < 1 || targetEpisode > episodeCount) return;
 
-    const nextEpisode = currentEpisode + 1;
     try {
-      const nextReleases = await unwrap(api.catalog.releases(subjectId, currentSeason, nextEpisode));
+      setWaiting(true);
+      const nextReleases = await unwrap(api.catalog.releases(subjectId, currentSeason, targetEpisode));
       if (nextReleases.length === 0) return;
 
       const chosen =
@@ -660,11 +642,11 @@ export function Player() {
 
       openPlayer({
         ...request,
-        subtitleLine: `Season ${currentSeason} · Episode ${nextEpisode} · ${qualityLabel(chosen.resolution)}`,
+        subtitleLine: `Season ${currentSeason} · Episode ${targetEpisode} · ${qualityLabel(chosen.resolution)}`,
         url: chosen.url,
         resolution: chosen.resolution,
         resourceId: chosen.resourceId,
-        episode: nextEpisode,
+        episode: targetEpisode,
         startAt: 0,
         releases: nextReleases,
         subtitles: nextSubtitles,
@@ -672,11 +654,18 @@ export function Player() {
     } catch (error) {
       notify({
         kind: "error",
-        title: "Could not start the next episode",
+        title: `Could not start the ${step > 0 ? "next" : "previous"} episode`,
         body: error instanceof Error ? error.message : undefined,
       });
+    } finally {
+      setWaiting(false);
     }
   }, [request, config.autoplayNext, activeRelease?.resolution, openPlayer, notify]);
+
+  const playNextEpisode = useCallback(
+    () => playAdjacentEpisode(1, true),
+    [playAdjacentEpisode],
+  );
 
   const close = useCallback(() => {
     const video = videoRef.current;
@@ -744,24 +733,6 @@ export function Player() {
     }
   }, [orientationMode, toggleFullscreen]);
 
-  useEffect(() => {
-    if (!request) return;
-    const isMobileOrTablet = window.matchMedia("(max-width: 1024px)").matches;
-    if (isMobileOrTablet) {
-      const screenObj = window.screen as any;
-      if (screenObj?.orientation?.lock) {
-        screenObj.orientation.lock("landscape").catch(() => undefined);
-        setOrientationMode("landscape");
-      }
-    }
-    return () => {
-      const screenObj = window.screen as any;
-      if (screenObj?.orientation?.unlock) {
-        try { screenObj.orientation.unlock(); } catch {}
-      }
-    };
-  }, [request]);
-
   const wake = useCallback(() => {
     setIdle(false);
     window.clearTimeout(idleTimer.current);
@@ -774,6 +745,18 @@ export function Player() {
     return () => window.clearTimeout(idleTimer.current);
   }, [request, wake]);
 
+  useEffect(() => {
+    if (!request) return;
+    const onBack = (event: Event) => {
+      event.preventDefault();
+      if (menu) setMenu(null);
+      else close();
+      wake();
+    };
+    window.addEventListener("infinityplay:back", onBack);
+    return () => window.removeEventListener("infinityplay:back", onBack);
+  }, [request, menu, close, wake]);
+
   // Keyboard shortcuts follow the usual video-player conventions.
   useEffect(() => {
     if (!request) return;
@@ -785,6 +768,7 @@ export function Player() {
       switch (event.key) {
         case " ":
         case "k":
+        case "MediaPlayPause":
           event.preventDefault();
           togglePlay();
           break;
@@ -949,6 +933,20 @@ export function Player() {
     buttons[target]?.focus();
   };
 
+  const playerRemoteKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (document.documentElement.dataset.device !== "tv" || menu) return;
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+    const controls = Array.from(
+      event.currentTarget.querySelectorAll<HTMLButtonElement>(".player-chrome button:not(:disabled)"),
+    ).filter((button) => button.offsetWidth > 0 && button.offsetHeight > 0);
+    const index = controls.indexOf(document.activeElement as HTMLButtonElement);
+    if (index < 0) return;
+    const step = event.key === "ArrowLeft" || event.key === "ArrowUp" ? -1 : 1;
+    event.preventDefault();
+    event.stopPropagation();
+    controls[(index + step + controls.length) % controls.length]?.focus();
+  };
+
   const chooseRelease = async (release: Release) => {
     const resumeAt = current;
     setActiveRelease(release);
@@ -997,21 +995,42 @@ export function Player() {
   const playedRatio = duration > 0 ? displayedCurrent / duration : 0;
   const bufferedRatio = duration > 0 ? buffered / duration : 0;
   const VolumeIcon = muted || volume === 0 ? VolumeX : volume < 0.5 ? Volume1 : Volume2;
+  const alternateRelease = releases.find(
+    (release) => release.url !== activeRelease?.url || release.resolution !== activeRelease?.resolution,
+  );
+  const isTouchInput = document.documentElement.dataset.input === "touch";
+  const isTv = document.documentElement.dataset.device === "tv";
+  const isPhone = document.documentElement.dataset.device === "phone";
+  const pipAvailable = !isTv && !isPhone && Boolean(document.pictureInPictureEnabled && videoRef.current?.requestPictureInPicture);
+  const subtitleScale = (config.subtitleSize ?? 100) / 100;
 
   return (
-    <div className="player-root">
+    <div className="player-root" data-device={document.documentElement.dataset.device} onKeyDownCapture={playerRemoteKeyDown}>
       <style>{cueCss}</style>
       <div
         className="player-surface"
         ref={surfaceRef}
         data-idle={idle && playing}
-        onMouseMove={wake}
+        onPointerMove={wake}
+        onPointerDown={wake}
+        onFocusCapture={wake}
         onClick={(event) => {
           if (event.target === event.currentTarget || (event.target as HTMLElement).tagName === "VIDEO") {
-            togglePlay();
+            if (isTouchInput) wake();
+            else togglePlay();
           }
         }}
-        onDoubleClick={() => void toggleFullscreen()}
+        onDoubleClick={(event) => {
+          if (!isTouchInput) {
+            void toggleFullscreen();
+            return;
+          }
+          const rect = event.currentTarget.getBoundingClientRect();
+          const ratio = (event.clientX - rect.left) / rect.width;
+          if (ratio < 0.4) seekBy(-SEEK_STEP);
+          else if (ratio > 0.6) seekBy(SEEK_STEP);
+          else togglePlay();
+        }}
       >
         <video
           ref={videoRef}
@@ -1026,13 +1045,10 @@ export function Player() {
             setPlaying(false);
             void playNextEpisode();
           }}
-          onError={() =>
-            notify({
-              kind: "error",
-              title: "Playback failed",
-              body: "The source rejected the request or the codec is unsupported.",
-            })
-          }
+          onError={() => {
+            setWaiting(false);
+            setPlaybackError("The source rejected the request or this device cannot decode it.");
+          }}
           playsInline
         >
           {subtitle && (
@@ -1081,7 +1097,7 @@ export function Player() {
           >
             <div
               style={{
-                fontSize: `${Math.round(22 * ((config.subtitleSize ?? 100) / 100))}px`,
+                fontSize: `clamp(${Math.round(16 * subtitleScale)}px, ${2.25 * subtitleScale}vmin, ${Math.round(40 * subtitleScale)}px)`,
                 color: config.subtitleColor ?? "#ffffff",
                 backgroundColor:
                   config.subtitleBackground === "box"
@@ -1117,7 +1133,7 @@ export function Player() {
                           : "0 2px 4px rgba(0,0,0,0.95)",
                 whiteSpace: "pre-wrap",
                 lineHeight: 1.35,
-                maxWidth: "85vw",
+                maxWidth: isTv ? "78vw" : "88vw",
                 boxShadow: draggingSub.current ? "0 0 16px rgba(255,255,255,0.5)" : undefined,
                 border: draggingSub.current ? "1px dashed rgba(255,255,255,0.6)" : "1px solid transparent",
               }}
@@ -1148,6 +1164,26 @@ export function Player() {
         {waiting && (
           <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
             <div className="spinner" />
+          </div>
+        )}
+
+        {playbackError && (
+          <div className="player-error" role="alert">
+            <div className="player-error-card">
+              <h3>Playback stopped</h3>
+              <p>{playbackError}</p>
+              <div className="resume-actions">
+                <button className="btn btn-primary" onClick={() => { setPlaybackError(null); setSourceUrl(""); setRetryNonce((value) => value + 1); }}>
+                  <RotateCw size={16} /> Retry
+                </button>
+                {alternateRelease && (
+                  <button className="btn" onClick={() => { setPlaybackError(null); void chooseRelease(alternateRelease); }}>
+                    Try {qualityLabel(alternateRelease.resolution)}
+                  </button>
+                )}
+                <button className="btn" onClick={close}>Close</button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -1208,7 +1244,7 @@ export function Player() {
             )}
 
             <div className="player-controls">
-              <button className="icon-button" onClick={togglePlay} aria-label={playing ? "Pause" : "Play"} title={playing ? "Pause (K)" : "Play (K)"}>
+              <button className="icon-button player-primary" data-focus-initial onClick={togglePlay} aria-label={playing ? "Pause" : "Play"} title={playing ? "Pause (K)" : "Play (K)"}>
                 {playing ? <Pause size={20} fill="currentColor" /> : <Play size={20} fill="currentColor" />}
               </button>
 
@@ -1245,17 +1281,11 @@ export function Player() {
                 {request.live ? "LIVE" : `${formatTime(displayedCurrent)} / ${formatTime(duration)}`}
               </span>
 
-              <div style={{ marginLeft: "auto", display: "flex", gap: 4, alignItems: "center" }}>
+              <div className="player-secondary-controls">
                 {request.mediaType === "series" && (request.episode ?? 0) > 1 && (
                   <button
-                    className="icon-button"
-                    onClick={() =>
-                      openPlayer({
-                        ...request,
-                        episode: (request.episode ?? 1) - 1,
-                        startAt: 0,
-                      })
-                    }
+                    className="icon-button player-episode-control"
+                    onClick={() => void playAdjacentEpisode(-1)}
                     aria-label="Previous Episode"
                     title="Previous Episode"
                   >
@@ -1265,14 +1295,8 @@ export function Player() {
 
                 {request.mediaType === "series" && (
                   <button
-                    className="icon-button"
-                    onClick={() =>
-                      openPlayer({
-                        ...request,
-                        episode: (request.episode ?? 1) + 1,
-                        startAt: 0,
-                      })
-                    }
+                    className="icon-button player-episode-control"
+                    onClick={() => void playAdjacentEpisode(1)}
                     aria-label="Next Episode"
                     title="Next Episode"
                   >
@@ -1300,7 +1324,7 @@ export function Player() {
                   <Settings2 size={19} />
                 </button>
 
-                <button
+                {pipAvailable && <button
                   className="icon-button"
                   onClick={() => {
                     const video = videoRef.current;
@@ -1315,10 +1339,10 @@ export function Player() {
                   title="Picture in Picture (PiP)"
                 >
                   <PictureInPicture size={19} />
-                </button>
+                </button>}
 
                 <button
-                  className="icon-button mobile-only-inline"
+                  className="icon-button mobile-only-inline player-orientation"
                   onClick={() => void toggleMobileOrientation()}
                   aria-label="Switch orientation / Laptop view"
                   title="Switch to Horizontal View"
@@ -1327,7 +1351,7 @@ export function Player() {
                   <RotateCw size={19} />
                 </button>
 
-                <button className="icon-button" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"} title={fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}>
+                <button className="icon-button player-fullscreen" onClick={() => void toggleFullscreen()} aria-label={fullscreen ? "Exit fullscreen" : "Fullscreen"} title={fullscreen ? "Exit fullscreen (F)" : "Fullscreen (F)"}>
                   {fullscreen ? <Minimize size={19} /> : <Maximize size={19} />}
                 </button>
               </div>
@@ -1506,17 +1530,33 @@ export function Player() {
                 </select>
               </div>
 
+              <div className="cue-control">
+                <span>Position</span>
+                <div className="cue-segments">
+                  {([28, 54, 86] as const).map((y) => (
+                    <button
+                      key={y}
+                      data-active={Math.abs(subPosition.y - y) < 2}
+                      onClick={() => setSubPosition({ x: 50, y })}
+                    >
+                      {y === 28 ? "Top" : y === 54 ? "Middle" : "Bottom"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <button
                 className="player-menu-reset"
-                onClick={() =>
+                onClick={() => {
+                  setSubPosition({ x: 50, y: 86 });
                   void patchConfig({
                     subtitleSize: 100,
                     subtitleColor: "#ffffff",
                     subtitleBackground: "box",
                     subtitleFontFamily: "sans-serif",
                     subtitleEdgeStyle: "drop-shadow",
-                  })
-                }
+                  });
+                }}
               >
                 Reset default appearance
               </button>

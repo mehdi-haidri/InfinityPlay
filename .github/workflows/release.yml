@@ -320,9 +320,23 @@ jobs:
       - name: Sync Capacitor Android
         run: npm run cap:sync
 
+      - name: Prepare Android signing key
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo "ANDROID_KEYSTORE_BASE64 is required for release builds"; exit 1; }
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/infinityplay-release.jks"
+
       - name: Build Android APK
         shell: bash
+        env:
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/infinityplay-release.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
+          test -n "$ANDROID_KEYSTORE_PASSWORD" -a -n "$ANDROID_KEY_ALIAS" -a -n "$ANDROID_KEY_PASSWORD"
           cd android
           chmod +x gradlew
           ./gradlew assembleRelease
@@ -332,7 +346,7 @@ jobs:
         run: |
           version=$(node -p "require('./package.json').version")
           mkdir -p release-apk
-          cp android/app/build/outputs/apk/release/app-release-unsigned.apk "release-apk/InfinityPlay-${version}-android-tv.apk"
+          cp android/app/build/outputs/apk/release/app-release.apk "release-apk/InfinityPlay-${version}-android-universal.apk"
 
       - name: Upload Android release files
         uses: actions/upload-artifact@v7

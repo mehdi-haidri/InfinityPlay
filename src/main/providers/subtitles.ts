@@ -7,6 +7,7 @@
  */
 
 const FETCH_TIMEOUT_MS = 15_000;
+const NODE_FS_MODULE = "node:fs/promises";
 
 export const LOCAL_SUBTITLE_PREFIX = "local:";
 
@@ -52,7 +53,7 @@ export async function fetchSubtitleVtt(url: string): Promise<{ dataUrl: string; 
   if (url.startsWith(LOCAL_SUBTITLE_PREFIX)) {
     const filePath = url.slice(LOCAL_SUBTITLE_PREFIX.length);
     try {
-      const fs = await import("node:fs/promises");
+      const fs = await import(/* @vite-ignore */ NODE_FS_MODULE);
       rawText = await fs.readFile(filePath, "utf8");
     } catch {
       throw new Error("Local subtitle files are not supported on this platform.");
@@ -79,7 +80,7 @@ export async function saveSubtitleFile(url: string, destination: string): Promis
   const response = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!response.ok) throw new Error(`Subtitle download failed with status ${response.status}.`);
   try {
-    const fs = await import("node:fs/promises");
+    const fs = await import(/* @vite-ignore */ NODE_FS_MODULE);
     await fs.writeFile(destination, await response.text(), "utf8");
   } catch {
     // Non-electron environment
