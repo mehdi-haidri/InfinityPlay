@@ -1,5 +1,7 @@
 # InfinityPlay
 
+[![Release](https://github.com/scorpionTaj/InfinityPlay/actions/workflows/release.yml/badge.svg)](https://github.com/scorpionTaj/InfinityPlay/actions/workflows/release.yml)
+
 A desktop app for finding and streaming movies, TV shows, anime and live TV, with an
 in-app player, offline downloads and configurable subtitles.
 
@@ -15,7 +17,7 @@ Download the package for your system from the
 ### Windows
 
 Run the x64 `.exe` installer. Windows builds are unsigned, so SmartScreen shows
-*"Windows protected your PC"* on first run — choose **More info → Run anyway**.
+_"Windows protected your PC"_ on first run — choose **More info → Run anyway**.
 
 ### macOS
 
@@ -70,7 +72,7 @@ They are needed for:
 
 - **Downloading 720p and 1080p.** Those qualities are published only as adaptive (DASH)
   streams — a manifest of segments rather than one file. Playing them needs nothing, but
-  saving one means remuxing the segments into an MP4. Sources marked *Adaptive* take this
+  saving one means remuxing the segments into an MP4. Sources marked _Adaptive_ take this
   path; entries showing a file size are direct downloads.
 - **Live TV and downloads** whose MPEG-2 or HEVC video Chromium cannot decode directly.
 - **Player timeline thumbnails**, generated on demand and cached in memory.
@@ -103,15 +105,15 @@ npm install
 npm run dev
 ```
 
-| Command | What it does |
-| --- | --- |
-| `npm run dev` | Hot-reloading dev build |
-| `npm start` | Production preview |
-| `npm run typecheck` | Type-checks main + preload and the renderer |
-| `npm run cap:sync` | Builds the shared renderer and syncs the Android project |
-| `npm run dist:win` | Build the x64 NSIS installer on Windows |
-| `npm run dist:mac` | Build unsigned x64 and arm64 DMG + ZIP packages on macOS |
-| `npm run dist:linux` | Build x64 AppImage, DEB, RPM and Arch packages on Linux |
+| Command                   | What it does                                              |
+| ------------------------- | --------------------------------------------------------- |
+| `npm run dev`             | Hot-reloading dev build                                   |
+| `npm start`               | Production preview                                        |
+| `npm run typecheck`       | Type-checks main + preload and the renderer               |
+| `npm run cap:sync`        | Builds the shared renderer and syncs the Android project  |
+| `npm run dist:win`        | Build the x64 NSIS installer on Windows                   |
+| `npm run dist:mac`        | Build unsigned x64 and arm64 DMG + ZIP packages on macOS  |
+| `npm run dist:linux`      | Build x64 AppImage, DEB, RPM and Arch packages on Linux   |
 | `npm run release:current` | Build and publish the current platform (needs `GH_TOKEN`) |
 
 ## Releases
