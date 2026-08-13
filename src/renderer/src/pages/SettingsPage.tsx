@@ -38,6 +38,12 @@ export function SettingsPage() {
 
   const [playlistName, setPlaylistName] = useState("");
   const [playlistUrl, setPlaylistUrl] = useState("");
+  const [playlistEpgUrl, setPlaylistEpgUrl] = useState("");
+  const [xtreamName, setXtreamName] = useState("");
+  const [xtreamServer, setXtreamServer] = useState("");
+  const [xtreamUsername, setXtreamUsername] = useState("");
+  const [xtreamPassword, setXtreamPassword] = useState("");
+  const [tmdbToken, setTmdbToken] = useState(config.tmdbReadToken);
   const [restartNeeded, setRestartNeeded] = useState(false);
   const [appInfo, setAppInfo] = useState<AppInfo | null>(null);
 
@@ -53,10 +59,45 @@ export function SettingsPage() {
       return;
     }
     void patchConfig({
-      playlists: [...config.playlists, { name: name.trim() || trimmedUrl, url: trimmedUrl }],
+      playlists: [...config.playlists, {
+        name: name.trim() || trimmedUrl,
+        url: trimmedUrl,
+        trust: "user",
+        trustNote: "Playlist added by you.",
+        epgUrl: playlistEpgUrl.trim() || undefined,
+      }],
     });
     setPlaylistName("");
     setPlaylistUrl("");
+    setPlaylistEpgUrl("");
+  };
+
+  const addXtream = () => {
+    if (!xtreamServer.trim() || !xtreamUsername.trim() || !xtreamPassword) {
+      notify({ kind: "error", title: "Missing IPTV login", body: "Enter the server, username, and password." });
+      return;
+    }
+    try {
+      const url = new URL(xtreamServer.trim());
+      if (!/^https?:$/.test(url.protocol)) throw new Error();
+    } catch {
+      notify({ kind: "error", title: "Invalid IPTV server", body: "Use a complete HTTP or HTTPS server URL." });
+      return;
+    }
+    const id = globalThis.crypto?.randomUUID?.() ?? `iptv-${Date.now()}`;
+    void patchConfig({
+      xtreamSources: [...config.xtreamSources, {
+        id,
+        name: xtreamName.trim() || "My IPTV",
+        serverUrl: xtreamServer.trim(),
+        username: xtreamUsername.trim(),
+        password: xtreamPassword,
+      }],
+    });
+    setXtreamName("");
+    setXtreamServer("");
+    setXtreamUsername("");
+    setXtreamPassword("");
   };
 
   const pickFile = async () => {
@@ -462,6 +503,25 @@ export function SettingsPage() {
         </div>
       </section>
 
+      <section className="panel panel-section">
+        <div className="panel-title">Legal streaming availability</div>
+        <div className="setting">
+          <div>
+            <div className="setting-label">TMDB read token</div>
+            <div className="setting-hint">Used locally to request JustWatch availability. It does not unlock or proxy any service.</div>
+          </div>
+          <input className="input" type="password" autoComplete="off" placeholder="TMDB v4 read token" value={tmdbToken} onChange={(event) => setTmdbToken(event.target.value)} style={{ minWidth: 280 }} />
+        </div>
+        <div className="setting">
+          <div>
+            <div className="setting-label">Watch region</div>
+            <div className="setting-hint">Two-letter country code used for provider results.</div>
+          </div>
+          <input className="input" value={config.watchRegion} maxLength={2} onChange={(event) => void patchConfig({ watchRegion: event.target.value.toUpperCase() })} style={{ width: 72, textTransform: "uppercase" }} aria-label="Watch region" />
+        </div>
+        <button className="btn btn-sm" onClick={() => void patchConfig({ tmdbReadToken: tmdbToken.trim() })}>Save availability token</button>
+      </section>
+
       <section className="panel" style={{ marginBottom: 20 }}>
         <div className="panel-title">Live TV playlists</div>
 
@@ -470,6 +530,7 @@ export function SettingsPage() {
             <div style={{ minWidth: 0, flex: 1 }}>
               <div className="setting-label">{playlist.name}</div>
               <div className="playlist-url">{playlist.url}</div>
+              <div className="setting-hint">{playlist.trust === "official" ? "Verified free source" : playlist.trust === "community" ? "Community-maintained links" : "Added by you"}{playlist.epgUrl ? " · XMLTV guide attached" : ""}</div>
             </div>
             <button
               className="icon-button"
@@ -495,6 +556,13 @@ export function SettingsPage() {
           />
           <input
             className="input"
+            placeholder="Optional XMLTV guide URL"
+            value={playlistEpgUrl}
+            onChange={(event) => setPlaylistEpgUrl(event.target.value)}
+            style={{ flex: 1, minWidth: 220 }}
+          />
+          <input
+            className="input"
             placeholder="https://… .m3u"
             value={playlistUrl}
             onChange={(event) => setPlaylistUrl(event.target.value)}
@@ -506,6 +574,30 @@ export function SettingsPage() {
           <button className="btn btn-sm btn-ghost" onClick={() => void pickFile()}>
             <FolderOpen size={14} /> From file
           </button>
+        </div>
+      </section>
+
+      <section className="panel" style={{ marginBottom: 20 }}>
+        <div className="panel-title">My IPTV subscriptions · Xtream</div>
+        <div className="setting-hint" style={{ marginBottom: 12 }}>
+          Connect only a service you are authorized to use. Credentials stay in InfinityPlay's local configuration and are never bundled with the app.
+        </div>
+        {config.xtreamSources.map((source) => (
+          <div className="playlist-row" key={source.id}>
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div className="setting-label">{source.name}</div>
+              <div className="playlist-url">{source.serverUrl}</div>
+              <div className="setting-hint">User {source.username} · password stored locally</div>
+            </div>
+            <button className="icon-button" aria-label={`Remove ${source.name}`} onClick={() => void patchConfig({ xtreamSources: config.xtreamSources.filter((entry) => entry.id !== source.id) })}><Trash2 size={16} /></button>
+          </div>
+        ))}
+        <div className="xtream-form">
+          <input className="input" placeholder="Name" value={xtreamName} onChange={(event) => setXtreamName(event.target.value)} />
+          <input className="input" placeholder="https://provider.example:port" value={xtreamServer} onChange={(event) => setXtreamServer(event.target.value)} />
+          <input className="input" placeholder="Username" autoComplete="off" value={xtreamUsername} onChange={(event) => setXtreamUsername(event.target.value)} />
+          <input className="input" placeholder="Password" type="password" autoComplete="off" value={xtreamPassword} onChange={(event) => setXtreamPassword(event.target.value)} />
+          <button className="btn btn-sm" onClick={addXtream}><Plus size={14} /> Add IPTV login</button>
         </div>
       </section>
 

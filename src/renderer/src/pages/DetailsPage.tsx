@@ -15,6 +15,7 @@ import { formatBytes, qualityLabel } from "../lib/format";
 import { EmptyState, ErrorState, LoadingState, Spinner } from "../components/States";
 import { MediaImage } from "../components/MediaImage";
 import { findProgress, useApp } from "../store";
+import { WatchAvailabilityPanel } from "../components/WatchAvailabilityPanel";
 
 interface Props {
   id: string;
@@ -510,6 +511,7 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
         </div>
 
         <aside>
+          <WatchAvailabilityPanel title={media.title} mediaType={media.mediaType} />
           <div className="panel" style={{ marginBottom: 16 }}>
             <div className="panel-title">
               Sources{isSeries ? ` · S${season}E${episode}` : ""} ·{" "}

@@ -300,6 +300,20 @@ export interface Channel {
   streamUrl: string;
   /** Per-channel HTTP headers declared by EXTINF/EXTVLCOPT (for example Referer). */
   headers?: Record<string, string>;
+  /** Provenance inherited from the selected source; never inferred from a channel name. */
+  trust?: SourceTrust;
+  /** Human-readable reason the source received its trust level. */
+  trustNote?: string;
+}
+
+export type SourceTrust = "official" | "community" | "user";
+
+export interface ChannelProgramme {
+  channelId: string;
+  title: string;
+  description: string;
+  start: number;
+  stop: number;
 }
 
 export interface PreparedLiveStream {
@@ -315,38 +329,124 @@ export interface PreparedLiveStream {
 export interface PlaylistSource {
   name: string;
   url: string;
+  /** An HLS URL can represent one verified channel instead of an M3U channel directory. */
+  type?: "m3u" | "direct";
+  trust?: SourceTrust;
+  trustNote?: string;
+  /** Optional user-supplied XMLTV document matched through each channel's `tvg-id`. */
+  epgUrl?: string;
+  directChannel?: Omit<Channel, "streamUrl" | "trust" | "trustNote">;
+}
+
+export interface XtreamSource {
+  id: string;
+  name: string;
+  serverUrl: string;
+  username: string;
+  password: string;
 }
 
 /**
  * Community-maintained, openly published playlists.
  *
- * Both projects index streams their broadcasters put out publicly; neither carries
- * subscription services. Arabic coverage measured against the live lists: 325 channels
- * across 18 Arab countries in the iptv-org index, 356 in its Arabic-language cut, 77 in
- * Free-TV — which also tags every entry with `tvg-country`.
+ * Community indexes can change without notice. Their entries are deliberately marked
+ * community rather than official: a public URL is not proof that a broadcaster licensed
+ * a third-party player to redistribute it.
  */
 export const DEFAULT_PLAYLISTS: PlaylistSource[] = [
   {
+    name: "Verified — beIN SPORTS XTRA",
+    url: "https://bein-xtra-bein.amagi.tv/playlist.m3u8",
+    type: "direct",
+    trust: "official",
+    trustNote: "Free beIN FAST channel delivered by its authorized Amagi distribution feed.",
+    directChannel: {
+      id: "beINSPORTSXTRA.us",
+      name: "beIN SPORTS XTRA",
+      logo: "https://i.ibb.co/HT49GPmB/XTRA-2.png",
+      group: "Sports",
+      country: "US",
+    },
+  },
+  {
     name: "IPTV-org — All channels",
     url: "https://iptv-org.github.io/iptv/index.m3u",
+    trust: "community",
   },
   {
     name: "IPTV-org — Arabic",
     url: "https://iptv-org.github.io/iptv/languages/ara.m3u",
+    trust: "community",
   },
   {
     name: "IPTV-org — Sports",
     url: "https://iptv-org.github.io/iptv/categories/sports.m3u",
+    trust: "community",
+  },
+  {
+    name: "IPTV-org — Movies",
+    url: "https://iptv-org.github.io/iptv/categories/movies.m3u",
+    trust: "community",
+  },
+  {
+    name: "IPTV-org — Series",
+    url: "https://iptv-org.github.io/iptv/categories/series.m3u",
+    trust: "community",
+  },
+  {
+    name: "IPTV-org — Morocco",
+    url: "https://iptv-org.github.io/iptv/countries/ma.m3u",
+    trust: "community",
+  },
+  {
+    name: "IPTV-org — French",
+    url: "https://iptv-org.github.io/iptv/languages/fra.m3u",
+    trust: "community",
   },
   {
     name: "IPTV-org — News",
     url: "https://iptv-org.github.io/iptv/categories/news.m3u",
+    trust: "community",
   },
   {
     name: "Free-TV",
     url: "https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8",
+    trust: "community",
   },
 ];
+
+export type FreeMediaProvider = "loc" | "wikimedia";
+
+export interface FreeMediaItem {
+  id: string;
+  provider: FreeMediaProvider;
+  title: string;
+  description: string;
+  year: string;
+  posterUrl: string | null;
+  detailUrl: string;
+  streamUrl: string | null;
+  mimeType: string;
+  rights: string;
+  creator: string;
+}
+
+export interface WatchProviderOption {
+  id: number;
+  name: string;
+  logoUrl: string | null;
+}
+
+export interface WatchAvailability {
+  configured: boolean;
+  region: string;
+  link: string | null;
+  free: WatchProviderOption[];
+  ads: WatchProviderOption[];
+  subscription: WatchProviderOption[];
+  rent: WatchProviderOption[];
+  buy: WatchProviderOption[];
+}
 
 export interface WatchHistoryItem {
   provider: ProviderKind;
@@ -400,6 +500,12 @@ export interface AppConfig {
   subtitlePosition: SubtitlePosition;
   volume: number;
   playlists: PlaylistSource[];
+  /** User-owned IPTV subscriptions. Credentials stay in the local app configuration. */
+  xtreamSources: XtreamSource[];
+  /** Optional TMDB v4 read token used only for legal watch-provider discovery. */
+  tmdbReadToken: string;
+  /** ISO 3166-1 region used for legal streaming availability. */
+  watchRegion: string;
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -422,6 +528,9 @@ export const DEFAULT_CONFIG: AppConfig = {
   subtitlePosition: "bottom",
   volume: 1,
   playlists: [...DEFAULT_PLAYLISTS],
+  xtreamSources: [],
+  tmdbReadToken: "",
+  watchRegion: "MA",
 };
 
 /** Uniform IPC envelope so renderer code never has to catch across the bridge. */
@@ -490,6 +599,9 @@ export interface DownloadRecord extends DownloadRequest {
 export interface AppInfo {
   name: string;
   version: string;
+  runtime: "electron" | "android";
+  /** Native Android versionCode. Desktop builds do not expose this field. */
+  buildNumber?: string;
   electron: string;
   chrome: string;
   node: string;
@@ -553,7 +665,18 @@ export interface InfinityPlayApi {
     load: (url: string) => Promise<Result<string>>;
   };
   tv: {
-    playlist: (url: string, forceRefresh?: boolean) => Promise<Result<Channel[]>>;
+    playlist: (source: PlaylistSource, forceRefresh?: boolean) => Promise<Result<Channel[]>>;
+    epg: (url: string, channelIds: string[]) => Promise<Result<Record<string, ChannelProgramme[]>>>;
+    xtream: (source: XtreamSource) => Promise<Result<Channel[]>>;
+    xtreamEpg: (source: XtreamSource, channelIds: string[]) => Promise<Result<Record<string, ChannelProgramme[]>>>;
+  };
+  freeMedia: {
+    browse: (provider: FreeMediaProvider, page?: number) => Promise<Result<FreeMediaItem[]>>;
+    search: (provider: FreeMediaProvider, query: string, page?: number) => Promise<Result<FreeMediaItem[]>>;
+    details: (provider: FreeMediaProvider, id: string) => Promise<Result<FreeMediaItem>>;
+  };
+  availability: {
+    title: (title: string, mediaType: MediaType) => Promise<Result<WatchAvailability>>;
   };
   media: {
     prepareLive: (url: string, startAt?: number, resolution?: number) => Promise<Result<PreparedLiveStream>>;

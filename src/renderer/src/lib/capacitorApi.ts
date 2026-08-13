@@ -9,6 +9,7 @@ import type {
   AudioVariant,
   CatalogItem,
   FavoriteItem,
+  FreeMediaProvider,
   Channel,
   DownloadRecord,
   DownloadRequest,
@@ -28,6 +29,10 @@ import type {
 import { DEFAULT_CONFIG } from "@shared/types";
 import { MovieBoxService } from "@/../../main/providers/moviebox";
 import { fetchPlaylist } from "@/../../main/providers/m3u";
+import { fetchEpg } from "@/../../main/providers/epg";
+import { fetchXtreamChannels, fetchXtreamEpg } from "@/../../main/providers/xtream";
+import { browseFreeMedia, freeMediaDetails, searchFreeMedia } from "@/../../main/providers/free-media";
+import { findWatchAvailability } from "@/../../main/providers/watch";
 import { fetchSubtitleAsVttDataUrl } from "@/../../main/providers/subtitles";
 
 const STORAGE_KEYS = {
@@ -251,8 +256,25 @@ export const createCapacitorApi = (): InfinityPlayApi => {
       load: (url: string) => wrapResult(() => fetchSubtitleAsVttDataUrl(url)),
     },
     tv: {
-      playlist: (url: string, forceRefresh = false) =>
-        wrapResult(() => fetchPlaylist(url, forceRefresh)),
+      playlist: (source, forceRefresh = false) =>
+        wrapResult(() => fetchPlaylist(source, forceRefresh)),
+      epg: (url, channelIds) => wrapResult(() => fetchEpg(url, channelIds)),
+      xtream: (source) => wrapResult(() => fetchXtreamChannels(source)),
+      xtreamEpg: (source, channelIds) => wrapResult(() => fetchXtreamEpg(source, channelIds)),
+    },
+    freeMedia: {
+      browse: (provider: FreeMediaProvider, page = 1) =>
+        wrapResult(() => browseFreeMedia(provider, page)),
+      search: (provider: FreeMediaProvider, query: string, page = 1) =>
+        wrapResult(() => searchFreeMedia(provider, query, page)),
+      details: (provider: FreeMediaProvider, id: string) =>
+        wrapResult(() => freeMediaDetails(provider, id)),
+    },
+    availability: {
+      title: (title, mediaType) => wrapResult(async () => {
+        const config = await getStoredConfig();
+        return findWatchAvailability(title, mediaType, config.tmdbReadToken, config.watchRegion);
+      }),
     },
     media: {
       prepareLive: (url: string, startAt = 0, resolution = 0) =>
@@ -375,23 +397,31 @@ export const createCapacitorApi = (): InfinityPlayApi => {
         wrapResult(async (): Promise<AppInfo> => {
           const nativeInfo = await CapApp.getInfo();
           return {
-          name: nativeInfo.name || "InfinityPlay",
-          version: nativeInfo.version,
-          electron: "N/A (Capacitor/Android)",
-          chrome: navigator.userAgent.match(/Chrome\/(\d+\.\d+\.\d+\.\d+)/)?.[1] ?? "WebView",
-          node: "N/A",
-          platform: "Android",
-          packageType: "Android APK / App Bundle",
-          updatable: false,
-          ffmpeg: false,
-          ffmpegVersion: "",
-          gpu: "Android Mobile GPU",
-        };
+            name: nativeInfo.name || "InfinityPlay",
+            version: nativeInfo.version,
+            runtime: "android",
+            buildNumber: nativeInfo.build,
+            electron: "",
+            chrome: "",
+            node: "",
+            platform: "Android",
+            packageType: "Android APK / App Bundle",
+            updatable: false,
+            ffmpeg: false,
+            ffmpegVersion: "",
+            gpu: "",
+          };
         }),
     },
     updates: {
-      status: () => wrapResult(async () => ({ state: "up-to-date", version: (await CapApp.getInfo()).version })),
-      check: () => wrapResult(async () => ({ state: "up-to-date", version: (await CapApp.getInfo()).version })),
+      status: () => wrapResult(async () => ({
+        state: "unsupported",
+        message: "Android updates are installed manually from GitHub Releases.",
+      })),
+      check: () => wrapResult(async () => ({
+        state: "unsupported",
+        message: "Android updates are installed manually from GitHub Releases.",
+      })),
       install: () => wrapResult(async () => false),
       onStatus: () => () => {},
     },

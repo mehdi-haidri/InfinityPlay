@@ -86,6 +86,38 @@ and a season download takes the best direct file instead.
 Cast profiles use the MovieBox catalog for verified credits and may request an optional
 English biography from Wikipedia; movies and series still appear if that service is offline.
 
+## Free and legal sources
+
+InfinityPlay separates source provenance instead of treating every public URL as verified:
+
+- **Free Library** browses the Library of Congress National Screening Room and freely
+  licensed Wikimedia Commons video. Each card keeps its archive, creator, and rights label.
+  A small public-domain Library of Congress selection remains available when its JSON API
+  temporarily challenges automated requests.
+- **Verified — beIN SPORTS XTRA** is the free FAST channel delivered through beIN's Amagi
+  distribution feed. It is not a way to unlock premium beIN channels.
+- **IPTV-org** and **Free-TV** entries are marked *Community link*. InfinityPlay removes
+  non-XTRA beIN-branded entries from those lists because a community submission is not
+  evidence that a premium feed is authorized.
+- Focused IPTV-org playlists for movies, series, Morocco, French, sports, Arabic, and news
+  are included alongside the full directory.
+
+The **Watch legally** panel can show free, ad-supported, subscription, rental, and purchase
+availability by region. Create a TMDB API read token, enter it in Settings, and choose the
+two-letter region code. Availability is supplied by JustWatch through TMDB; InfinityPlay
+opens the provider page and does not proxy or bypass the service.
+
+### Your IPTV service and program guide
+
+Settings accepts ordinary M3U/M3U8 playlists, an optional XMLTV guide URL, and Xtream API
+credentials for a service you are authorized to use. Xtream credentials and the TMDB token
+are stored only in the app's local configuration; they are never committed or included in
+release packages. Prefer HTTPS providers, and do not reuse an important password.
+
+XMLTV programmes are matched through `tvg-id`. Xtream sources use their own XMLTV endpoint.
+The Live TV page shows the current programme when guide data exists and labels every channel
+as **Verified free**, **Community link**, or **Your provider**.
+
 Settings can enable or disable hardware acceleration for Electron and FFmpeg. InfinityPlay
 uses the installed NVIDIA, AMD, or Intel driver when available and shows Chromium's detected
 video-decode status; changing this setting requires an app restart.
@@ -195,6 +227,15 @@ Worth knowing before debugging something that "returns nothing":
   links.
 - The stream CDN answers 428 to browser-like `User-Agent` headers, so it is rewritten for
   media hosts only.
+
+### Source policy
+
+- Do not submit premium-channel restreams, extracted session tokens, DRM workarounds,
+  credential dumps, Stalker/MAG device cloning, or torrent-backed catalog providers.
+- A source may be called *official* only when it is published by the rights holder or a
+  named authorized distributor. Community directories stay visibly marked as community.
+- User-supplied IPTV access remains user-owned configuration. Never put real IPTV, TMDB,
+  signing, or release credentials in source control.
 
 ## Authors & Developers
 

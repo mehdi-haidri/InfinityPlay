@@ -9,15 +9,22 @@ import type {
   AppConfig,
   AppInfo,
   CatalogItem,
+  FreeMediaProvider,
   DownloadRequest,
   SeasonDownloadRequest,
   MediaType,
   Result,
   WatchHistoryItem,
   PreparedLiveStream,
+  PlaylistSource,
+  XtreamSource,
 } from "@shared/types";
 import { MovieBoxService } from "./providers/moviebox";
 import { fetchPlaylist } from "./providers/m3u";
+import { fetchEpg } from "./providers/epg";
+import { fetchXtreamChannels, fetchXtreamEpg } from "./providers/xtream";
+import { browseFreeMedia, freeMediaDetails, searchFreeMedia } from "./providers/free-media";
+import { findWatchAvailability } from "./providers/watch";
 import { fetchSubtitleAsVttDataUrl } from "./providers/subtitles";
 import {
   clearHistory,
@@ -107,9 +114,28 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   handle("subtitle:load", (url: string) => fetchSubtitleAsVttDataUrl(url));
 
-  handle("tv:playlist", (url: string, forceRefresh: boolean) =>
-    fetchPlaylist(url, forceRefresh ?? false),
+  handle("tv:playlist", (source: PlaylistSource, forceRefresh: boolean) =>
+    fetchPlaylist(source, forceRefresh ?? false),
   );
+  handle("tv:epg", (url: string, channelIds: string[]) => fetchEpg(url, channelIds));
+  handle("tv:xtream", (source: XtreamSource) => fetchXtreamChannels(source));
+  handle("tv:xtreamEpg", (source: XtreamSource, channelIds: string[]) =>
+    fetchXtreamEpg(source, channelIds),
+  );
+
+  handle("free:browse", (provider: FreeMediaProvider, page: number) =>
+    browseFreeMedia(provider, page ?? 1),
+  );
+  handle("free:search", (provider: FreeMediaProvider, query: string, page: number) =>
+    searchFreeMedia(provider, query, page ?? 1),
+  );
+  handle("free:details", (provider: FreeMediaProvider, id: string) =>
+    freeMediaDetails(provider, id),
+  );
+  handle("availability:title", (title: string, mediaType: MediaType) => {
+    const config = getConfig();
+    return findWatchAvailability(title, mediaType, config.tmdbReadToken, config.watchRegion);
+  });
   handle("media:prepareLive", (url: string, startAt: number, resolution: number): Promise<PreparedLiveStream> =>
     prepareLiveStream(url, startAt, resolution),
   );
@@ -170,6 +196,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
     return {
       name: app.getName(),
       version: app.getVersion(),
+      runtime: "electron",
       electron: process.versions.electron,
       chrome: process.versions.chrome,
       node: process.versions.node,

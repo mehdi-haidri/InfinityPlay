@@ -3,7 +3,7 @@
  * Portable across Electron main process and Capacitor / Web browser.
  */
 import { md5 } from "js-md5";
-import type { Channel } from "@shared/types";
+import type { Channel, PlaylistSource } from "@shared/types";
 
 const FETCH_TIMEOUT_MS = 30_000;
 const NODE_FS_MODULE = "node:fs/promises";
@@ -26,6 +26,20 @@ function playlistCache(): CacheStorage {
     getItem: (key) => memoryCache.get(key) ?? null,
     setItem: (key, value) => memoryCache.set(key, value),
   };
+}
+
+function applySourcePolicy(channels: Channel[], source: PlaylistSource): Channel[] {
+  const allowed = source.trust === "community"
+    ? channels.filter((channel) => {
+        const beIn = /^bein/i.test(channel.id) || /^bein/i.test(channel.name.replace(/\s+/g, ""));
+        return !beIn || /xtra/i.test(`${channel.id} ${channel.name}`);
+      })
+    : channels;
+  return allowed.map((channel) => ({
+    ...channel,
+    trust: source.trust ?? "user",
+    trustNote: source.trustNote,
+  }));
 }
 
 function extractAttribute(line: string, attribute: string): string {
@@ -111,14 +125,24 @@ async function download(url: string): Promise<string> {
   return response.text();
 }
 
-export async function fetchPlaylist(source: string, _forceRefresh = false): Promise<Channel[]> {
-  const trimmed = source.trim();
+export async function fetchPlaylist(source: PlaylistSource, _forceRefresh = false): Promise<Channel[]> {
+  const trimmed = source.url.trim();
+
+  if (source.type === "direct") {
+    if (!source.directChannel) throw new Error("This direct channel is missing its metadata.");
+    return [{
+      ...source.directChannel,
+      streamUrl: trimmed,
+      trust: source.trust ?? "official",
+      trustNote: source.trustNote,
+    }];
+  }
   const isRemote = trimmed.startsWith("http://") || trimmed.startsWith("https://");
 
   if (!isRemote) {
     try {
       const fs = await import(/* @vite-ignore */ NODE_FS_MODULE);
-      return parseM3u(await fs.readFile(trimmed, "utf8"));
+      return applySourcePolicy(parseM3u(await fs.readFile(trimmed, "utf8")), source);
     } catch {
       throw new Error("Local playlist files are not supported on this device.");
     }
@@ -132,7 +156,9 @@ export async function fetchPlaylist(source: string, _forceRefresh = false): Prom
       const { timestamp, content } = JSON.parse(cached);
       if (Date.now() - timestamp < 24 * 60 * 60 * 1000) {
         const channels = parseM3u(content);
-        if (channels.length > 0) return channels;
+        if (channels.length > 0) {
+          return applySourcePolicy(channels, source);
+        }
       }
     } catch {
       // Ignore cache parse error
@@ -148,5 +174,5 @@ export async function fetchPlaylist(source: string, _forceRefresh = false): Prom
       // Storage full
     }
   }
-  return channels;
+  return applySourcePolicy(channels, source);
 }

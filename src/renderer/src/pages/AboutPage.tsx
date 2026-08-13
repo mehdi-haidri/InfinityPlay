@@ -103,6 +103,7 @@ export function AboutPage() {
 
   const open = (url: string) => void api.system.openExternal(url);
   const line = statusLine(status);
+  const isAndroid = info?.runtime === "android";
 
   return (
     <div className="page page-narrow">
@@ -177,13 +178,19 @@ export function AboutPage() {
 
       {info && (
         <section className="panel panel-spaced">
-          <div className="panel-title">Build</div>
+          <div className="panel-title">{isAndroid ? "Android app" : "Desktop build"}</div>
           <dl className="meta-list">
-            <div><dt>Version</dt><dd>{info.version}</dd></div>
-            <div><dt>Electron</dt><dd>{info.electron}</dd></div>
-            <div><dt>Chromium</dt><dd>{info.chrome}</dd></div>
-            <div><dt>Node</dt><dd>{info.node}</dd></div>
-            <div><dt>FFmpeg</dt><dd>{info.ffmpegVersion || (info.ffmpeg ? "Available" : "Not found")}</dd></div>
+            <div><dt>App version</dt><dd>{info.version}</dd></div>
+            {isAndroid ? (
+              info.buildNumber && <div><dt>Build code</dt><dd>{info.buildNumber}</dd></div>
+            ) : (
+              <>
+                <div><dt>Electron</dt><dd>{info.electron}</dd></div>
+                <div><dt>Chromium</dt><dd>{info.chrome}</dd></div>
+                <div><dt>Node</dt><dd>{info.node}</dd></div>
+                <div><dt>FFmpeg</dt><dd>{info.ffmpegVersion || (info.ffmpeg ? "Available" : "Not found")}</dd></div>
+              </>
+            )}
             <div><dt>Platform</dt><dd>{info.platform}</dd></div>
             <div><dt>Package</dt><dd>{info.packageType}</dd></div>
           </dl>

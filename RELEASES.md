@@ -4,7 +4,33 @@ Updates install automatically. InfinityPlay checks on launch and on demand from 
 
 ---
 
-## 0.2.8 (Latest Update)
+## 0.2.9 (Latest Update)
+
+### Free media and legal availability
+- Added a dedicated **Free Library** for Library of Congress National Screening Room films and freely licensed Wikimedia Commons video, including archive rights and creator labels.
+- Added resilient curated Library of Congress fallbacks for temporary API challenges and selected streamable Wikimedia renditions instead of multi-gigabyte originals.
+- Added regional legal watch availability through TMDB and JustWatch, covering free, ad-supported, subscription, rental, and purchase options without proxying protected services.
+
+### Live TV sources, beIN, and program guides
+- Added the authorized free **beIN SPORTS XTRA** FAST feed while explicitly filtering non-XTRA beIN-branded entries from community playlists.
+- Added focused IPTV-org playlists for movies, series, Morocco, and French alongside the existing all-channel, Arabic, sports, and news lists.
+- Added visible **Verified free**, **Community link**, and **Your provider** provenance labels.
+- Added optional XMLTV program guides matched by `tvg-id`, with current-programme titles on channel cards.
+- Added user-owned Xtream IPTV accounts, live categories, channel logos, and provider XMLTV support. Credentials remain local and are never bundled with InfinityPlay.
+
+### Validation
+- Passed TypeScript checking for Electron, preload, renderer, and Capacitor provider paths.
+- Passed the Android Studio/Gradle unit tests, debug lint, and debug APK build; Android version metadata is synchronized as `0.2.9` (`versionCode 209`).
+- Inspected the Android build on the `Medium_Phone` emulator and checked startup logs for fatal crashes.
+
+### Android About page
+- Added an Android-specific build panel with the native app version and version code.
+- Removed Electron, Node, Chromium, GPU, and FFmpeg rows from Android instead of displaying desktop-only or unavailable values.
+- Replaced the desktop auto-update status on Android with clear manual APK update guidance and a link to GitHub Releases.
+
+---
+
+## 0.2.8
 
 ### Desktop Live TV reliability
 - Fixed the desktop/Electron Live TV page failing with `localStorage is not defined` before IPTV channels could load.

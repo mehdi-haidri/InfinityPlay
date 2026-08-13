@@ -14,6 +14,7 @@ import { AboutPage } from "./pages/AboutPage";
 import { DownloadsPage } from "./pages/DownloadsPage";
 import { FavoritesPage } from "./pages/FavoritesPage";
 import { PersonPage } from "./pages/PersonPage";
+import { FreeLibraryPage } from "./pages/FreeLibraryPage";
 import { formatBytes } from "./lib/format";
 import { useApp } from "./store";
 import { applyDeviceProfile, installTvSpatialNavigation } from "./lib/device";
@@ -49,6 +50,8 @@ function Routes() {
       );
     case "livetv":
       return <LiveTvPage />;
+    case "free-library":
+      return <FreeLibraryPage />;
     case "history":
       return <HistoryPage />;
     case "favorites":
