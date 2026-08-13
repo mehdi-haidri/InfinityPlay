@@ -4,7 +4,15 @@ Updates install automatically. InfinityPlay checks on launch and on demand from 
 
 ---
 
-## 0.2.7 (Latest Update)
+## 0.2.8 (Latest Update)
+
+### Desktop Live TV reliability
+- Fixed the desktop/Electron Live TV page failing with `localStorage is not defined` before IPTV channels could load.
+- Added a runtime-safe playlist cache: Electron uses an in-process cache, while Android and browser builds continue using browser storage.
+- Verified M3U parsing and cache reuse in the same Node.js environment used by Electron's main process, including a representative **2M** channel entry.
+- Protected Android release keystores and local signing credentials with enforced Git ignore rules.
+
+## 0.2.7
 
 ### Release workflow reliability
 - Fixed release tags failing when Android signing secrets are unavailable. CI now runs the complete Android test, lint, and debug-build validation while skipping only the publishable APK.
