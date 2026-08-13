@@ -1,22 +1,11 @@
 /**
- * M3U playlist loading for live TV, with a 24-hour on-disk cache and a single forced
- * re-download when a cached playlist parses to nothing.
+ * M3U playlist loading for live TV, with a 24-hour cache and forced re-downloading.
+ * Portable across Electron main process and Capacitor / Web browser.
  */
-import crypto from "node:crypto";
-import fs from "node:fs/promises";
-import path from "node:path";
-import { app } from "electron";
+import { md5 } from "js-md5";
 import type { Channel } from "@shared/types";
 
-const CACHE_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 const FETCH_TIMEOUT_MS = 30_000;
-
-function cacheDir(): string {
-  return path.join(app.getPath("userData"), "tv_playlists");
-}
-
-const cacheFilename = (url: string): string =>
-  `${crypto.createHash("md5").update(url).digest("hex")}.m3u`;
 
 function extractAttribute(line: string, attribute: string): string {
   const start = line.indexOf(attribute);
@@ -28,14 +17,9 @@ function extractAttribute(line: string, attribute: string): string {
 
 /**
  * ISO country for a channel, as an upper-case two-letter code.
- *
- * Playlists disagree on how they carry it. Free-TV writes an explicit `tvg-country`;
- * iptv-org does not, but its `tvg-id` is `ChannelName.<cc>@<quality>`, so the code sits
- * after the last dot of the part before `@`. Anything else yields "".
  */
 export function channelCountry(line: string, tvgId: string): string {
   const explicit = extractAttribute(line, 'tvg-country="').trim();
-  // Some playlists list several; the first is the origin.
   if (explicit) {
     const first = explicit.split(/[;,]/)[0].trim().toUpperCase();
     if (/^[A-Z]{2}$/.test(first)) return first;
@@ -85,41 +69,41 @@ async function download(url: string): Promise<string> {
   return response.text();
 }
 
-async function readFreshCache(file: string): Promise<string | null> {
-  try {
-    const stats = await fs.stat(file);
-    if (Date.now() - stats.mtimeMs >= CACHE_MAX_AGE_MS) return null;
-    return await fs.readFile(file, "utf8");
-  } catch {
-    return null;
-  }
-}
-
-export async function fetchPlaylist(source: string, forceRefresh = false): Promise<Channel[]> {
+export async function fetchPlaylist(source: string, _forceRefresh = false): Promise<Channel[]> {
   const trimmed = source.trim();
   const isRemote = trimmed.startsWith("http://") || trimmed.startsWith("https://");
 
-  if (!isRemote) return parseM3u(await fs.readFile(trimmed, "utf8"));
-
-  const dir = cacheDir();
-  await fs.mkdir(dir, { recursive: true });
-  const file = path.join(dir, cacheFilename(trimmed));
-
-  let content = forceRefresh ? null : await readFreshCache(file);
-  if (content === null) {
-    content = await download(trimmed);
-    await fs.writeFile(file, content, "utf8").catch(() => undefined);
+  if (!isRemote) {
+    try {
+      const fs = await import("node:fs/promises");
+      return parseM3u(await fs.readFile(trimmed, "utf8"));
+    } catch {
+      throw new Error("Local playlist files are not supported on this device.");
+    }
   }
 
+  const cacheKey = `m3u_cache_${md5(trimmed)}`;
+  const cached = localStorage.getItem(cacheKey);
+  if (cached && !_forceRefresh) {
+    try {
+      const { timestamp, content } = JSON.parse(cached);
+      if (Date.now() - timestamp < 24 * 60 * 60 * 1000) {
+        const channels = parseM3u(content);
+        if (channels.length > 0) return channels;
+      }
+    } catch {
+      // Ignore cache parse error
+    }
+  }
+
+  const content = await download(trimmed);
   const channels = parseM3u(content);
-  if (channels.length > 0) return channels;
-
-  // A cached-but-unparsable file is worth exactly one forced re-download.
-  await fs.rm(file, { force: true }).catch(() => undefined);
-  const fresh = await download(trimmed);
-  const freshChannels = parseM3u(fresh);
-  if (freshChannels.length > 0) {
-    await fs.writeFile(file, fresh, "utf8").catch(() => undefined);
+  if (channels.length > 0) {
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify({ timestamp: Date.now(), content }));
+    } catch {
+      // Storage full
+    }
   }
-  return freshChannels;
+  return channels;
 }

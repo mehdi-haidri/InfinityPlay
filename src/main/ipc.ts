@@ -47,9 +47,9 @@ import {
   isAutoUpdateSupported,
 } from "./updater";
 import { generateMediaPreview, prepareLiveStream, setDecodableCodecs, stageManifest } from "./live";
-import { toolAvailable } from "./media-tools";
+import { toolAvailable, ffmpegVersion } from "./media-tools";
 
-const moviebox = new MovieBoxService();
+const moviebox = new MovieBoxService(getConfig);
 
 function packageType(): string {
   if (!app.isPackaged) return "development";
@@ -171,6 +171,7 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
       platform: `${process.platform}-${process.arch}`,
       packageType: packageType(),
       ffmpeg: toolAvailable("ffmpeg"),
+      ffmpegVersion: ffmpegVersion(),
       updatable: isAutoUpdateSupported(),
       gpu: `${vendor} · video decode ${decode}`,
     };

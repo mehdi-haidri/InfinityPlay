@@ -60,6 +60,9 @@ function packageHelp(info: AppInfo | null): string {
   if (info.packageType.includes("DEB") || info.packageType.includes("RPM") || info.packageType === "pacman") {
     return "For system packages, download the matching installer from GitHub Releases and install it with your package manager.";
   }
+  if (info.packageType.includes("Android")) {
+    return "For Android and Android TV, download the latest APK from GitHub Releases to update.";
+  }
   return "Updates are downloaded from GitHub Releases and installed after restart.";
 }
 
@@ -178,6 +181,7 @@ export function AboutPage() {
             <div><dt>Electron</dt><dd>{info.electron}</dd></div>
             <div><dt>Chromium</dt><dd>{info.chrome}</dd></div>
             <div><dt>Node</dt><dd>{info.node}</dd></div>
+            <div><dt>FFmpeg</dt><dd>{info.ffmpegVersion || (info.ffmpeg ? "Available" : "Not found")}</dd></div>
             <div><dt>Platform</dt><dd>{info.platform}</dd></div>
             <div><dt>Package</dt><dd>{info.packageType}</dd></div>
           </dl>

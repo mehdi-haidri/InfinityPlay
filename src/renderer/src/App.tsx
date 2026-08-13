@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Download as DownloadIcon, Info, X } from "lucide-react";
+import { App as CapApp } from "@capacitor/app";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { Player } from "./components/Player";
@@ -164,8 +165,32 @@ export function App() {
   const watchDownloads = useApp((state) => state.watchDownloads);
   const route = useApp((state) => state.route);
   const player = useApp((state) => state.player);
+  const closePlayer = useApp((state) => state.closePlayer);
+  const goBack = useApp((state) => state.goBack);
 
   const [booted, setBooted] = useState(false);
+
+  useEffect(() => {
+    let sub: { remove: () => void } | undefined;
+    try {
+      void CapApp.addListener("backButton", () => {
+        if (useApp.getState().player) {
+          closePlayer();
+        } else if (useApp.getState().history.length > 0) {
+          goBack();
+        } else {
+          void CapApp.minimizeApp();
+        }
+      }).then((handle) => {
+        sub = handle;
+      });
+    } catch {
+      // Non-capacitor environment
+    }
+    return () => {
+      sub?.remove();
+    };
+  }, [closePlayer, goBack]);
 
   useEffect(() => {
     // The splash lifts once the persisted state is in, so the first frame behind it is

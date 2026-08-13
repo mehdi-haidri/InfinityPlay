@@ -1,6 +1,6 @@
 {
   "name": "infinityplay",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "description": "Desktop app for finding and streaming movies, TV shows, anime and live TV.",
   "main": "./out/main/index.js",
   "author": {
@@ -32,16 +32,27 @@
     "dist:mac": "electron-vite build && electron-builder --mac --publish never",
     "dist:linux": "electron-vite build && electron-builder --linux --publish never",
     "release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "cap:sync": "electron-vite build && cap sync android",
+    "cap:open": "cap open android"
   },
   "dependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/browser": "^8.0.4",
+    "@capacitor/core": "^8.5.0",
+    "@capacitor/filesystem": "^8.1.2",
+    "@capacitor/preferences": "^8.0.1",
     "@fontsource-variable/outfit": "^5.3.0",
     "dashjs": "^5.2.0",
-    "electron-updater": "^6.8.9"
+    "electron-updater": "^6.8.9",
+    "js-md5": "^0.9.2"
   },
   "devDependencies": {
-    "@ffmpeg-installer/ffmpeg": "^1.1.0",
+    "@capacitor/cli": "^8.5.0",
     "@ffprobe-installer/ffprobe": "^2.1.2",
+    "@rse/ffmpeg": "^1.4.2",
+    "@types/js-md5": "^0.8.0",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",

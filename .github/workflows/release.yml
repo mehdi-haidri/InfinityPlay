@@ -119,27 +119,30 @@ jobs:
         run: npm ci
 
       # npm installs only the runner's own architecture, but this job packages x64 as well
-      # as arm64. `npm install` refuses a package whose `cpu` does not match the machine
-      # (EBADPLATFORM) and `--cpu`/`--os` only steer optional-dependency *selection*, so
-      # the tarballs are fetched with `npm pack`, which performs no platform check, and
-      # unpacked where `beforePack` looks for them.
-      - name: Add x64 FFmpeg binaries for the cross build
+      # as arm64. The @rse/ffmpeg post-install downloads only the host's binary, so the
+      # x64 binary is fetched from the same GitHub release that @rse/ffmpeg uses. FFprobe
+      # still uses the per-platform @ffprobe-installer package.
+      - name: Add x64 FFmpeg and FFprobe binaries for the cross build
         shell: bash
         run: |
           set -euo pipefail
-          for package in @ffmpeg-installer/darwin-x64 @ffprobe-installer/darwin-x64; do
-            target="node_modules/${package}"
-            mkdir -p "$target"
-            tarball=$(npm pack "$package" --silent | tail -1)
-            tar -xzf "$tarball" -C "$target" --strip-components=1
-            rm -f "$tarball"
-          done
-          # The binaries must be executable and must really be x86_64, or the x64 DMG
-          # would ship something its own app cannot spawn.
-          chmod +x node_modules/@ffmpeg-installer/darwin-x64/ffmpeg
-          chmod +x node_modules/@ffprobe-installer/darwin-x64/ffprobe
-          file node_modules/@ffmpeg-installer/darwin-x64/ffmpeg
-          file node_modules/@ffprobe-installer/darwin-x64/ffprobe
+          # --- FFmpeg x64 from @rse/ffmpeg GitHub release ---
+          ffmpeg_dir="node_modules/@rse/ffmpeg/ffmpeg.d"
+          mkdir -p "$ffmpeg_dir"
+          rse_version=$(node -p "require('./node_modules/@rse/ffmpeg/package.json').version")
+          curl -fsSL -o "$ffmpeg_dir/ffmpeg-mac-x64" \
+            "https://github.com/rse/ffmpeg/releases/download/${rse_version}/ffmpeg-mac-x64"
+          chmod +x "$ffmpeg_dir/ffmpeg-mac-x64"
+          file "$ffmpeg_dir/ffmpeg-mac-x64"
+
+          # --- FFprobe x64 from @ffprobe-installer ---
+          target="node_modules/@ffprobe-installer/darwin-x64"
+          mkdir -p "$target"
+          tarball=$(npm pack @ffprobe-installer/darwin-x64 --silent | tail -1)
+          tar -xzf "$tarball" -C "$target" --strip-components=1
+          rm -f "$tarball"
+          chmod +x "$target/ffprobe"
+          file "$target/ffprobe"
 
       # electron-builder downloads the Electron binary and its own helpers during
       # packaging. Those requests fail intermittently ("socket hang up"), which is a
@@ -291,9 +294,56 @@ jobs:
             release/*.pkg.tar.zst
             release/latest-linux.yml
 
+  android:
+    name: Package Android APK (Android & Android TV)
+    needs: validate
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '21'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Sync Capacitor Android
+        run: npm run cap:sync
+
+      - name: Build Android APK
+        shell: bash
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease
+
+      - name: Prepare APK release asset
+        shell: bash
+        run: |
+          version=$(node -p "require('./package.json').version")
+          mkdir -p release-apk
+          cp android/app/build/outputs/apk/release/app-release-unsigned.apk "release-apk/InfinityPlay-${version}-android-tv.apk"
+
+      - name: Upload Android release files
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-android
+          if-no-files-found: error
+          path: release-apk/*.apk
+
   publish:
     name: Publish GitHub Release
-    needs: [windows, macos, linux]
+    needs: [windows, macos, linux, android]
     runs-on: ubuntu-22.04
     env:
       GH_TOKEN: ${{ github.token }}

@@ -181,5 +181,4 @@ The packages bundle unmodified FFmpeg binaries, which carry their own licence (G
 depending on the build) and remain the work of the [FFmpeg project](https://ffmpeg.org).
 They are shipped as separate executables and run as child processes, not linked into the
 app. Their source is available from the FFmpeg project and from the
-[@ffmpeg-installer](https://github.com/kribblo/node-ffmpeg-installer) packages the builds
-take them from.
+[@rse/ffmpeg](https://github.com/rse/ffmpeg) package the builds take them from.

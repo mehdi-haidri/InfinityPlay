@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">InfinityPlay</string>
+    <string name="title_activity_main">InfinityPlay</string>
+    <string name="package_name">com.infinityplay.app</string>
+    <string name="custom_url_scheme">com.infinityplay.app</string>
+</resources>

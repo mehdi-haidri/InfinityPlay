@@ -5,6 +5,28 @@ page, then offers **Restart & install** when a new version is ready.
 
 ---
 
+## 0.2.1
+
+### FFmpeg 7 Upgrade & Build Info
+
+- Upgraded bundled FFmpeg binaries from legacy v4.1 to **FFmpeg 7.0.2 / 7.1.1** via `@rse/ffmpeg`, providing improved media remuxing performance, modern codec support, and security fixes.
+- Displayed detected FFmpeg version directly in the **About → Build** section alongside Electron, Chromium, Node, Platform, Package type, and GPU status.
+
+### Android & Android TV Support
+
+- Added complete **Android and Android TV** support powered by Capacitor inside a unified monorepo.
+- Integrated Android TV Leanback Launcher (`LEANBACK_LAUNCHER`) intent filter to show InfinityPlay on TV home screens.
+- Enhanced D-Pad TV remote navigation with high-visibility `:focus-visible` visual focus rings and scale animations for TV remotes.
+- Added Android hardware back button listener for intuitive navigation (closing player, routing back in history, or minimizing).
+- Created a universal client API bridge enabling catalog browsing, streaming, M3U Live TV, and subtitle parsing natively on Android via `@capacitor/preferences` and `@capacitor/browser`.
+- Added Safe Area insets support (`env(safe-area-inset-top)` / `env(safe-area-inset-bottom)`) and responsive mobile layout breakpoints.
+
+### Release Pipeline
+
+- Updated GitHub CI workflow (`release.yml`) to automatically build `InfinityPlay-0.2.1-android-tv.apk` using JDK 21 and publish it to GitHub Releases alongside Windows (`.exe`), macOS (`.dmg`), and Linux (`.AppImage`, `.deb`, `.rpm`, `.pkg.tar.zst`) installers.
+
+---
+
 ## 0.2.0
 
 ### Playback

@@ -1,4 +1,5 @@
 import type { Result } from "@shared/types";
+import { createCapacitorApi } from "./capacitorApi";
 
 /**
  * Unwraps the IPC Result envelope. Every main-process failure surfaces here as a
@@ -10,4 +11,4 @@ export async function unwrap<T>(promise: Promise<Result<T>>): Promise<T> {
   return result.data;
 }
 
-export const api = window.infinityplay;
+export const api = window.infinityplay ?? createCapacitorApi();

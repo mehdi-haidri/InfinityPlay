@@ -1,11 +1,10 @@
 /**
  * The catalog serves `.srt`. A `<track>` element only accepts WebVTT, so the main
- * process fetches the file and converts it before handing it to the renderer.
+ * process or Capacitor renderer fetches the file and converts it.
  *
  * Downloaded titles pass a `local:` URL instead, which is read from disk so offline
  * playback keeps its subtitles.
  */
-import fs from "node:fs/promises";
 
 const FETCH_TIMEOUT_MS = 15_000;
 
@@ -41,13 +40,22 @@ export function srtToVtt(source: string): string {
 }
 
 /** Returns a WebVTT `data:` URL that a `<track src>` can consume directly. */
-const toDataUrl = (vtt: string): string =>
-  `data:text/vtt;charset=utf-8;base64,${Buffer.from(vtt, "utf8").toString("base64")}`;
+const toDataUrl = (vtt: string): string => {
+  const base64 = typeof Buffer !== "undefined"
+    ? Buffer.from(vtt, "utf8").toString("base64")
+    : btoa(unescape(encodeURIComponent(vtt)));
+  return `data:text/vtt;charset=utf-8;base64,${base64}`;
+};
 
 export async function fetchSubtitleAsVttDataUrl(url: string): Promise<string> {
   if (url.startsWith(LOCAL_SUBTITLE_PREFIX)) {
     const filePath = url.slice(LOCAL_SUBTITLE_PREFIX.length);
-    return toDataUrl(srtToVtt(await fs.readFile(filePath, "utf8")));
+    try {
+      const fs = await import("node:fs/promises");
+      return toDataUrl(srtToVtt(await fs.readFile(filePath, "utf8")));
+    } catch {
+      throw new Error("Local subtitle files are not supported on this platform.");
+    }
   }
 
   const response = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
@@ -57,13 +65,14 @@ export async function fetchSubtitleAsVttDataUrl(url: string): Promise<string> {
 
 /**
  * Saves a caption file next to its video, in its original SRT form.
- *
- * SRT rather than WebVTT on purpose: external players auto-load a sidecar that shares the
- * video's basename, and `.srt` is the format every one of them recognises. The in-app
- * player converts on read, so nothing is lost.
  */
 export async function saveSubtitleFile(url: string, destination: string): Promise<void> {
   const response = await fetch(url, { signal: AbortSignal.timeout(FETCH_TIMEOUT_MS) });
   if (!response.ok) throw new Error(`Subtitle download failed with status ${response.status}.`);
-  await fs.writeFile(destination, await response.text(), "utf8");
+  try {
+    const fs = await import("node:fs/promises");
+    await fs.writeFile(destination, await response.text(), "utf8");
+  } catch {
+    // Non-electron environment
+  }
 }

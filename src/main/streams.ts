@@ -1,15 +1,7 @@
 /**
  * Signing for the HD (DASH) streams.
- *
- * The catalog hands out a CloudFront policy covering a whole episode directory, but only
- * the manifest URL is returned signed. dash.js resolves segment URLs relative to the
- * manifest, and a relative resolve drops the query string — so every segment would arrive
- * unsigned and be refused with 403.
- *
- * Rather than depending on a dash.js extension point, the signature is re-attached at the
- * session level: any request under a registered prefix that has no `Policy` gets one.
+ * Works across Electron main process and Capacitor / browser renderer.
  */
-import { session } from "electron";
 
 interface SignedPrefix {
   /** Everything under this URL prefix is covered by the policy. */
@@ -50,7 +42,10 @@ function policyExpiry(query: string): number {
     const policy = new URLSearchParams(query).get("Policy");
     if (!policy) return 0;
     const normalised = policy.replace(/-/g, "+").replace(/_/g, "/").replace(/~/g, "=");
-    const decoded = JSON.parse(Buffer.from(normalised, "base64").toString("utf8"));
+    const decodedStr = typeof Buffer !== "undefined"
+      ? Buffer.from(normalised, "base64").toString("utf8")
+      : atob(normalised);
+    const decoded = JSON.parse(decodedStr);
     const seconds = decoded?.Statement?.[0]?.Condition?.DateLessThan?.["AWS:EpochTime"];
     return typeof seconds === "number" ? seconds * 1000 : 0;
   } catch {
@@ -79,19 +74,26 @@ export function registerSignedStream(manifestUrl: string, signCookie: string): s
   return `${manifestUrl}?${query}`;
 }
 
-export function installStreamSigner(): void {
-  const filter = { urls: ["*://*.hakunaymatata.com/dash/*"] };
-  session.defaultSession.webRequest.onBeforeRequest(filter, (details, callback) => {
-    if (details.url.includes("Policy=")) {
-      callback({});
-      return;
-    }
-    const match = signedPrefixes.find((entry) => details.url.startsWith(entry.prefix));
-    if (!match) {
-      callback({});
-      return;
-    }
-    const separator = details.url.includes("?") ? "&" : "?";
-    callback({ redirectURL: `${details.url}${separator}${match.query}` });
-  });
+export async function installStreamSigner(): Promise<void> {
+  try {
+    const electron = await import("electron");
+    if (!electron?.session?.defaultSession) return;
+    
+    const filter = { urls: ["*://*.hakunaymatata.com/dash/*"] };
+    electron.session.defaultSession.webRequest.onBeforeRequest(filter, (details, callback) => {
+      if (details.url.includes("Policy=")) {
+        callback({});
+        return;
+      }
+      const match = signedPrefixes.find((entry) => details.url.startsWith(entry.prefix));
+      if (!match) {
+        callback({});
+        return;
+      }
+      const separator = details.url.includes("?") ? "&" : "?";
+      callback({ redirectURL: `${details.url}${separator}${match.query}` });
+    });
+  } catch {
+    // Non-electron environment
+  }
 }

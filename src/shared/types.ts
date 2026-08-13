@@ -461,6 +461,8 @@ export interface AppInfo {
   updatable: boolean;
   /** FFmpeg on PATH. Without it, adaptive (DASH) qualities cannot be saved. */
   ffmpeg: boolean;
+  /** Human-readable FFmpeg version string, or empty when unavailable. */
+  ffmpegVersion: string;
   /** Detected graphics vendor and Chromium video-decode status. */
   gpu: string;
 }
@@ -482,3 +484,70 @@ export const AUTHOR = {
   github: "https://github.com/ELhadratiOth",
   githubHandle: "ELhadratiOth",
 } as const;
+
+export interface InfinityPlayApi {
+  catalog: {
+    home: () => Promise<Result<HomePage>>;
+    featured: (tabId?: string, page?: number) => Promise<Result<HomePage>>;
+    search: (query: string, page?: number) => Promise<Result<CatalogItem[]>>;
+    suggest: (query: string) => Promise<Result<CatalogItem[]>>;
+    details: (subjectId: string) => Promise<Result<MediaDetails>>;
+    person: (staffId: string, name: string, avatarUrl: string | null) => Promise<Result<PersonDetails>>;
+    audioVariants: (title: string, mediaType: MediaType) => Promise<Result<AudioVariant[]>>;
+    releases: (subjectId: string, season?: number, episode?: number) => Promise<Result<Release[]>>;
+    subtitles: (subjectId: string, resourceId: string) => Promise<Result<SubtitleOption[]>>;
+    clearCache: () => Promise<Result<boolean>>;
+  };
+  subtitle: {
+    load: (url: string) => Promise<Result<string>>;
+  };
+  tv: {
+    playlist: (url: string, forceRefresh?: boolean) => Promise<Result<Channel[]>>;
+  };
+  media: {
+    prepareLive: (url: string, startAt?: number, resolution?: number) => Promise<Result<PreparedLiveStream>>;
+    preview: (url: string, position: number, resolution?: number) => Promise<Result<string | null>>;
+    stageManifest: (xml: string) => Promise<Result<string>>;
+    reportDecodable: (codecs: string[]) => Promise<Result<boolean>>;
+  };
+  config: {
+    get: () => Promise<Result<AppConfig>>;
+    update: (patch: Partial<AppConfig>) => Promise<Result<AppConfig>>;
+  };
+  history: {
+    list: () => Promise<Result<WatchHistoryItem[]>>;
+    record: (item: WatchHistoryItem) => Promise<Result<WatchHistoryItem[]>>;
+    remove: (subjectId: string) => Promise<Result<WatchHistoryItem[]>>;
+    clear: () => Promise<Result<WatchHistoryItem[]>>;
+  };
+  downloads: {
+    start: (request: DownloadRequest) => Promise<Result<DownloadRecord>>;
+    startSeason: (request: SeasonDownloadRequest) => Promise<Result<number>>;
+    clearQueue: () => Promise<Result<number>>;
+    queueSize: () => Promise<Result<number>>;
+    list: () => Promise<Result<DownloadRecord[]>>;
+    pause: (id: string) => Promise<Result<boolean>>;
+    resume: (id: string) => Promise<Result<boolean>>;
+    cancel: (id: string) => Promise<Result<boolean>>;
+    remove: (id: string, deleteFile: boolean) => Promise<Result<DownloadRecord[]>>;
+    clearFinished: () => Promise<Result<DownloadRecord[]>>;
+    open: (id: string) => Promise<Result<string>>;
+    reveal: (id: string) => Promise<Result<boolean>>;
+    onProgress: (listener: (record: DownloadRecord) => void) => () => void;
+  };
+  app: {
+    info: () => Promise<Result<AppInfo>>;
+  };
+  updates: {
+    status: () => Promise<Result<UpdateStatus>>;
+    check: () => Promise<Result<UpdateStatus>>;
+    install: () => Promise<Result<boolean>>;
+    onStatus: (listener: (status: UpdateStatus) => void) => () => void;
+  };
+  system: {
+    openExternal: (url: string) => Promise<Result<void>>;
+    setFullScreen: (value: boolean) => Promise<Result<boolean>>;
+    pickPlaylistFile: () => Promise<Result<string | null>>;
+    restart: () => Promise<Result<boolean>>;
+  };
+}
