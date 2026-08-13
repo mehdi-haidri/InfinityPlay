@@ -1,15 +1,21 @@
 package com.infinityplay.app;
 
 import android.app.Activity;
+import android.app.PictureInPictureParams;
 import android.content.Intent;
+import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Build;
+import android.util.Rational;
 import android.view.Gravity;
+import android.view.KeyEvent;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.activity.OnBackPressedCallback;
@@ -18,10 +24,14 @@ import androidx.annotation.OptIn;
 import androidx.appcompat.app.AlertDialog;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.media3.common.C;
+import androidx.media3.common.AudioAttributes;
+import androidx.media3.common.Format;
 import androidx.media3.common.MediaItem;
 import androidx.media3.common.MimeTypes;
 import androidx.media3.common.PlaybackException;
 import androidx.media3.common.Player;
+import androidx.media3.common.TrackSelectionOverride;
+import androidx.media3.common.Tracks;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DataSpec;
 import androidx.media3.datasource.DefaultHttpDataSource;
@@ -30,6 +40,7 @@ import androidx.media3.exoplayer.ExoPlayer;
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
 import androidx.media3.ui.PlayerView;
+import androidx.media3.ui.AspectRatioFrameLayout;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -49,6 +60,8 @@ public class NativePlayerActivity extends AppCompatActivity {
     public static final String EXTRA_SUBTITLES_JSON = "subtitlesJson";
     public static final String EXTRA_RELEASES_JSON = "releasesJson";
     public static final String EXTRA_HEADERS_JSON = "headersJson";
+    public static final String EXTRA_PREFERRED_AUDIO = "preferredAudioLanguage";
+    public static final String EXTRA_PREFERRED_SUBTITLE = "preferredSubtitleLanguage";
     public static final String EXTRA_LIVE = "live";
     public static final String RESULT_POSITION_MS = "positionMs";
     public static final String RESULT_DURATION_MS = "durationMs";
@@ -57,6 +70,10 @@ public class NativePlayerActivity extends AppCompatActivity {
 
     private PlayerView playerView;
     private TextView qualityButton;
+    private TextView audioButton;
+    private TextView pipButton;
+    private TextView optionsButton;
+    private LinearLayout quickActions;
     private ExoPlayer player;
     private DefaultTrackSelector trackSelector;
     private JSONArray releases = new JSONArray();
@@ -68,6 +85,7 @@ public class NativePlayerActivity extends AppCompatActivity {
     private String signedQuery = "";
     private String signedHost = "";
     private String signedDirectory = "";
+    private int resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -84,6 +102,7 @@ public class NativePlayerActivity extends AppCompatActivity {
         playerView.setUseController(true);
         playerView.setControllerAutoShow(true);
         playerView.setControllerHideOnTouch(true);
+        playerView.setControllerShowTimeoutMs(3500);
         playerView.setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING);
         playerView.setShowSubtitleButton(true);
         playerView.setShowNextButton(false);
@@ -96,14 +115,25 @@ public class NativePlayerActivity extends AppCompatActivity {
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT
         ));
-        qualityButton = createQualityButton();
-        FrameLayout.LayoutParams qualityLayout = new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT,
-            dp(44)
+        quickActions = new LinearLayout(this);
+        quickActions.setOrientation(LinearLayout.HORIZONTAL);
+        quickActions.setGravity(Gravity.CENTER_VERTICAL);
+        qualityButton = createActionButton("AUTO", view -> showQualityPicker());
+        audioButton = createActionButton("Audio", view -> showAudioPicker());
+        optionsButton = createActionButton("More", view -> showPlaybackOptions());
+        quickActions.addView(qualityButton);
+        quickActions.addView(audioButton);
+        quickActions.addView(optionsButton);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && getPackageManager().hasSystemFeature("android.software.picture_in_picture")) {
+            pipButton = createActionButton("PiP", view -> enterPip());
+            quickActions.addView(pipButton);
+        }
+        FrameLayout.LayoutParams actionsLayout = new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT, dp(48)
         );
-        qualityLayout.gravity = Gravity.TOP | Gravity.END;
-        qualityLayout.setMargins(dp(16), dp(16), dp(16), 0);
-        root.addView(qualityButton, qualityLayout);
+        actionsLayout.gravity = Gravity.TOP | Gravity.END;
+        actionsLayout.setMargins(dp(12), dp(12), dp(12), 0);
+        root.addView(quickActions, actionsLayout);
         setContentView(root);
         updateQualityButton();
 
@@ -120,20 +150,38 @@ public class NativePlayerActivity extends AppCompatActivity {
         return Math.round(value * getResources().getDisplayMetrics().density);
     }
 
-    private TextView createQualityButton() {
+    private TextView createActionButton(String label, View.OnClickListener listener) {
         TextView button = new TextView(this);
+        button.setText(label);
         button.setTextColor(Color.WHITE);
         button.setTextSize(14);
         button.setGravity(Gravity.CENTER);
-        button.setPadding(dp(15), 0, dp(15), 0);
-        button.setMinWidth(dp(82));
+        button.setPadding(dp(13), 0, dp(13), 0);
+        button.setMinWidth(dp(68));
+        LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, dp(42)
+        );
+        layout.setMarginStart(dp(6));
+        button.setLayoutParams(layout);
         GradientDrawable background = new GradientDrawable();
         background.setColor(0xD91A1B22);
         background.setStroke(dp(1), 0x55FFFFFF);
         background.setCornerRadius(dp(10));
         button.setBackground(background);
-        button.setOnClickListener(view -> showQualityPicker());
+        button.setOnClickListener(listener);
         return button;
+    }
+
+    private void enterPip() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O || player == null) return;
+        try {
+            PictureInPictureParams.Builder builder = new PictureInPictureParams.Builder()
+                .setAspectRatio(new Rational(16, 9));
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) builder.setSeamlessResizeEnabled(true);
+            enterPictureInPictureMode(builder.build());
+        } catch (Exception ignored) {
+            playerView.showController();
+        }
     }
 
     private void enterImmersiveMode() {
@@ -285,14 +333,37 @@ public class NativePlayerActivity extends AppCompatActivity {
             this::resolveSignedSegment
         );
         trackSelector = new DefaultTrackSelector(this);
+        DefaultTrackSelector.Parameters.Builder initialTracks = trackSelector.buildUponParameters();
+        String preferredAudio = getIntent().getStringExtra(EXTRA_PREFERRED_AUDIO);
+        String preferredSubtitle = getIntent().getStringExtra(EXTRA_PREFERRED_SUBTITLE);
+        if (preferredAudio != null && !preferredAudio.isEmpty() && !"original".equalsIgnoreCase(preferredAudio)) {
+            initialTracks.setPreferredAudioLanguage(preferredAudio);
+        }
+        if (preferredSubtitle != null && !preferredSubtitle.isEmpty() && !"off".equalsIgnoreCase(preferredSubtitle)) {
+            initialTracks.setPreferredTextLanguage(preferredSubtitle);
+        }
+        trackSelector.setParameters(initialTracks);
         player = new ExoPlayer.Builder(this)
             .setTrackSelector(trackSelector)
             .setMediaSourceFactory(new DefaultMediaSourceFactory(resolvingFactory))
             .build();
+        player.setAudioAttributes(
+            new AudioAttributes.Builder()
+                .setUsage(C.USAGE_MEDIA)
+                .setContentType(C.AUDIO_CONTENT_TYPE_MOVIE)
+                .build(),
+            true
+        );
+        player.setHandleAudioBecomingNoisy(true);
         player.addListener(new Player.Listener() {
             @Override
             public void onPlaybackStateChanged(int state) {
                 ended = state == Player.STATE_ENDED;
+            }
+
+            @Override
+            public void onTracksChanged(Tracks tracks) {
+                updateAudioButton(tracks);
             }
 
             @Override
@@ -359,6 +430,140 @@ public class NativePlayerActivity extends AppCompatActivity {
             .show();
     }
 
+    private String trackLabel(Format format, String fallback) {
+        if (format.label != null && !format.label.trim().isEmpty()) return format.label;
+        if (format.language != null && !format.language.trim().isEmpty()) {
+            java.util.Locale locale = java.util.Locale.forLanguageTag(format.language);
+            String name = locale.getDisplayLanguage();
+            return name == null || name.isEmpty() ? format.language : name;
+        }
+        return fallback;
+    }
+
+    private List<Tracks.Group> trackGroups(int type) {
+        List<Tracks.Group> groups = new ArrayList<>();
+        if (player == null) return groups;
+        for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+            if (group.getType() == type && group.isSupported()) groups.add(group);
+        }
+        return groups;
+    }
+
+    private void updateAudioButton(Tracks tracks) {
+        if (audioButton == null) return;
+        int count = 0;
+        String label = "Audio";
+        for (Tracks.Group group : tracks.getGroups()) {
+            if (group.getType() != C.TRACK_TYPE_AUDIO || !group.isSupported()) continue;
+            count += group.length;
+            for (int index = 0; index < group.length; index++) {
+                if (group.isTrackSelected(index)) label = trackLabel(group.getTrackFormat(index), "Audio");
+            }
+        }
+        audioButton.setText(label.length() > 12 ? label.substring(0, 12) : label);
+        audioButton.setVisibility(count > 1 ? View.VISIBLE : View.GONE);
+    }
+
+    private void showAudioPicker() {
+        List<Tracks.Group> groups = trackGroups(C.TRACK_TYPE_AUDIO);
+        List<String> labels = new ArrayList<>();
+        List<TrackSelectionOverride> choices = new ArrayList<>();
+        int selected = 0;
+        for (Tracks.Group group : groups) {
+            for (int index = 0; index < group.length; index++) {
+                if (!group.isTrackSupported(index)) continue;
+                labels.add(trackLabel(group.getTrackFormat(index), "Audio " + (labels.size() + 1)));
+                choices.add(new TrackSelectionOverride(group.getMediaTrackGroup(), index));
+                if (group.isTrackSelected(index)) selected = labels.size() - 1;
+            }
+        }
+        if (choices.size() < 2) return;
+        new AlertDialog.Builder(this)
+            .setTitle("Audio language")
+            .setSingleChoiceItems(labels.toArray(new String[0]), selected, (dialog, which) -> {
+                trackSelector.setParameters(
+                    trackSelector.buildUponParameters().setOverrideForType(choices.get(which))
+                );
+                dialog.dismiss();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    private void showSubtitlePicker() {
+        List<Tracks.Group> groups = trackGroups(C.TRACK_TYPE_TEXT);
+        List<String> labels = new ArrayList<>();
+        List<TrackSelectionOverride> choices = new ArrayList<>();
+        labels.add("Off");
+        choices.add(null);
+        int selected = 0;
+        for (Tracks.Group group : groups) {
+            for (int index = 0; index < group.length; index++) {
+                if (!group.isTrackSupported(index)) continue;
+                labels.add(trackLabel(group.getTrackFormat(index), "Subtitle " + labels.size()));
+                choices.add(new TrackSelectionOverride(group.getMediaTrackGroup(), index));
+                if (group.isTrackSelected(index)) selected = labels.size() - 1;
+            }
+        }
+        if (labels.size() < 2) return;
+        new AlertDialog.Builder(this)
+            .setTitle("Subtitles")
+            .setSingleChoiceItems(labels.toArray(new String[0]), selected, (dialog, which) -> {
+                DefaultTrackSelector.Parameters.Builder parameters = trackSelector.buildUponParameters()
+                    .clearOverridesOfType(C.TRACK_TYPE_TEXT)
+                    .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, which == 0);
+                if (which > 0) parameters.setOverrideForType(choices.get(which));
+                trackSelector.setParameters(parameters);
+                dialog.dismiss();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    private void showSpeedPicker() {
+        final float[] speeds = {0.5f, 0.75f, 1f, 1.25f, 1.5f, 1.75f, 2f};
+        String[] labels = {"0.5×", "0.75×", "Normal", "1.25×", "1.5×", "1.75×", "2×"};
+        int selected = 2;
+        float currentSpeed = player == null ? 1f : player.getPlaybackParameters().speed;
+        for (int index = 0; index < speeds.length; index++) {
+            if (Math.abs(speeds[index] - currentSpeed) < 0.01f) selected = index;
+        }
+        new AlertDialog.Builder(this)
+            .setTitle("Playback speed")
+            .setSingleChoiceItems(labels, selected, (dialog, which) -> {
+                if (player != null) player.setPlaybackSpeed(speeds[which]);
+                dialog.dismiss();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    private void cycleResizeMode() {
+        if (resizeMode == AspectRatioFrameLayout.RESIZE_MODE_FIT) resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM;
+        else if (resizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM) resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FILL;
+        else resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT;
+        playerView.setResizeMode(resizeMode);
+    }
+
+    private void showPlaybackOptions() {
+        List<String> labels = new ArrayList<>();
+        labels.add("Audio language");
+        labels.add("Subtitles");
+        if (!live) labels.add("Playback speed");
+        labels.add(resizeMode == AspectRatioFrameLayout.RESIZE_MODE_FIT ? "Picture: fit screen" :
+            resizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM ? "Picture: fill and crop" : "Picture: stretch");
+        new AlertDialog.Builder(this)
+            .setTitle("Playback options")
+            .setItems(labels.toArray(new String[0]), (dialog, which) -> {
+                if (which == 0) showAudioPicker();
+                else if (which == 1) showSubtitlePicker();
+                else if (!live && which == 2) showSpeedPicker();
+                else cycleResizeMode();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
     private void finishWithResult(boolean completedNormally) {
         Intent result = new Intent();
         long position = player == null ? startPositionMs : Math.max(0L, player.getCurrentPosition());
@@ -379,17 +584,60 @@ public class NativePlayerActivity extends AppCompatActivity {
     @Override
     protected void onStop() {
         finishWithResult(true);
-        if (player != null) {
-            playerView.setPlayer(null);
-            player.release();
-            player = null;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode()) {
+            super.onStop();
+            return;
         }
+        releasePlayer();
         super.onStop();
+    }
+
+    private void releasePlayer() {
+        if (player == null) return;
+        if (!live) startPositionMs = Math.max(0L, player.getCurrentPosition());
+        playerView.setPlayer(null);
+        player.release();
+        player = null;
+    }
+
+    @Override
+    protected void onDestroy() {
+        releasePlayer();
+        super.onDestroy();
     }
 
     @Override
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         if (hasFocus) enterImmersiveMode();
+    }
+
+    @Override
+    public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, Configuration newConfig) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
+        if (quickActions != null) quickActions.setVisibility(isInPictureInPictureMode ? View.GONE : View.VISIBLE);
+        if (isInPictureInPictureMode) playerView.hideController();
+        else playerView.showController();
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent event) {
+        if (player != null && event.getAction() == KeyEvent.ACTION_DOWN) {
+            switch (event.getKeyCode()) {
+                case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+                case KeyEvent.KEYCODE_HEADSETHOOK:
+                    if (player.isPlaying()) player.pause(); else player.play();
+                    return true;
+                case KeyEvent.KEYCODE_MEDIA_PLAY:
+                    player.play(); return true;
+                case KeyEvent.KEYCODE_MEDIA_PAUSE:
+                    player.pause(); return true;
+                case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD:
+                    if (!live) player.seekTo(player.getCurrentPosition() + 10_000); return true;
+                case KeyEvent.KEYCODE_MEDIA_REWIND:
+                    if (!live) player.seekTo(Math.max(0, player.getCurrentPosition() - 10_000)); return true;
+            }
+        }
+        return super.dispatchKeyEvent(event);
     }
 }

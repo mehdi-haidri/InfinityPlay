@@ -1,7 +1,8 @@
 {
   "name": "infinityplay",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "description": "Desktop app for finding and streaming movies, TV shows, anime and live TV.",
+  "desktopName": "InfinityPlay.desktop",
   "main": "./out/main/index.js",
   "author": {
     "name": "EL HADRATI Othman & Tajeddine Bourhim",

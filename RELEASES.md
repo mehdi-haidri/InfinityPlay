@@ -4,7 +4,30 @@ Updates install automatically. InfinityPlay checks on launch and on demand from 
 
 ---
 
-## 0.2.5 (Latest Update)
+## 0.2.6 (Latest Update)
+
+### Richer Android and cross-platform playback controls
+- Added Android Picture-in-Picture support with a native **PiP** action, 16:9 mini-player sizing, uninterrupted playback when the activity enters PiP, and automatic hiding of full controls inside the floating window.
+- Added native Android audio-language discovery and switching based on the tracks actually exposed by HLS, DASH, or the selected file. The saved preferred audio language is applied when a matching track is available.
+- Added a consolidated native playback options panel for audio, subtitles, playback speed, and fit/fill/stretch picture modes without overcrowding the main controller.
+- Added native headset and hardware media-key handling for play, pause, 10-second forward, and 10-second rewind.
+- Added HLS and DASH audio-track discovery and language switching to the desktop/mobile web player, with a dedicated language control that only appears when multiple tracks exist.
+- Enabled browser Picture-in-Picture on supported phones instead of hiding it by device class.
+- Added Media Session metadata and actions for headset keys, desktop media overlays, and supported lock-screen controls.
+- Added a screen wake lock during active web playback and automatic release while paused or hidden to prevent accidental battery drain.
+- Made dense phone secondary controls horizontally scrollable, keeping every advanced action touch-accessible without shrinking targets below a usable size.
+
+### Final performance, lifecycle, and security pass
+- Split the large HLS/DASH player engine into an on-demand renderer chunk. Home and catalog screens now load an approximately **831 KB** main renderer instead of eagerly parsing the previous approximately **3.2 MB** combined bundle; the player chunk loads only when playback opens.
+- Replaced subtitle polling five times per second with native `cuechange` events, removing continuous caption work while playback is paused or no cue changes.
+- Added Media Session playback-state and bounded position updates, keeping supported lock-screen and operating-system seek surfaces synchronized without updating them on every video frame.
+- Removed the Android main activity's permanent keep-awake flag. Browsing the catalog can now dim normally while the native player and web wake lock still keep the screen awake only during playback.
+- Fixed native Android lifecycle resume so backgrounding and restoring a non-PiP player continues from the most recently reached timestamp instead of the original launch position.
+- Enabled Media3 audio-focus management and automatic noisy-output handling, so another audio app can duck/pause playback and disconnecting headphones does not continue loudly through the speaker.
+- Added a defensive native-player release during activity destruction to avoid retaining decoders after unusual lifecycle exits.
+- Restricted Electron external navigation and shell opening to validated HTTP/HTTPS URLs and blocked renderer-driven top-level navigation away from the app shell.
+- Enabled Chromium renderer sandboxing while retaining the context-isolated preload bridge, reducing the impact of a renderer compromise without exposing Node.js APIs.
+- Aligned the Linux desktop filename with Electron's app ID/WM class so launchers group the running window under the correct InfinityPlay icon.
 
 ### Android Movie & Series Playback
 - Added a dedicated Android Media3 player for Movies and Series, bypassing WebView's `MEDIA_ELEMENT_ERROR: Format error` on HEVC/H.265 releases while leaving IPTV on its separate live-stream path.

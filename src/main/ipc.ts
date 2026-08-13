@@ -186,7 +186,13 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   handle("update:check", () => checkForUpdates());
   handle("update:install", () => installUpdate());
 
-  handle("shell:openExternal", (url: string) => shell.openExternal(url));
+  handle("shell:openExternal", (url: string) => {
+    const parsed = new URL(url);
+    if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+      throw new Error("Only web links can be opened outside InfinityPlay.");
+    }
+    return shell.openExternal(parsed.toString());
+  });
 
   handle("window:toggleFullScreen", (value: boolean) => {
     const window = getWindow();

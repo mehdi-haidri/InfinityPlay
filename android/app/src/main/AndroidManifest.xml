@@ -30,10 +30,12 @@
 
         <activity
             android:name=".NativePlayerActivity"
-            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|uiMode"
+            android:configChanges="orientation|keyboardHidden|screenSize|smallestScreenSize|screenLayout|uiMode|density"
             android:exported="false"
             android:launchMode="singleTop"
+            android:resizeableActivity="true"
             android:screenOrientation="sensorLandscape"
+            android:supportsPictureInPicture="true"
             android:theme="@style/AppTheme.NoActionBar" />
 
         <activity

@@ -1219,6 +1219,15 @@ button {
   flex-direction: column;
 }
 
+.player-module-loader {
+  position: fixed;
+  z-index: var(--layer-player, 100);
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: #08090d;
+}
+
 .player-root video {
   width: 100%;
   height: 100%;
@@ -1543,6 +1552,14 @@ button {
 
 .player-menu button[data-active="true"] {
   color: var(--accent);
+}
+
+.player-track-language {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
 }
 
 .player-center-hint {
@@ -2563,7 +2580,15 @@ html[data-device="phone"] .player-controls .icon-button { width: 42px; height: 4
 html[data-device="phone"] .player-primary { width: 48px !important; height: 48px !important; background: rgba(255,255,255,0.14); color: #fff; }
 html[data-device="phone"] .volume { display: none; }
 html[data-device="phone"] .player-time { margin: 0 4px; font-size: 11px; white-space: nowrap; }
-html[data-device="phone"] .player-secondary-controls { gap: 0; }
+html[data-device="phone"] .player-secondary-controls {
+  gap: 0;
+  max-width: 50vw;
+  overflow-x: auto;
+  scrollbar-width: none;
+  overscroll-behavior-inline: contain;
+  touch-action: pan-x;
+}
+html[data-device="phone"] .player-secondary-controls::-webkit-scrollbar { display: none; }
 html[data-device="phone"] .player-episode-control,
 html[data-device="phone"] .player-fullscreen { display: none; }
 html[data-device="phone"] .mobile-only-inline { display: inline-flex; }

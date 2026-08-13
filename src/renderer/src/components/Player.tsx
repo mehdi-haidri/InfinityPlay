@@ -13,6 +13,7 @@ import {
   PictureInPicture,
   Play,
   Plus,
+  Languages,
   RotateCcw,
   RotateCw,
   Settings2,
@@ -97,7 +98,7 @@ const IDLE_MS = 2600;
 const SEEK_STEP = 10;
 const PROGRESS_SAVE_MS = 5000;
 
-type MenuTab = "quality" | "subtitles" | "subtitle-style" | null;
+type MenuTab = "quality" | "audio" | "subtitles" | "subtitle-style" | null;
 type VideoFit = "contain" | "cover" | "fill";
 
 /**
@@ -195,6 +196,7 @@ export function Player() {
   const lastSaved = useRef(0);
   const draggingScrub = useRef(false);
   const previewRequest = useRef(0);
+  const mediaPositionUpdated = useRef(0);
   const previewCache = useRef(new Map<string, string | null>());
   const androidFallbackTried = useRef(false);
   const nativeLaunch = useRef("");
@@ -221,6 +223,8 @@ export function Player() {
   const subPosition = config.subtitlePosition === "top" ? 28 : config.subtitlePosition === "middle" ? 54 : 86;
   const [videoFit, setVideoFit] = useState<VideoFit>("contain");
   const [sleepMinutes, setSleepMinutes] = useState(0);
+  const [audioTracks, setAudioTracks] = useState<Array<{ id: string; label: string; language: string }>>([]);
+  const [selectedAudioId, setSelectedAudioId] = useState("auto");
 
   const cues = useMemo(() => {
     if (!subtitle?.vttText) return [];
@@ -258,8 +262,27 @@ export function Player() {
       setTrackCueText(activeText);
     };
 
-    const interval = setInterval(onCueChange, 200);
-    return () => clearInterval(interval);
+    const listening = new Set<TextTrack>();
+    const attach = (track: TextTrack) => {
+      if (listening.has(track)) return;
+      track.addEventListener("cuechange", onCueChange);
+      listening.add(track);
+    };
+    const attachAll = () => {
+      for (let index = 0; index < video.textTracks.length; index++) attach(video.textTracks[index]);
+      onCueChange();
+    };
+    const onTrackAdded = (event: TrackEvent) => {
+      if (event.track instanceof TextTrack) attach(event.track);
+    };
+    attachAll();
+    video.textTracks.addEventListener("addtrack", onTrackAdded);
+    video.addEventListener("loadedmetadata", attachAll);
+    return () => {
+      video.textTracks.removeEventListener("addtrack", onTrackAdded);
+      video.removeEventListener("loadedmetadata", attachAll);
+      listening.forEach((track) => track.removeEventListener("cuechange", onCueChange));
+    };
   }, [subtitle, sourceUrl]);
 
   const displayCueText = trackCueText || activeCueText;
@@ -324,6 +347,8 @@ export function Player() {
       ) ?? null,
     );
     setSubtitle(null);
+    setAudioTracks([]);
+    setSelectedAudioId("auto");
     setCurrent(saved > 30 && config.resumeBehavior !== "restart" ? saved : 0);
     setDuration(0);
     setScrubPreview(null);
@@ -362,6 +387,8 @@ export function Player() {
         })),
       ),
       headersJson: JSON.stringify(request.headers ?? {}),
+      preferredAudioLanguage: config.preferredAudio ?? "",
+      preferredSubtitleLanguage: request.initialSubtitle ?? config.preferredSubtitle ?? "",
       live: request.live,
     }).then((result) => {
       if (cancelled) return;
@@ -404,7 +431,7 @@ export function Player() {
     return () => {
       cancelled = true;
     };
-  }, [request, isNativeAndroidPlayer, config.resumeBehavior, saveProgress, notify, closePlayer]);
+  }, [request, isNativeAndroidPlayer, config.resumeBehavior, config.preferredAudio, config.preferredSubtitle, saveProgress, notify, closePlayer]);
 
   // Netflix-style hover frames are generated lazily and bucketed every five seconds.
   // The debounce prevents pointer movement from starting an FFmpeg process per pixel.
@@ -581,6 +608,17 @@ export function Player() {
       hlsRef.current = hls;
       hls.attachMedia(video);
       hls.loadSource(sourceUrl);
+      const syncHlsAudio = () => {
+        const tracks = hls.audioTracks.map((track, index) => ({
+          id: `hls:${index}`,
+          label: track.name || track.lang || `Audio ${index + 1}`,
+          language: track.lang || "und",
+        }));
+        setAudioTracks(tracks);
+        setSelectedAudioId(hls.audioTrack >= 0 ? `hls:${hls.audioTrack}` : "auto");
+      };
+      hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, syncHlsAudio);
+      hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, syncHlsAudio);
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRetries < 2) {
@@ -693,6 +731,17 @@ export function Player() {
           title: "Stream error",
           body: event?.error?.message ?? "The adaptive stream could not be played.",
         });
+      });
+      player.on(MediaPlayer.events.STREAM_INITIALIZED, () => {
+        const tracks = (player.getTracksFor("audio") ?? []) as any[];
+        const currentTrack = player.getCurrentTrackFor("audio") as any;
+        setAudioTracks(tracks.map((track, index) => ({
+          id: `dash:${index}`,
+          label: track.labels?.[0]?.text || track.lang || `Audio ${index + 1}`,
+          language: track.lang || "und",
+        })));
+        const selectedIndex = tracks.findIndex((track) => track === currentTrack || track.id === currentTrack?.id);
+        setSelectedAudioId(selectedIndex >= 0 ? `dash:${selectedIndex}` : "auto");
       });
       player.initialize(media, manifestUrl, true);
       media.play().catch(() => setPlaying(false));
@@ -831,6 +880,27 @@ export function Player() {
     void seekTo((prepared?.transcoded ? playbackOffset + video.currentTime : video.currentTime) + delta);
   }, [duration, playbackOffset, prepared?.transcoded, seekTo]);
 
+  const chooseAudioTrack = useCallback((id: string) => {
+    const [engine, indexText] = id.split(":");
+    const index = Number(indexText);
+    if (!Number.isInteger(index) || index < 0) return;
+    if (engine === "hls" && hlsRef.current) {
+      hlsRef.current.audioTrack = index;
+    } else if (engine === "dash" && dashRef.current) {
+      const track = dashRef.current.getTracksFor("audio")?.[index];
+      if (track) dashRef.current.setCurrentTrack(track);
+    } else {
+      const nativeAudioTracks = (videoRef.current as HTMLVideoElement & { audioTracks?: ArrayLike<{ enabled: boolean }> })?.audioTracks;
+      if (nativeAudioTracks) {
+        for (let trackIndex = 0; trackIndex < nativeAudioTracks.length; trackIndex++) {
+          nativeAudioTracks[trackIndex].enabled = trackIndex === index;
+        }
+      }
+    }
+    setSelectedAudioId(id);
+    setMenu(null);
+  }, []);
+
   const [orientationMode, setOrientationMode] = useState<"landscape" | "portrait" | "auto">("auto");
 
   const toggleFullscreen = useCallback(async () => {
@@ -961,6 +1031,57 @@ export function Player() {
     video.playbackRate = rate;
   }, [volume, muted, rate]);
 
+  // Expose playback to headset keys, lock-screen controls, and desktop media overlays.
+  useEffect(() => {
+    const mediaSession = navigator.mediaSession;
+    if (!request || !mediaSession) return;
+    mediaSession.metadata = new MediaMetadata({
+      title: request.title,
+      artist: request.subtitleLine || (request.live ? "Live TV" : "InfinityPlay"),
+      album: request.live ? "InfinityPlay Live" : "InfinityPlay",
+      artwork: request.posterUrl ? [{ src: request.posterUrl }] : [],
+    });
+    const actions: Array<[MediaSessionAction, MediaSessionActionHandler | null]> = [
+      ["play", () => void videoRef.current?.play()],
+      ["pause", () => videoRef.current?.pause()],
+      ["seekbackward", (details) => seekBy(-(details.seekOffset || SEEK_STEP))],
+      ["seekforward", (details) => seekBy(details.seekOffset || SEEK_STEP)],
+      ["seekto", (details) => details.seekTime !== undefined && void seekTo(details.seekTime)],
+      ["stop", close],
+    ];
+    for (const [action, handler] of actions) {
+      try { mediaSession.setActionHandler(action, handler); } catch { /* unsupported action */ }
+    }
+    return () => {
+      for (const [action] of actions) {
+        try { mediaSession.setActionHandler(action, null); } catch { /* unsupported action */ }
+      }
+      mediaSession.metadata = null;
+    };
+  }, [request, seekBy, seekTo, close]);
+
+  useEffect(() => {
+    if (!navigator.mediaSession) return;
+    navigator.mediaSession.playbackState = playing ? "playing" : "paused";
+  }, [playing]);
+
+  // Prevent dimming during playback without forcing the screen awake after pause/close.
+  useEffect(() => {
+    let lock: { release: () => Promise<void>; released: boolean } | null = null;
+    const acquire = async () => {
+      const wakeLock = (navigator as Navigator & { wakeLock?: { request: (type: "screen") => Promise<typeof lock> } }).wakeLock;
+      if (!playing || !wakeLock || document.visibilityState !== "visible") return;
+      try { lock = await wakeLock.request("screen"); } catch { /* OS may deny low-battery locks */ }
+    };
+    void acquire();
+    const onVisibility = () => { if (document.visibilityState === "visible") void acquire(); };
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      if (lock && !lock.released) void lock.release();
+    };
+  }, [playing]);
+
   // Volume is a preference; persist it, but not on every drag frame.
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -1001,6 +1122,23 @@ export function Player() {
       setBuffered(playbackOffset + video.buffered.end(video.buffered.length - 1));
     }
     persistProgress(playbackOffset + video.currentTime, duration || prepared?.duration || video.duration || 0);
+    const total = duration || prepared?.duration || video.duration || 0;
+    const position = playbackOffset + video.currentTime;
+    if (
+      !request.live && navigator.mediaSession?.setPositionState && total > 0 &&
+      Number.isFinite(total) && position >= 0 && Date.now() - mediaPositionUpdated.current >= 1000
+    ) {
+      mediaPositionUpdated.current = Date.now();
+      try {
+        navigator.mediaSession.setPositionState({
+          duration: total,
+          playbackRate: video.playbackRate,
+          position: Math.min(position, total),
+        });
+      } catch {
+        // Metadata can briefly lag behind a source change; the next time update retries.
+      }
+    }
   };
 
   const scrubPosition = (clientX: number, element: HTMLDivElement): number => {
@@ -1167,7 +1305,7 @@ export function Player() {
   const isTouchInput = document.documentElement.dataset.input === "touch";
   const isTv = document.documentElement.dataset.device === "tv";
   const isPhone = document.documentElement.dataset.device === "phone";
-  const pipAvailable = !isTv && !isPhone && Boolean(document.pictureInPictureEnabled && videoRef.current?.requestPictureInPicture);
+  const pipAvailable = !isTv && Boolean(document.pictureInPictureEnabled && videoRef.current?.requestPictureInPicture);
   const subtitleScale = (config.subtitleSize ?? 100) / 100;
 
   return (
@@ -1460,6 +1598,16 @@ export function Player() {
                     <Captions size={19} />
                   </button>
                 )}
+                {audioTracks.length > 1 && (
+                  <button
+                    className="icon-button"
+                    onClick={() => setMenu((value) => (value === "audio" ? null : "audio"))}
+                    aria-label="Audio language"
+                    title="Audio language"
+                  >
+                    <Languages size={19} />
+                  </button>
+                )}
                 <button
                   className="icon-button"
                   onClick={() => setMenu((value) => (value === "quality" ? null : "quality"))}
@@ -1555,6 +1703,19 @@ export function Player() {
                   ))}
                 </>
               )}
+            </div>
+          )}
+
+          {menu === "audio" && (
+            <div ref={menuRef} className="player-menu" role="dialog" aria-label="Audio language" onKeyDown={menuKeyDown}>
+              <div className="player-menu-label">Audio language</div>
+              {audioTracks.map((track) => (
+                <button key={track.id} data-active={selectedAudioId === track.id} onClick={() => chooseAudioTrack(track.id)}>
+                  {selectedAudioId === track.id ? <Check size={14} /> : <span style={{ width: 14 }} />}
+                  <span>{track.label}</span>
+                  <span className="player-track-language">{track.language === "und" ? "" : track.language.toUpperCase()}</span>
+                </button>
+              ))}
             </div>
           )}
 

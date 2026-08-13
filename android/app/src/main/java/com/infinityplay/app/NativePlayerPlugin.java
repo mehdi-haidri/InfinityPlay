@@ -27,6 +27,8 @@ public class NativePlayerPlugin extends Plugin {
         intent.putExtra(NativePlayerActivity.EXTRA_SUBTITLES_JSON, call.getString("subtitlesJson", "[]"));
         intent.putExtra(NativePlayerActivity.EXTRA_RELEASES_JSON, call.getString("releasesJson", "[]"));
         intent.putExtra(NativePlayerActivity.EXTRA_HEADERS_JSON, call.getString("headersJson", "{}"));
+        intent.putExtra(NativePlayerActivity.EXTRA_PREFERRED_AUDIO, call.getString("preferredAudioLanguage", ""));
+        intent.putExtra(NativePlayerActivity.EXTRA_PREFERRED_SUBTITLE, call.getString("preferredSubtitleLanguage", ""));
         intent.putExtra(NativePlayerActivity.EXTRA_LIVE, call.getBoolean("live", false));
         startActivityForResult(call, intent, "playerFinished");
     }

@@ -4,7 +4,6 @@ import android.os.Bundle;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.view.View;
-import android.view.WindowManager;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
@@ -40,7 +39,6 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(DownloadsPlugin.class);
         registerPlugin(NativePlayerPlugin.class);
         super.onCreate(savedInstanceState);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         applyTelevisionMode();
     }
 

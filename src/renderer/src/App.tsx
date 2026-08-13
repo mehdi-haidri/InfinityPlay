@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { AlertTriangle, Download as DownloadIcon, Info, X } from "lucide-react";
 import { App as CapApp } from "@capacitor/app";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
-import { Player } from "./components/Player";
 import { Splash } from "./components/Splash";
 import { HomePage } from "./pages/HomePage";
 import { SearchPage } from "./pages/SearchPage";
@@ -18,6 +17,8 @@ import { PersonPage } from "./pages/PersonPage";
 import { formatBytes } from "./lib/format";
 import { useApp } from "./store";
 import { applyDeviceProfile, installTvSpatialNavigation } from "./lib/device";
+
+const Player = lazy(() => import("./components/Player").then((module) => ({ default: module.Player })));
 
 function Routes() {
   const route = useApp((state) => state.route);
@@ -237,7 +238,11 @@ export function App() {
         <TopBar />
         <Routes />
       </main>
-      {player && <Player />}
+      {player && (
+        <Suspense fallback={<div className="player-module-loader" aria-label="Opening player"><div className="spinner" /></div>}>
+          <Player />
+        </Suspense>
+      )}
       <Toasts />
       <LiveAnnouncements />
       <Splash ready={booted} />

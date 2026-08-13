@@ -70,6 +70,8 @@ interface InfinityPlayerPlugin {
     subtitlesJson: string;
     releasesJson: string;
     headersJson: string;
+    preferredAudioLanguage: string;
+    preferredSubtitleLanguage: string;
     live: boolean;
   }): Promise<NativePlayerResult>;
 }
