@@ -7,6 +7,26 @@ import type { Channel } from "@shared/types";
 
 const FETCH_TIMEOUT_MS = 30_000;
 const NODE_FS_MODULE = "node:fs/promises";
+const memoryCache = new Map<string, string>();
+
+interface CacheStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+
+/**
+ * The provider is shared by Capacitor's renderer and Electron's main process.
+ * `localStorage` only exists in the former, so Electron uses a process-local cache.
+ */
+function playlistCache(): CacheStorage {
+  const browserStorage = (globalThis as { localStorage?: CacheStorage }).localStorage;
+  if (browserStorage) return browserStorage;
+
+  return {
+    getItem: (key) => memoryCache.get(key) ?? null,
+    setItem: (key, value) => memoryCache.set(key, value),
+  };
+}
 
 function extractAttribute(line: string, attribute: string): string {
   const start = line.indexOf(attribute);
@@ -105,7 +125,8 @@ export async function fetchPlaylist(source: string, _forceRefresh = false): Prom
   }
 
   const cacheKey = `m3u_cache_${md5(trimmed)}`;
-  const cached = localStorage.getItem(cacheKey);
+  const cache = playlistCache();
+  const cached = cache.getItem(cacheKey);
   if (cached && !_forceRefresh) {
     try {
       const { timestamp, content } = JSON.parse(cached);
@@ -122,7 +143,7 @@ export async function fetchPlaylist(source: string, _forceRefresh = false): Prom
   const channels = parseM3u(content);
   if (channels.length > 0) {
     try {
-      localStorage.setItem(cacheKey, JSON.stringify({ timestamp: Date.now(), content }));
+      cache.setItem(cacheKey, JSON.stringify({ timestamp: Date.now(), content }));
     } catch {
       // Storage full
     }
