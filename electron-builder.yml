@@ -24,6 +24,11 @@ files:
 
 asar: true
 
+# castv2 loads `cast_channel.proto` from beside its own source at runtime. Reading it from inside
+# the archive is fragile, so the Chromecast sender is unpacked to the filesystem.
+asarUnpack:
+  - node_modules/castv2/**
+
 # Stages the FFmpeg binaries for the target platform/arch into build/bin.
 beforePack: build/prepare-ffmpeg.cjs
 

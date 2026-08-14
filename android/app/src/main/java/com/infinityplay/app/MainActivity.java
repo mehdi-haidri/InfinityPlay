@@ -38,6 +38,7 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(DownloadsPlugin.class);
         registerPlugin(NativePlayerPlugin.class);
+        registerPlugin(CastPlugin.class);
         super.onCreate(savedInstanceState);
         applyTelevisionMode();
     }

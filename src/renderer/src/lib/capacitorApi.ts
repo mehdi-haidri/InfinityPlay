@@ -3,6 +3,17 @@ import { Browser } from "@capacitor/browser";
 import { Filesystem, Directory } from "@capacitor/filesystem";
 import { App as CapApp } from "@capacitor/app";
 import { registerPlugin } from "@capacitor/core";
+import {
+  androidCastPause,
+  androidCastPlay,
+  androidCastSeek,
+  androidCastSession,
+  androidCastStop,
+  androidCastVolume,
+  androidDiscover,
+  androidOnCastSession,
+  androidStartCast,
+} from "./androidCast";
 import type {
   AppConfig,
   AppInfo,
@@ -418,6 +429,17 @@ export const createCapacitorApi = (): InfinityPlayApi => {
             gpu: "",
           };
         }),
+    },
+    cast: {
+      discover: () => wrapResult(androidDiscover),
+      start: (request) => wrapResult(() => androidStartCast(request)),
+      play: () => wrapResult(androidCastPlay),
+      pause: () => wrapResult(androidCastPause),
+      seek: (seconds) => wrapResult(() => androidCastSeek(seconds)),
+      setVolume: (level) => wrapResult(() => androidCastVolume(level)),
+      stop: () => wrapResult(androidCastStop),
+      session: () => wrapResult(async () => androidCastSession()),
+      onSession: androidOnCastSession,
     },
     updates: {
       status: () => wrapResult(async () => ({

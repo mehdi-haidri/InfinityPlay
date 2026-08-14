@@ -595,6 +595,51 @@ export interface SeasonDownloadRequest {
   resolution: number;
 }
 
+/**
+ * Chromecast reaches Google's own receivers; DLNA reaches most smart TVs and media renderers.
+ * Neither alone covers every device, so both are discovered and shown in one list.
+ */
+export type CastProtocol = "chromecast" | "dlna";
+
+export interface CastDevice {
+  id: string;
+  name: string;
+  protocol: CastProtocol;
+  /** Model or room name when the device reports one, purely for telling two TVs apart. */
+  detail?: string;
+}
+
+export type CastPlaybackState = "idle" | "loading" | "playing" | "paused" | "buffering" | "error";
+
+export interface CastSession {
+  device: CastDevice;
+  state: CastPlaybackState;
+  title: string;
+  /** Seconds; 0 when the receiver has not reported a position yet. */
+  position: number;
+  duration: number;
+  /** 0–1. */
+  volume: number;
+  muted: boolean;
+  message?: string;
+}
+
+/** What the player hands over when starting a cast. */
+export interface CastRequest {
+  deviceId: string;
+  url: string;
+  title: string;
+  subtitleLine?: string;
+  mimeType?: string;
+  posterUrl?: string;
+  subtitleUrl?: string;
+  /** Resume point, so casting continues from where local playback stopped. */
+  startSeconds?: number;
+  durationSeconds?: number;
+  /** Live streams are told apart so the receiver is not asked to seek in them. */
+  live?: boolean;
+}
+
 /** Result of pause/resume. `reason` is present only when the UI should explain the refusal. */
 export interface DownloadControlResult {
   ok: boolean;
@@ -772,6 +817,17 @@ export interface InfinityPlayApi {
     decline: () => Promise<Result<boolean>>;
     install: () => Promise<Result<boolean>>;
     onStatus: (listener: (status: UpdateStatus) => void) => () => void;
+  };
+  cast: {
+    discover: () => Promise<Result<CastDevice[]>>;
+    start: (request: CastRequest) => Promise<Result<CastSession>>;
+    play: () => Promise<Result<boolean>>;
+    pause: () => Promise<Result<boolean>>;
+    seek: (seconds: number) => Promise<Result<boolean>>;
+    setVolume: (level: number) => Promise<Result<boolean>>;
+    stop: () => Promise<Result<boolean>>;
+    session: () => Promise<Result<CastSession | null>>;
+    onSession: (listener: (session: CastSession | null) => void) => () => void;
   };
   system: {
     openExternal: (url: string) => Promise<Result<void>>;

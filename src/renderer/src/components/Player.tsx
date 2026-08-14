@@ -39,6 +39,7 @@ import {
   type SubtitleEdgeStyle,
 } from "@shared/types";
 import { api, unwrap } from "../lib/api";
+import { CastControl } from "./CastControl";
 import { nativePlayer } from "../lib/capacitorApi";
 import { formatTime, qualityLabel } from "../lib/format";
 import { registerStreamSignature } from "../lib/streamSigner";
@@ -234,6 +235,8 @@ export function Player() {
   const [current, setCurrent] = useState(0);
   const [duration, setDuration] = useState(0);
   const [buffered, setBuffered] = useState(0);
+  /** True while a receiver has the stream; local playback stands down so nothing plays twice. */
+  const [casting, setCasting] = useState(false);
   const [volume, setVolume] = useState(config.volume);
   const [muted, setMuted] = useState(false);
   const [rate, setRate] = useState(1);
@@ -1335,6 +1338,43 @@ export function Player() {
     setPlaybackError("The source rejected the request or this device cannot decode it.");
   };
 
+  // Handing playback to a TV should silence the local copy, not run both at once.
+  useEffect(() => {
+    if (!casting) return;
+    videoRef.current?.pause();
+  }, [casting]);
+
+  /*
+   * What a receiver would need to take over.
+   *
+   * Deliberately not `sourceUrl`. A DASH title plays here from a staged manifest whose segments are
+   * signed by our own request hook — a TV has no such hook, so it fetches the segments, gets 403,
+   * and sits on an idle receiver screen. A progressive release carries its signature in the URL and
+   * needs nothing from the app, so casting prefers one and only falls back to the live source.
+   */
+  const castRelease = useMemo(
+    () =>
+      releases.find((release) => release.kind !== "dash" && release.resolution === selectedResolution)
+      ?? releases.find((release) => release.kind !== "dash"),
+    [releases, selectedResolution],
+  );
+
+  const castUrl = request.live ? sourceUrl : castRelease?.url ?? sourceUrl;
+
+  const castMedia = castUrl
+    ? {
+        url: castUrl,
+        title: request.title,
+        subtitleLine: request.subtitleLine,
+        posterUrl: request.posterUrl ?? undefined,
+        // A manifest that only this app can authenticate is worth naming, so a failure is legible.
+        mimeType: request.live ? "application/x-mpegURL" : undefined,
+        live: request.live,
+        startSeconds: request.live ? 0 : current,
+        durationSeconds: request.live ? 0 : duration,
+      }
+    : null;
+
   const displayedCurrent = scrubPreview ?? current;
   const playedRatio = duration > 0 ? displayedCurrent / duration : 0;
   const bufferedRatio = duration > 0 ? buffered / duration : 0;
@@ -1605,6 +1645,8 @@ export function Player() {
               </span>
 
               <div className="player-secondary-controls">
+                <CastControl media={castMedia} onCastingChange={setCasting} />
+
                 {request.mediaType === "series" && (request.episode ?? 0) > 1 && (
                   <button
                     className="icon-button player-episode-control"

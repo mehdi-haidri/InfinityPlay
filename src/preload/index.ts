@@ -3,6 +3,9 @@ import type {
   AppConfig,
   AppInfo,
   AudioVariant,
+  CastDevice,
+  CastRequest,
+  CastSession,
   DownloadControlResult,
   DownloadRecord,
   DownloadRequest,
@@ -125,6 +128,7 @@ const api = {
     info: () => invoke<AppInfo>("app:info"),
   },
   updates: {
+    // Cast lives beside updates: both are long-running main-process concerns the UI observes.
     status: () => invoke<UpdateStatus>("update:status"),
     check: () => invoke<UpdateStatus>("update:check"),
     download: () => invoke<boolean>("update:download"),
@@ -136,6 +140,24 @@ const api = {
       ipcRenderer.on("update:status", wrapped);
       return () => {
         ipcRenderer.removeListener("update:status", wrapped);
+      };
+    },
+  },
+  cast: {
+    /** Sweeps the network for Chromecast receivers and DLNA renderers. Takes a few seconds. */
+    discover: () => invoke<CastDevice[]>("cast:discover"),
+    start: (request: CastRequest) => invoke<CastSession>("cast:start", request),
+    play: () => invoke<boolean>("cast:play"),
+    pause: () => invoke<boolean>("cast:pause"),
+    seek: (seconds: number) => invoke<boolean>("cast:seek", seconds),
+    setVolume: (level: number) => invoke<boolean>("cast:volume", level),
+    stop: () => invoke<boolean>("cast:stop"),
+    session: () => invoke<CastSession | null>("cast:session"),
+    onSession: (listener: (session: CastSession | null) => void) => {
+      const wrapped = (_event: unknown, session: CastSession | null) => listener(session);
+      ipcRenderer.on("cast:session", wrapped);
+      return () => {
+        ipcRenderer.removeListener("cast:session", wrapped);
       };
     },
   },

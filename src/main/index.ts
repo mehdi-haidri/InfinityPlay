@@ -5,7 +5,9 @@ import { app, BrowserWindow, protocol, shell, session } from "electron";
 import { registerIpcHandlers } from "./ipc";
 import { initUpdater } from "./updater";
 import { initDownloads } from "./downloads";
+import { initCast, stopCast } from "./cast";
 import { installStreamSigner } from "./streams";
+import { STREAM_HOST_FILTER, STREAM_USER_AGENT } from "./stream-headers";
 import { LIVE_TRANSCODE_SCHEME, registerLiveTranscodeProtocol } from "./live";
 import { getConfig } from "./store";
 
@@ -199,14 +201,11 @@ function createWindow(): BrowserWindow {
  * request fails even though the signed URL is valid. Verified behaviour: the same URL
  * returns 206 with the app's own Android UA, or with any non-browser UA. Rewrite the UA
  * (and drop the browser-only headers that go with it) for the media hosts only, leaving
- * image and API traffic untouched.
+ * image and API traffic untouched. The UA itself lives in `stream-headers` because the
+ * cast proxy has to send the identical one.
  */
-const STREAM_USER_AGENT =
-  "com.community.oneroom/50020042 (Linux; U; Android 13; en_US; 2201117TY; " +
-  "Build/TQ2A.230405.003; Cronet/135.0.7012.3)";
-
 function rewriteMediaRequestHeaders(): void {
-  const filter = { urls: ["*://*.hakunaymatata.com/*"] };
+  const filter = { urls: STREAM_HOST_FILTER };
   session.defaultSession.webRequest.onBeforeSendHeaders(filter, (details, callback) => {
     const headers: Record<string, string> = { ...details.requestHeaders };
     for (const name of Object.keys(headers)) {
@@ -253,10 +252,18 @@ app.whenReady().then(() => {
   mainWindow = createWindow();
   initDownloads(() => mainWindow);
   initUpdater(() => mainWindow);
+  initCast((session) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("cast:session", session);
+  });
 
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) mainWindow = createWindow();
   });
+});
+
+// Leaving a cast running would keep the LAN file server listening after the window is gone.
+app.on("before-quit", () => {
+  void stopCast();
 });
 
 app.on("window-all-closed", () => {

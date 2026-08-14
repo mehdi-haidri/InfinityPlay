@@ -2080,6 +2080,67 @@ video::cue {
 .update-help { padding-top: 4px; max-width: 620px; }
 .update-actions { display: flex; flex-wrap: wrap; gap: 8px; flex: none; }
 
+/* ── Casting ───────────────────────────────────────────────────────────────── */
+
+.cast-wrap { position: relative; display: inline-flex; }
+
+.cast-menu { min-width: 268px; }
+
+.cast-device {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 100%;
+  min-height: 48px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  color: var(--text-muted);
+  text-align: left;
+}
+
+.cast-device:hover { background: var(--bg-hover); color: var(--text); }
+
+.cast-device-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cast-device-name { color: var(--text); font-size: 13px; font-weight: 550; }
+.cast-device-kind { color: var(--text-faint); font-size: 11px; }
+
+/* The transport bar replaces the cast button once a receiver has the stream. */
+.cast-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 6px 3px 10px;
+  border: 1px solid var(--accent-soft);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  white-space: nowrap;
+}
+
+.cast-bar-target { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+
+.cast-bar-name {
+  max-width: 132px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.cast-bar .icon-button { width: 30px; height: 30px; color: inherit; }
+.cast-bar .icon-button:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 18%, transparent); }
+.cast-bar-primary { width: 34px !important; height: 34px !important; }
+.cast-bar-time { margin-inline: 2px; font-size: 11px; font-variant-numeric: tabular-nums; }
+.cast-bar-error { font-size: 11px; color: var(--text); }
+.cast-skip { font-size: 10px; font-weight: 700; }
+
+.cast-spin { animation: spin 900ms linear infinite; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+html[data-device="phone"] .cast-bar-name { max-width: 84px; }
+html[data-device="phone"] .cast-menu { min-width: 0; }
+
 /* Release notes sit inside the update card. They are long, so the body scrolls rather than
    pushing the build details off the page. */
 .release-notes-block {
