@@ -87,6 +87,46 @@ public class NativePlayerActivity extends AppCompatActivity {
     private String signedDirectory = "";
     private int resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT;
 
+    /** English is the fallback; only these languages are exposed in the mobile player. */
+    private static final String[] SUPPORTED_AUDIO_TAGS = {"en", "ar", "fr"};
+
+    @Nullable
+    private String supportedAudioTag(@Nullable String value) {
+        if (value == null) return null;
+        String normalized = value.trim().toLowerCase(java.util.Locale.ROOT).replace('_', '-');
+        if (normalized.equals("en") || normalized.equals("eng") || normalized.startsWith("en-") || normalized.contains("english")) return "en";
+        if (normalized.equals("ar") || normalized.equals("ara") || normalized.startsWith("ar-") || normalized.contains("arabic")) return "ar";
+        if (normalized.equals("fr") || normalized.equals("fra") || normalized.equals("fre") || normalized.startsWith("fr-") || normalized.contains("french")) return "fr";
+        return null;
+    }
+
+    @Nullable
+    private String supportedAudioTag(Format format) {
+        // A declared language is authoritative. Only fall back to the label when the
+        // manifest omitted it; this prevents a Hindi track with a vague label leaking in.
+        if (format.language != null && !format.language.trim().isEmpty()) {
+            return supportedAudioTag(format.language);
+        }
+        return supportedAudioTag(format.label);
+    }
+
+    private String audioName(String tag) {
+        if ("ar".equals(tag)) return "Arabic";
+        if ("fr".equals(tag)) return "French";
+        return "English";
+    }
+
+    private String[] audioPreferenceOrder(@Nullable String configured) {
+        String selected = supportedAudioTag(configured);
+        if (selected == null) selected = "en";
+        List<String> order = new ArrayList<>();
+        order.add(selected);
+        for (String tag : SUPPORTED_AUDIO_TAGS) {
+            if (!tag.equals(selected)) order.add(tag);
+        }
+        return order.toArray(new String[0]);
+    }
+
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
@@ -336,9 +376,9 @@ public class NativePlayerActivity extends AppCompatActivity {
         DefaultTrackSelector.Parameters.Builder initialTracks = trackSelector.buildUponParameters();
         String preferredAudio = getIntent().getStringExtra(EXTRA_PREFERRED_AUDIO);
         String preferredSubtitle = getIntent().getStringExtra(EXTRA_PREFERRED_SUBTITLE);
-        if (preferredAudio != null && !preferredAudio.isEmpty() && !"original".equalsIgnoreCase(preferredAudio)) {
-            initialTracks.setPreferredAudioLanguage(preferredAudio);
-        }
+        // Media3 expects BCP-47 tags, not labels such as "English". Supplying an ordered
+        // list fixes manifests whose first/default track is Hindi while English is present.
+        initialTracks.setPreferredAudioLanguages(audioPreferenceOrder(preferredAudio));
         if (preferredSubtitle != null && !preferredSubtitle.isEmpty() && !"off".equalsIgnoreCase(preferredSubtitle)) {
             initialTracks.setPreferredTextLanguage(preferredSubtitle);
         }
@@ -455,13 +495,26 @@ public class NativePlayerActivity extends AppCompatActivity {
         String label = "Audio";
         for (Tracks.Group group : tracks.getGroups()) {
             if (group.getType() != C.TRACK_TYPE_AUDIO || !group.isSupported()) continue;
-            count += group.length;
             for (int index = 0; index < group.length; index++) {
-                if (group.isTrackSelected(index)) label = trackLabel(group.getTrackFormat(index), "Audio");
+                Format format = group.getTrackFormat(index);
+                String tag = supportedAudioTag(format);
+                if (tag == null || !group.isTrackSupported(index)) continue;
+                count += 1;
+                if (group.isTrackSelected(index)) label = audioName(tag);
             }
         }
         audioButton.setText(label.length() > 12 ? label.substring(0, 12) : label);
         audioButton.setVisibility(count > 1 ? View.VISIBLE : View.GONE);
+    }
+
+    private int supportedAudioTrackCount() {
+        int count = 0;
+        for (Tracks.Group group : trackGroups(C.TRACK_TYPE_AUDIO)) {
+            for (int index = 0; index < group.length; index++) {
+                if (group.isTrackSupported(index) && supportedAudioTag(group.getTrackFormat(index)) != null) count += 1;
+            }
+        }
+        return count;
     }
 
     private void showAudioPicker() {
@@ -472,7 +525,9 @@ public class NativePlayerActivity extends AppCompatActivity {
         for (Tracks.Group group : groups) {
             for (int index = 0; index < group.length; index++) {
                 if (!group.isTrackSupported(index)) continue;
-                labels.add(trackLabel(group.getTrackFormat(index), "Audio " + (labels.size() + 1)));
+                String tag = supportedAudioTag(group.getTrackFormat(index));
+                if (tag == null) continue;
+                labels.add(audioName(tag));
                 choices.add(new TrackSelectionOverride(group.getMediaTrackGroup(), index));
                 if (group.isTrackSelected(index)) selected = labels.size() - 1;
             }
@@ -547,18 +602,32 @@ public class NativePlayerActivity extends AppCompatActivity {
 
     private void showPlaybackOptions() {
         List<String> labels = new ArrayList<>();
-        labels.add("Audio language");
+        final int audioIndex;
+        if (supportedAudioTrackCount() > 1) {
+            audioIndex = labels.size();
+            labels.add("Audio language");
+        } else {
+            audioIndex = -1;
+        }
+        final int subtitleIndex = labels.size();
         labels.add("Subtitles");
-        if (!live) labels.add("Playback speed");
+        final int speedIndex;
+        if (!live) {
+            speedIndex = labels.size();
+            labels.add("Playback speed");
+        } else {
+            speedIndex = -1;
+        }
+        final int pictureIndex = labels.size();
         labels.add(resizeMode == AspectRatioFrameLayout.RESIZE_MODE_FIT ? "Picture: fit screen" :
             resizeMode == AspectRatioFrameLayout.RESIZE_MODE_ZOOM ? "Picture: fill and crop" : "Picture: stretch");
         new AlertDialog.Builder(this)
             .setTitle("Playback options")
             .setItems(labels.toArray(new String[0]), (dialog, which) -> {
-                if (which == 0) showAudioPicker();
-                else if (which == 1) showSubtitlePicker();
-                else if (!live && which == 2) showSpeedPicker();
-                else cycleResizeMode();
+                if (which == audioIndex) showAudioPicker();
+                else if (which == subtitleIndex) showSubtitlePicker();
+                else if (which == speedIndex) showSpeedPicker();
+                else if (which == pictureIndex) cycleResizeMode();
             })
             .setNegativeButton("Cancel", null)
             .show();

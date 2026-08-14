@@ -47,24 +47,20 @@ function publishError(error: unknown): void {
 }
 
 /**
- * `releaseNotes` is a string for a single release, or a list when several versions are being
- * skipped at once. The list is joined newest-first so About shows every version being crossed.
+ * `releaseNotes` is a string for one release, or a newest-first list when several versions
+ * are skipped. About intentionally shows only the main/latest update, so keep the first
+ * non-empty entry instead of concatenating historical changelogs.
  */
 function releaseNotesText(notes: unknown): string | undefined {
   if (typeof notes === "string") return notes.trim() || undefined;
   if (!Array.isArray(notes)) return undefined;
 
-  const joined = notes
-    .map((entry) => {
+  for (const entry of notes) {
       const item = entry as { version?: string; note?: string | null };
       const body = (item.note ?? "").trim();
-      if (!body) return "";
-      return item.version ? `### ${item.version}\n${body}` : body;
-    })
-    .filter(Boolean)
-    .join("\n\n");
-
-  return joined || undefined;
+      if (body) return body;
+  }
+  return undefined;
 }
 
 function unsupportedMessage(): string | null {

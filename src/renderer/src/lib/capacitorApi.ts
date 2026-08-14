@@ -26,7 +26,7 @@ import type {
   UpdateStatus,
   WatchHistoryItem,
 } from "@shared/types";
-import { DEFAULT_CONFIG } from "@shared/types";
+import { DEFAULT_CONFIG, preferredAudioLanguage } from "@shared/types";
 import { MovieBoxService } from "@/../../main/providers/moviebox";
 import { fetchPlaylist } from "@/../../main/providers/m3u";
 import { fetchEpg } from "@/../../main/providers/epg";
@@ -91,7 +91,12 @@ async function getStoredConfig(): Promise<AppConfig> {
   try {
     const { value } = await Preferences.get({ key: STORAGE_KEYS.CONFIG });
     if (value) {
-      cachedConfig = { ...DEFAULT_CONFIG, ...JSON.parse(value) };
+      const stored = JSON.parse(value) as Partial<AppConfig>;
+      cachedConfig = {
+        ...DEFAULT_CONFIG,
+        ...stored,
+        preferredAudio: preferredAudioLanguage(stored.preferredAudio) ?? "English",
+      };
       return cachedConfig!;
     }
   } catch {
@@ -108,6 +113,7 @@ function getSyncConfig(): AppConfig {
 async function saveStoredConfig(patch: Partial<AppConfig>): Promise<AppConfig> {
   const current = await getStoredConfig();
   cachedConfig = { ...current, ...patch };
+  cachedConfig.preferredAudio = preferredAudioLanguage(cachedConfig.preferredAudio) ?? "English";
   await Preferences.set({
     key: STORAGE_KEYS.CONFIG,
     value: JSON.stringify(cachedConfig),

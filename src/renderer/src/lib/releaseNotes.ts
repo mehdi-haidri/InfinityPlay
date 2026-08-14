@@ -46,3 +46,19 @@ export function notesForVersion(version: string): ReleaseSection | null {
 export function newestNotes(): ReleaseSection | null {
   return parsed[0] ?? null;
 }
+
+/**
+ * Normalizes updater-provided notes to one release. GitHub may return the whole notes
+ * file, while electron-updater may return a single release body; About should never
+ * render historical sections below the newest/main update.
+ */
+export function latestNotesFrom(markdown: string, version = ""): ReleaseSection | null {
+  const body = markdown.trim();
+  if (!body) return null;
+  const remote = sections(body);
+  if (remote.length === 0) {
+    return { version: version.trim().replace(/^v/i, ""), body };
+  }
+  const wanted = version.trim().replace(/^v/i, "");
+  return remote.find((entry) => entry.version === wanted) ?? remote[0];
+}

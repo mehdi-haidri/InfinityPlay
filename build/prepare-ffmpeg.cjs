@@ -78,6 +78,17 @@ exports.default = async function prepareFfmpeg(context) {
   fs.rmSync(destination, { recursive: true, force: true });
   fs.mkdirSync(destination, { recursive: true });
 
+  // Linux packages use the maintained ffmpeg/ffprobe supplied by the distribution.
+  // AppImage cannot install host packages, so its users install ffmpeg once themselves.
+  if (platform === "linux") {
+    fs.writeFileSync(
+      path.join(destination, "SYSTEM_FFMPEG_REQUIRED.txt"),
+      "InfinityPlay uses ffmpeg and ffprobe from the Linux system PATH.\n",
+    );
+    console.log("  • Linux uses system ffmpeg/ffprobe; no static binaries bundled");
+    return;
+  }
+
   // --- FFmpeg (from @rse/ffmpeg) ---
   const ffmpegSource = resolveFFmpeg(platform, arch);
   if (!ffmpegSource || !fs.existsSync(ffmpegSource)) {

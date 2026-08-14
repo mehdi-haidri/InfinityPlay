@@ -1,10 +1,8 @@
 /**
  * Locates the FFmpeg and FFprobe binaries.
  *
- * Packaged builds ship their own under `resources/bin`, so downloads and Live TV work
- * without the user installing anything. The lookup still falls back to a development
- * install and then to the bare command name, which keeps a `PATH` install working — and
- * matters when a platform build could not bundle one.
+ * Windows and macOS packages ship their own tools under `resources/bin`. Linux always
+ * uses the maintained `ffmpeg` and `ffprobe` installed by the distribution on `PATH`.
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -24,20 +22,27 @@ type Tool = "ffmpeg" | "ffprobe";
 const resolved = new Map<Tool, string>();
 
 function locate(tool: Tool): string {
-  // Use @rse/ffmpeg binary for both ffmpeg and ffprobe lookups to prevent legacy ffprobe crashes.
-  const targetTool = "ffmpeg";
-  const executable = process.platform === "win32" ? `${targetTool}.exe` : targetTool;
+  const executable = process.platform === "win32" ? `${tool}.exe` : tool;
+
+  // Never run the obsolete Linux static binaries shipped by the npm packages. Current
+  // distribution builds receive security/codec fixes and support current kernels.
+  if (process.platform === "linux") return executable;
 
   // Shipped with the app. `process.resourcesPath` is only meaningful once packaged.
   if (app.isPackaged) {
     const bundled = path.join(process.resourcesPath, "bin", executable);
     if (fs.existsSync(bundled)) return bundled;
   } else {
-    // Development: resolve from the modern @rse/ffmpeg package.
+    // Development on Windows/macOS: resolve each tool from its own package.
     try {
       const require = createRequire(import.meta.url);
-      const FFmpeg = require("@rse/ffmpeg") as { supported: boolean; binary: string };
-      if (FFmpeg.supported && fs.existsSync(FFmpeg.binary)) return FFmpeg.binary;
+      if (tool === "ffmpeg") {
+        const FFmpeg = require("@rse/ffmpeg") as { supported: boolean; binary: string };
+        if (FFmpeg.supported && fs.existsSync(FFmpeg.binary)) return FFmpeg.binary;
+      } else {
+        const FFprobe = require("@ffprobe-installer/ffprobe") as { path: string };
+        if (FFprobe.path && fs.existsSync(FFprobe.path)) return FFprobe.path;
+      }
     } catch {
       // Not installed; fall through to PATH.
     }
@@ -46,7 +51,7 @@ function locate(tool: Tool): string {
   return executable;
 }
 
-/** Absolute path to the bundled binary, or the bare name when relying on `PATH`. */
+/** Absolute path to a bundled binary, or the bare command name when relying on `PATH`. */
 export function toolPath(tool: Tool): string {
   const cached = resolved.get(tool);
   if (cached) return cached;

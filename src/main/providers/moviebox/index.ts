@@ -1,7 +1,7 @@
 /**
  * The MovieBox facade the IPC layer talks to: raw client + adapters + a small TTL cache.
  */
-import { DEFAULT_CONFIG, HIDDEN_AUDIO_LANGUAGES } from "@shared/types";
+import { DEFAULT_CONFIG } from "@shared/types";
 import type {
   AppConfig,
   AudioVariant,
@@ -189,16 +189,9 @@ export class MovieBoxService {
     return this.cached(`variants:${trimmed.toLowerCase()}:${mediaType}`, async () => {
       await this.client.init();
       const payload = await this.client.search(trimmed, 1);
-      const all = searchToAudioVariants(payload, trimmed, mediaType).map(
+      return searchToAudioVariants(payload, trimmed, mediaType).map(
         ({ language, subjectId, rawTitle }) => ({ language, subjectId, rawTitle }),
       );
-
-      // Regional dubs are hidden from the switcher, but never at the cost of leaving a
-      // title with no audio at all.
-      const kept = all.filter(
-        (variant) => !HIDDEN_AUDIO_LANGUAGES.includes(variant.language as never),
-      );
-      return kept.length > 0 ? kept : all;
     });
   }
 

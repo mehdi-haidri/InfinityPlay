@@ -26,6 +26,8 @@ import {
   X,
 } from "lucide-react";
 import {
+  preferredAudioLanguage,
+  preferredAudioOrder,
   SUBTITLE_COLORS,
   SUBTITLE_FONT_FAMILIES,
   SUBTITLE_EDGE_STYLES,
@@ -46,6 +48,29 @@ interface VttCue {
   start: number;
   end: number;
   text: string;
+}
+
+interface PlayerAudioTrack {
+  id: string;
+  label: string;
+  language: string;
+}
+
+/** Keep only English, Arabic, and French manifest tracks, without losing engine indexes. */
+function supportedAudioTracks(tracks: PlayerAudioTrack[]): PlayerAudioTrack[] {
+  return tracks.filter((track) =>
+    preferredAudioLanguage(`${track.language} ${track.label}`) !== null,
+  );
+}
+
+function preferredTrack(tracks: PlayerAudioTrack[], preferred: string): PlayerAudioTrack | null {
+  for (const language of preferredAudioOrder(preferred)) {
+    const match = tracks.find(
+      (track) => preferredAudioLanguage(`${track.language} ${track.label}`) === language,
+    );
+    if (match) return match;
+  }
+  return null;
 }
 
 function parseVttTime(timeStr: string): number {
@@ -223,7 +248,7 @@ export function Player() {
   const subPosition = config.subtitlePosition === "top" ? 28 : config.subtitlePosition === "middle" ? 54 : 86;
   const [videoFit, setVideoFit] = useState<VideoFit>("contain");
   const [sleepMinutes, setSleepMinutes] = useState(0);
-  const [audioTracks, setAudioTracks] = useState<Array<{ id: string; label: string; language: string }>>([]);
+  const [audioTracks, setAudioTracks] = useState<PlayerAudioTrack[]>([]);
   const [selectedAudioId, setSelectedAudioId] = useState("auto");
 
   const cues = useMemo(() => {
@@ -608,17 +633,23 @@ export function Player() {
       hlsRef.current = hls;
       hls.attachMedia(video);
       hls.loadSource(sourceUrl);
-      const syncHlsAudio = () => {
-        const tracks = hls.audioTracks.map((track, index) => ({
+      const syncHlsAudio = (applyPreference: boolean) => {
+        const tracks = supportedAudioTracks(hls.audioTracks.map((track, index) => ({
           id: `hls:${index}`,
           label: track.name || track.lang || `Audio ${index + 1}`,
           language: track.lang || "und",
-        }));
+        })));
+        const wanted = preferredTrack(tracks, config.preferredAudio);
+        if (applyPreference && wanted) {
+          const wantedIndex = Number(wanted.id.split(":")[1]);
+          if (hls.audioTrack !== wantedIndex) hls.audioTrack = wantedIndex;
+        }
         setAudioTracks(tracks);
-        setSelectedAudioId(hls.audioTrack >= 0 ? `hls:${hls.audioTrack}` : "auto");
+        const selected = `hls:${hls.audioTrack}`;
+        setSelectedAudioId(tracks.some((track) => track.id === selected) ? selected : (wanted?.id ?? "auto"));
       };
-      hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, syncHlsAudio);
-      hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, syncHlsAudio);
+      hls.on(Hls.Events.AUDIO_TRACKS_UPDATED, () => syncHlsAudio(true));
+      hls.on(Hls.Events.AUDIO_TRACK_SWITCHED, () => syncHlsAudio(false));
       hls.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return;
         if (data.type === Hls.ErrorTypes.NETWORK_ERROR && networkRetries < 2) {
@@ -735,13 +766,22 @@ export function Player() {
       player.on(MediaPlayer.events.STREAM_INITIALIZED, () => {
         const tracks = (player.getTracksFor("audio") ?? []) as any[];
         const currentTrack = player.getCurrentTrackFor("audio") as any;
-        setAudioTracks(tracks.map((track, index) => ({
+        const supported = supportedAudioTracks(tracks.map((track, index) => ({
           id: `dash:${index}`,
           label: track.labels?.[0]?.text || track.lang || `Audio ${index + 1}`,
           language: track.lang || "und",
         })));
-        const selectedIndex = tracks.findIndex((track) => track === currentTrack || track.id === currentTrack?.id);
-        setSelectedAudioId(selectedIndex >= 0 ? `dash:${selectedIndex}` : "auto");
+        const wanted = preferredTrack(supported, config.preferredAudio);
+        const wantedIndex = wanted ? Number(wanted.id.split(":")[1]) : -1;
+        if (wantedIndex >= 0 && tracks[wantedIndex] !== currentTrack) {
+          player.setCurrentTrack(tracks[wantedIndex]);
+        }
+        const selectedIndex = wantedIndex >= 0
+          ? wantedIndex
+          : tracks.findIndex((track) => track === currentTrack || track.id === currentTrack?.id);
+        setAudioTracks(supported);
+        const selected = `dash:${selectedIndex}`;
+        setSelectedAudioId(supported.some((track) => track.id === selected) ? selected : "auto");
       });
       player.initialize(media, manifestUrl, true);
       media.play().catch(() => setPlaying(false));
@@ -755,7 +795,7 @@ export function Player() {
       dashRef.current?.destroy();
       dashRef.current = null;
     };
-  }, [sourceUrl, request?.live, isNativeAndroidPlayer, notify]);
+  }, [sourceUrl, request?.live, isNativeAndroidPlayer, notify, config.preferredAudio]);
 
   useEffect(() => {
     if (sleepMinutes <= 0 || !request) return;

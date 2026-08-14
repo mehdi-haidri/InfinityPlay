@@ -4,7 +4,9 @@
  */
 import {
   AUDIO_LANGUAGES,
+  isAllowedCatalogAudio,
   ORIGINAL_AUDIO,
+  preferredAudioOrder,
   SUBTITLE_LANGUAGES,
   type CatalogItem,
   type HomePage,
@@ -147,17 +149,17 @@ export function subjectToCatalogItem(subject: Json): CatalogItem | null {
  */
 export function dedupeCatalogItems(
   items: CatalogItem[],
-  preferredAudio: string = ORIGINAL_AUDIO,
+  preferredAudio: string = "English",
 ): CatalogItem[] {
+  const order = [...preferredAudioOrder(preferredAudio), ORIGINAL_AUDIO];
   const rank = (item: CatalogItem): number => {
-    if (item.audioLanguage === preferredAudio) return 0;
-    if (item.audioLanguage === ORIGINAL_AUDIO) return 1;
-    return 2;
+    const index = order.indexOf(item.audioLanguage as (typeof order)[number]);
+    return index === -1 ? order.length : index;
   };
 
   const output: CatalogItem[] = [];
 
-  for (const item of items) {
+  for (const item of items.filter((candidate) => isAllowedCatalogAudio(candidate.audioLanguage))) {
     const existingById = output.findIndex((candidate) => candidate.id === item.id);
     if (existingById !== -1) {
       if (item.season > output[existingById].season) {
@@ -255,7 +257,7 @@ export function searchToAudioVariants(
   }
 
   // Original first, then alphabetical, so the list does not reshuffle between titles.
-  return [...byLanguage.values()].sort((a, b) => {
+  return [...byLanguage.values()].filter((variant) => isAllowedCatalogAudio(variant.language)).sort((a, b) => {
     if (a.language === ORIGINAL_AUDIO) return -1;
     if (b.language === ORIGINAL_AUDIO) return 1;
     return a.language.localeCompare(b.language);

@@ -6,7 +6,7 @@ import { formatBytes } from "../lib/format";
 import { Spinner } from "../components/States";
 import { PageHeader } from "../components/PageHeader";
 import { ReleaseNotes } from "../components/ReleaseNotes";
-import { newestNotes, notesForVersion } from "../lib/releaseNotes";
+import { latestNotesFrom, newestNotes, notesForVersion } from "../lib/releaseNotes";
 import { useApp } from "../store";
 
 /** lucide dropped its brand icons in v1, so the GitHub mark is drawn locally. */
@@ -126,9 +126,10 @@ export function AboutPage() {
    */
   const incomingNotes = "notes" in status && status.notes ? status.notes : null;
   const incomingVersion = "version" in status && incomingNotes ? status.version : null;
+  const incoming = incomingNotes ? latestNotesFrom(incomingNotes, incomingVersion ?? "") : null;
   const installed = info ? notesForVersion(info.version) ?? newestNotes() : newestNotes();
-  const shownNotes = incomingNotes ?? installed?.body ?? null;
-  const shownVersion = incomingVersion ?? installed?.version ?? info?.version ?? "";
+  const shownNotes = incoming?.body ?? installed?.body ?? null;
+  const shownVersion = incoming?.version || installed?.version || info?.version || "";
 
   return (
     <div className="page page-narrow">
@@ -146,17 +147,17 @@ export function AboutPage() {
             alt={`Portrait of ${author.name}`}
             referrerPolicy="no-referrer"
           />
-          <div className="min-width-zero">
+          <div className="min-width-zero about-copy">
             <div className="about-name">{author.name}</div>
             <div className="setting-hint about-role">
               {author.role}
             </div>
-            <div className="inline-actions inline-actions-wrap" style={{ marginTop: 8 }}>
-              <button className="btn btn-sm" onClick={() => open(author.github)}>
-                <GitHubMark size={15} /> {author.githubHandle}
+            <div className="inline-actions inline-actions-wrap about-contact-actions">
+              <button className="btn btn-sm about-contact" onClick={() => open(author.github)}>
+                <GitHubMark size={15} /> <span>{author.githubHandle}</span>
               </button>
-              <button className="btn btn-sm" onClick={() => open(`mailto:${author.email}`)}>
-                <Mail size={15} /> {author.email}
+              <button className="btn btn-sm about-contact" onClick={() => open(`mailto:${author.email}`)}>
+                <Mail size={15} /> <span>{author.email}</span>
               </button>
             </div>
           </div>

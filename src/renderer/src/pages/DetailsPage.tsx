@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { AudioLines, Captions, Download, Heart, Play, Star, Trash2 } from "lucide-react";
 import {
-  HIDDEN_AUDIO_LANGUAGES,
+  isAllowedCatalogAudio,
   ORIGINAL_AUDIO,
+  preferredAudioOrder,
   SUBTITLE_OFF,
   type AudioVariant,
   type MediaDetails,
@@ -96,9 +97,10 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
     // out upstream, so a title whose only listed track is the original still arrives
     // here as a single-entry list while the viewed subject is the dub.
     if (!media || !options || options.length === 0) return;
-    if (media.audioLanguage === preferredAudio) return;
-
-    const target = options.find((variant) => variant.language === preferredAudio);
+    const order = [...preferredAudioOrder(preferredAudio), ORIGINAL_AUDIO];
+    const target = order
+      .map((language) => options.find((variant) => variant.language === language))
+      .find(Boolean);
     if (!target || target.subjectId === media.id) return;
 
     // Replace rather than push: Back should return to where the user came from, not to
@@ -180,21 +182,32 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
   if (details.error)
     return <div className="page"><ErrorState message={details.error} onRetry={details.reload} /></div>;
   if (!details.data) return <div className="page"><EmptyState title="Title unavailable" /></div>;
+  if (
+    !isAllowedCatalogAudio(details.data.audioLanguage) &&
+    !variants.loading &&
+    (variants.data?.length ?? 0) === 0
+  ) {
+    return (
+      <div className="page">
+        <EmptyState
+          title="Supported audio unavailable"
+          body="This catalog entry has no English, Arabic, French, or undubbed release."
+        />
+      </div>
+    );
+  }
 
   const media = details.data;
   const isFavorite = favorites.some((entry) => entry.id === media.id);
   const activeSeason = media.seasons.find((entry) => entry.number === season) ?? media.seasons[0];
   const resume = findProgress(watchHistory, id, isSeries ? season : 0, isSeries ? episode : 0);
 
-  // The subject being viewed is offered even if the variant search missed it — but not
-  // when it is a hidden regional dub and a listed track exists, or the switcher would
-  // advertise the very dubs the catalog filter removes.
+  // The subject being viewed is offered only when it is part of the supported policy;
+  // direct links to Hindi or another removed dub can never leak back into the switcher.
   const audioTracks: AudioVariant[] = (() => {
     const found = variants.data ?? [];
     if (found.some((variant) => variant.subjectId === media.id)) return found;
-    if (found.length > 0 && HIDDEN_AUDIO_LANGUAGES.includes(media.audioLanguage as never)) {
-      return found;
-    }
+    if (!isAllowedCatalogAudio(media.audioLanguage)) return found;
     return [
       { language: media.audioLanguage, subjectId: media.id, rawTitle: media.rawTitle },
       ...found,

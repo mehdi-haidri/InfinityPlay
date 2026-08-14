@@ -10,7 +10,10 @@ export function detectDeviceProfile(): DeviceProfile {
   const nativeAndroid = /Android/i.test(navigator.userAgent) && Boolean((window as any).Capacitor?.isNativePlatform?.());
   const shortestSide = Math.min(window.innerWidth, window.innerHeight);
 
-  if ((nativeAndroid || coarse) && shortestSide < 600) return "phone";
+  // Width is authoritative for the phone shell. Pointer media queries can report
+  // `fine` in emulators, desktop touch devices, and automated checks; leaving those in
+  // the desktop shell squeezes content beside the sidebar at real phone widths.
+  if (shortestSide < 600) return "phone";
   if ((nativeAndroid || coarse) && shortestSide < 1100) return "tablet";
   return "desktop";
 }

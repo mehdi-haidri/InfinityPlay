@@ -9,6 +9,7 @@ import { app } from "electron";
 import {
   DEFAULT_CONFIG,
   DEFAULT_PLAYLISTS,
+  preferredAudioLanguage,
   type AppConfig,
   type PlaylistSource,
   type DownloadRecord,
@@ -80,6 +81,9 @@ function withDefaultPlaylists(stored: PlaylistSource[]): PlaylistSource[] {
 const configFile = new JsonFile<AppConfig>("config.json", DEFAULT_CONFIG, (raw) => ({
   ...DEFAULT_CONFIG,
   ...(raw as Partial<AppConfig>),
+  // Older builds stored "Original" (or another removed dub) here. Media manifests use
+  // language tags, and English is now the explicit fallback when that value is stale.
+  preferredAudio: preferredAudioLanguage((raw as Partial<AppConfig>)?.preferredAudio) ?? "English",
   playlists: Array.isArray((raw as AppConfig)?.playlists)
     ? withDefaultPlaylists((raw as AppConfig).playlists)
     : DEFAULT_CONFIG.playlists,
@@ -91,8 +95,11 @@ const historyFile = new JsonFile<WatchHistoryItem[]>("history.json", [], (raw) =
 
 export const getConfig = (): AppConfig => configFile.read();
 
-export const updateConfig = (patch: Partial<AppConfig>): AppConfig =>
-  configFile.write({ ...configFile.read(), ...patch });
+export const updateConfig = (patch: Partial<AppConfig>): AppConfig => {
+  const next = { ...configFile.read(), ...patch };
+  next.preferredAudio = preferredAudioLanguage(next.preferredAudio) ?? "English";
+  return configFile.write(next);
+};
 
 export const getHistory = (): WatchHistoryItem[] =>
   [...historyFile.read()].sort((a, b) => b.timestamp - a.timestamp);

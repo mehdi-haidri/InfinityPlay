@@ -11,13 +11,15 @@ const sourceIcon = path.join(root, 'build', 'icon.png');
 const androidRes = path.join(root, 'android', 'app', 'src', 'main', 'res');
 
 let ffmpegBin = 'ffmpeg';
-try {
-  const FFmpeg = require('@rse/ffmpeg');
-  if (FFmpeg.supported && fs.existsSync(FFmpeg.binary)) {
-    ffmpegBin = FFmpeg.binary;
+if (process.platform !== 'linux') {
+  try {
+    const FFmpeg = require('@rse/ffmpeg');
+    if (FFmpeg.supported && fs.existsSync(FFmpeg.binary)) {
+      ffmpegBin = FFmpeg.binary;
+    }
+  } catch (e) {
+    // fallback to PATH
   }
-} catch (e) {
-  // fallback to PATH
 }
 
 function resizeImage(input, output, width, height) {

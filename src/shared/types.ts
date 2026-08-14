@@ -38,25 +38,43 @@ export const AUDIO_LANGUAGES = [
   "Dubbed",
 ] as const;
 
-/** Tracks offered as a preference. Detection still recognises the rest. */
-export const AUDIO_PREFERENCES = [ORIGINAL_AUDIO, "English", "French", "Spanish", "Arabic"] as const;
-
 /**
- * Dubs kept out of the per-title switcher. They are still detected, still de-duplicated
- * against, and still shown when a title exists in no other track — hiding the only
- * available audio would make the title unplayable.
+ * Audio languages InfinityPlay intentionally offers. English is the default and fallback;
+ * Arabic and French remain available when a source publishes them. Catalog detection still
+ * recognises every marker above so unsupported dubs can be removed instead of being mistaken
+ * for an original release.
  */
-export const HIDDEN_AUDIO_LANGUAGES = [
-  "Hindi",
-  "Tamil",
-  "Telugu",
-  "Malayalam",
-  "Kannada",
-  "Bengali",
-  "Marathi",
-  "Punjabi",
-  "Urdu",
-] as const;
+export const AUDIO_PREFERENCES = ["English", "Arabic", "French"] as const;
+
+export type PreferredAudioLanguage = (typeof AUDIO_PREFERENCES)[number];
+
+/** Converts manifest codes and human labels to one of the three supported languages. */
+export function preferredAudioLanguage(value: string | null | undefined): PreferredAudioLanguage | null {
+  const normalized = String(value ?? "").trim().toLowerCase().replace(/_/g, "-");
+  if (/^(en|eng)(-|\s|$)/.test(normalized) || /\benglish\b/.test(normalized)) return "English";
+  if (/^(ar|ara)(-|\s|$)/.test(normalized) || /\barabic\b/.test(normalized)) return "Arabic";
+  if (/^(fr|fra|fre)(-|\s|$)/.test(normalized) || /\bfrench\b/.test(normalized)) return "French";
+  return null;
+}
+
+/** Supported language names in selection order, with English as the universal fallback. */
+export function preferredAudioOrder(preferred: string | null | undefined): PreferredAudioLanguage[] {
+  const names: PreferredAudioLanguage[] = ["English", "Arabic", "French"];
+  const selected = preferredAudioLanguage(preferred) ?? "English";
+  return [selected, ...names.filter((name) => name !== selected)];
+}
+
+/** BCP-47 tags in selection order, for HLS/DASH/Media3 track selectors. */
+export function preferredAudioTags(preferred: string | null | undefined): string[] {
+  return preferredAudioOrder(preferred).map(
+    (name) => ({ English: "en", Arabic: "ar", French: "fr" })[name],
+  );
+}
+
+/** Original/undubbed entries stay usable; explicit dubs are limited to the supported set. */
+export function isAllowedCatalogAudio(language: string): boolean {
+  return language === ORIGINAL_AUDIO || preferredAudioLanguage(language) !== null;
+}
 
 /**
  * Countries the catalog can be scoped to. MovieBox's default operating feed is heavily
@@ -512,7 +530,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   theme: "midnight",
   catalogCountry: "United States",
   hideAdultContent: true,
-  preferredAudio: ORIGINAL_AUDIO,
+  preferredAudio: "English",
   preferredSubtitle: SUBTITLE_OFF,
   defaultResolution: 0,
   autoplayNext: true,

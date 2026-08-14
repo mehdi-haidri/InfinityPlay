@@ -1,6 +1,6 @@
 # InfinityPlay
 
-[![Release](https://github.com/scorpionTaj/InfinityPlay/actions/workflows/release.yml/badge.svg)](https://github.com/scorpionTaj/InfinityPlay/actions/workflows/release.yml)
+[![Release](https://github.com/ELhadratiOth/InfinityPlay/actions/workflows/release.yml/badge.svg)](https://github.com/ELhadratiOth/InfinityPlay/actions/workflows/release.yml)
 
 A desktop app for finding and streaming movies, TV shows, anime and live TV, with an
 in-app player, offline downloads and configurable subtitles.
@@ -36,6 +36,10 @@ All Linux packages currently target x64 systems.
 ```bash
 # Portable package: no installation required
 chmod +x InfinityPlay-*-linux-x64.AppImage
+# AppImage cannot install host dependencies; install FFmpeg first:
+# Fedora: sudo dnf install ffmpeg
+# Ubuntu/Debian: sudo apt install ffmpeg
+# Arch: sudo pacman -S ffmpeg
 ./InfinityPlay-*-linux-x64.AppImage
 
 # Debian, Ubuntu, Linux Mint
@@ -48,6 +52,11 @@ sudo dnf install ./InfinityPlay-*-linux-x64.rpm
 sudo pacman -U ./InfinityPlay-*-linux-x64.pkg.tar.zst
 ```
 
+DEB, RPM, and Arch packages declare `ffmpeg` as an installation dependency; it also
+provides `ffprobe`. InfinityPlay uses these maintained distribution tools on Linux and
+does not ship obsolete static Linux binaries. AppImage users install FFmpeg once because
+the portable format cannot install host packages.
+
 ### Android phones, tablets, and TV
 
 The same universal APK adapts to touch phones, tablets, and D-pad Android TV devices.
@@ -59,14 +68,14 @@ from the TV apps row. The TV interface requires only D-pad, Select, and Back.
 Release APKs are signed. Android accepts an update over an existing installation only when
 both APKs use the same signing key; keep that key private and backed up.
 
-Installed Windows and supported Linux packages can update from GitHub Releases through
-the About page.
+Installed Windows builds and AppImages can update from GitHub Releases through About.
+DEB, RPM, and Arch builds are updated through their package manager.
 
 ## FFmpeg
 
-**Nothing to install.** Every package ships FFmpeg and FFprobe for its own platform and
-architecture, in `resources/bin` beside the app. A copy already on your `PATH` is used only
-when the bundled one is missing.
+Windows and macOS packages ship FFmpeg and FFprobe beside the app. Linux intentionally
+uses `ffmpeg` and `ffprobe` from the system `PATH`; install the distro package shown above
+when using AppImage. The DEB, RPM, and Arch installers request it automatically.
 
 They are needed for:
 
@@ -77,12 +86,8 @@ They are needed for:
 - **Live TV and downloads** whose MPEG-2 or HEVC video Chromium cannot decode directly.
 - **Player timeline thumbnails**, generated on demand and cached in memory.
 
-This is why the installers are larger than a typical Electron app: the two binaries add
-roughly 140 MB before compression.
-
-If a build ever ships without them, the app falls back to `PATH` and, when nothing is
-found, says so instead of failing silently — adaptive downloads are marked as unavailable
-and a season download takes the best direct file instead.
+When the tools are unavailable, adaptive downloads are marked as unavailable and a season
+download takes the best direct file instead of failing silently.
 Cast profiles use the MovieBox catalog for verified credits and may request an optional
 English biography from Wikipedia; movies and series still appear if that service is offline.
 
@@ -247,8 +252,7 @@ Worth knowing before debugging something that "returns nothing":
 MIT. Catalog and stream data come from a third-party API; this is an unofficial client and
 is not affiliated with or endorsed by its operators.
 
-The packages bundle unmodified FFmpeg binaries, which carry their own licence (GPL/LGPL
-depending on the build) and remain the work of the [FFmpeg project](https://ffmpeg.org).
-They are shipped as separate executables and run as child processes, not linked into the
-app. Their source is available from the FFmpeg project and from the
-[@rse/ffmpeg](https://github.com/rse/ffmpeg) package the builds take them from.
+Windows and macOS packages bundle unmodified FFmpeg binaries, which carry their own
+licence (GPL/LGPL depending on the build) and remain the work of the
+[FFmpeg project](https://ffmpeg.org). They run as separate child processes, not linked
+into the app. Linux uses the distribution's separately installed FFmpeg package.

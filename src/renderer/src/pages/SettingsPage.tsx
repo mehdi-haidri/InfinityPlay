@@ -3,7 +3,6 @@ import { FolderOpen, Plus, RotateCw, Trash2 } from "lucide-react";
 import {
   AUDIO_PREFERENCES,
   CATALOG_COUNTRIES,
-  ORIGINAL_AUDIO,
   SUBTITLE_COLORS,
   SUBTITLE_FONT_FAMILIES,
   SUBTITLE_EDGE_STYLES,
@@ -225,8 +224,8 @@ export function SettingsPage() {
           <div>
             <div className="setting-label">Preferred audio</div>
             <div className="setting-hint">
-              Many titles are published once per dub. This picks which one search and the
-              home rows land on; every title still has a per-title audio switcher.
+              English is the fallback. Arabic and French are used when selected and
+              available; Hindi and other dubbed variants are excluded.
             </div>
           </div>
           <select
@@ -236,7 +235,7 @@ export function SettingsPage() {
           >
             {AUDIO_PREFERENCES.map((language) => (
               <option key={language} value={language}>
-                {language === ORIGINAL_AUDIO ? "Original (undubbed)" : language}
+                {language}
               </option>
             ))}
           </select>

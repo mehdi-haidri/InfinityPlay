@@ -129,29 +129,28 @@ function probeMedia(source: string): Promise<{ codec: string; duration: number }
     const timer = setTimeout(() => finish("", 0), PROBE_TIMEOUT_MS);
 
     try {
-      child = spawn(toolPath("ffmpeg"), [
-        "-hide_banner", "-loglevel", "info",
+      child = spawn(toolPath("ffprobe"), [
+        "-v", "error",
         "-rw_timeout", "5000000",
-        "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
-        "-i", source,
-      ], { stdio: ["ignore", "ignore", "pipe"] });
+        "-show_entries", "stream=codec_name,codec_type:format=duration",
+        "-of", "json",
+        source,
+      ], { stdio: ["ignore", "pipe", "ignore"] });
 
       const chunks: Buffer[] = [];
-      child.stderr?.on("data", (chunk: Buffer) => chunks.push(chunk));
+      child.stdout?.on("data", (chunk: Buffer) => chunks.push(chunk));
       child.once("error", () => finish("", 0));
       child.once("close", () => {
-        const output = Buffer.concat(chunks).toString("utf8");
-        const durationMatch = output.match(/Duration:\s*(\d+):(\d+):([\d.]+)/i);
-        let duration = 0;
-        if (durationMatch) {
-          duration =
-            parseFloat(durationMatch[1]) * 3600 +
-            parseFloat(durationMatch[2]) * 60 +
-            parseFloat(durationMatch[3]);
+        try {
+          const output = JSON.parse(Buffer.concat(chunks).toString("utf8")) as {
+            streams?: { codec_name?: string; codec_type?: string }[];
+            format?: { duration?: string };
+          };
+          const video = output.streams?.find((stream) => stream.codec_type === "video");
+          finish(video?.codec_name ?? "", Number(output.format?.duration ?? 0) || 0);
+        } catch {
+          finish("", 0);
         }
-        const videoMatch = output.match(/Video:\s*([a-zA-Z0-9_]+)/i);
-        const codec = videoMatch ? videoMatch[1] : "";
-        finish(codec, duration);
       });
     } catch {
       finish("", 0);
