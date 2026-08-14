@@ -3,7 +3,10 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="description" content="InfinityPlay desktop media discovery, playback, downloads, and live TV." />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- `viewport-fit=cover` is what makes `env(safe-area-inset-*)` resolve to anything but 0.
+         targetSdk 36 forces edge-to-edge on Android, so without it the bottom nav renders
+         under the gesture bar and the topbar under the status bar. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta
       http-equiv="Content-Security-Policy"
       content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' https: data: blob:; media-src 'self' https: http: data: blob: ipmedia: iptranscode:; connect-src 'self' https: http: ipmedia: iptranscode:; font-src 'self' data:;"

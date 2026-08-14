@@ -29,6 +29,8 @@ export type Route =
   | { name: "favorites" }
   | { name: "settings" }
   | { name: "downloads" }
+  /** Phone-only hub for the destinations that do not fit in the bottom bar. */
+  | { name: "more" }
   | { name: "about" };
 
 export interface PlayerRequest {

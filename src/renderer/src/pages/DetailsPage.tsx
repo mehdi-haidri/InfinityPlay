@@ -374,35 +374,50 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
             </div>
           )}
 
-          <div style={{ display: "flex", gap: 10 }}>
+          {/* Phones collapse everything but Play to its icon; the labels live on as the accessible
+              name and the tooltip, so nothing is lost with the text. */}
+          <div className="detail-actions">
             <button
               className="btn btn-primary"
               disabled={!preferred}
               onClick={() => preferred && play(preferred)}
             >
               {releases.loading ? <Spinner /> : <Play size={17} fill="currentColor" />}
-              {resume && resume.position > 30 ? "Resume" : "Play"}
-              {preferred ? ` · ${qualityLabel(preferred.resolution)}` : ""}
+              <span className="btn-label">
+                {resume && resume.position > 30 ? "Resume" : "Play"}
+                {preferred ? ` · ${qualityLabel(preferred.resolution)}` : ""}
+              </span>
             </button>
             <button
               className="btn"
               disabled={!preferred}
               onClick={() => preferred && download(preferred)}
+              aria-label="Download"
+              title="Download"
             >
-              <Download size={17} /> Download
+              <Download size={17} />
+              <span className="btn-label">Download</span>
             </button>
             <button
-              className="btn btn-ghost"
+              className="btn btn-ghost btn-compact"
               data-active={isFavorite || undefined}
               onClick={() => void toggleFavorite(media)}
               aria-pressed={isFavorite}
+              aria-label={isFavorite ? "Remove from favorites" : "Add to favorites"}
+              title={isFavorite ? "Remove from favorites" : "Add to favorites"}
             >
               <Heart size={17} fill={isFavorite ? "currentColor" : "none"} />
-              {isFavorite ? "Favorited" : "Favorite"}
+              <span className="btn-label">{isFavorite ? "Favorited" : "Favorite"}</span>
             </button>
             {watchHistory.some((entry) => entry.subjectId === id) && (
-              <button className="btn btn-ghost" onClick={() => void forgetTitle(id)}>
-                <Trash2 size={16} /> Remove progress
+              <button
+                className="btn btn-ghost btn-compact"
+                onClick={() => void forgetTitle(id)}
+                aria-label="Remove progress"
+                title="Remove progress"
+              >
+                <Trash2 size={16} />
+                <span className="btn-label">Remove progress</span>
               </button>
             )}
           </div>

@@ -229,6 +229,44 @@ button {
   color: var(--accent);
 }
 
+/* The glyph wrapper exists so phones can draw a pill behind the icon and hang a badge off it.
+   On every other profile it is an inert box the icon sits in. */
+.nav-item-glyph {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.nav-item-glyph::before {
+  content: "";
+  position: absolute;
+  inset: -6px -15px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  opacity: 0;
+  transform: scale(0.72);
+  transition: opacity 160ms var(--ease), transform 200ms var(--ease);
+}
+
+/* Unread-style marker: a download is running and the user is looking somewhere else. */
+.nav-item-dot {
+  position: absolute;
+  top: -2px;
+  right: -4px;
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 2px var(--bg-elevated);
+}
+
+/* Both are phone-only: the full sidebar already lists every destination by its full name. */
+.nav-item-more,
+.nav-label-short {
+  display: none;
+}
+
 .nav-section {
   margin: 18px 0 6px;
   padding: 0 12px;
@@ -340,6 +378,9 @@ button {
 .search {
   position: relative;
   flex: 1;
+  /* Without this the input's intrinsic minimum (~180px) keeps the field from shrinking, and
+     the topbar overflows its own width on narrow screens. */
+  min-width: 0;
   max-width: 560px;
 }
 
@@ -347,6 +388,7 @@ button {
   display: flex;
   align-items: center;
   gap: 10px;
+  min-width: 0;
   padding: 0 14px;
   height: 40px;
   background: var(--bg-panel);
@@ -361,6 +403,8 @@ button {
 
 .search-field input {
   flex: 1;
+  width: 100%;
+  min-width: 0;
   background: none;
   border: none;
   outline: none;
@@ -368,6 +412,18 @@ button {
 
 .search-field input::placeholder {
   color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.search-field > svg {
+  flex: none;
+}
+
+.search-field .icon-button {
+  width: 26px;
+  height: 26px;
+  margin-right: -4px;
 }
 
 .suggestions {
@@ -398,6 +454,14 @@ button {
   background: var(--bg-hover);
 }
 
+/* The title is the only elastic cell; without a clamp it pushes the year/type out of view. */
+.suggestion > span:not(.suggestion-meta) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .suggestion img,
 .suggestion-art {
   width: 30px;
@@ -409,9 +473,12 @@ button {
 }
 
 .suggestion-meta {
+  flex: none;
   color: var(--text-faint);
   font-size: 12px;
   margin-left: auto;
+  padding-left: 8px;
+  white-space: nowrap;
 }
 
 /* ── Content ───────────────────────────────────────────────────────────────── */
@@ -519,6 +586,9 @@ button {
   gap: 8px;
   text-align: left;
   width: 100%;
+  /* Chromium's UA button padding (1px 6px) was insetting the poster from the shell, which threw
+     the art out of line with the grid gutter and off the favourite overlay. */
+  padding: 0;
   transition: transform 180ms var(--ease);
 }
 
@@ -549,6 +619,62 @@ button {
 
 .card:hover {
   transform: translateY(-4px);
+}
+
+/* Matches `.card-art`'s box (same width, same 2/3 ratio) so the heart sits on the poster and not
+   over the title. Transparent to pointers except for the button itself. */
+.card-favorite-layer {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  pointer-events: none;
+}
+
+.card-favorite {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  pointer-events: auto;
+  color: #fff;
+  background: rgba(7, 9, 13, 0.6);
+  backdrop-filter: blur(8px);
+  transition:
+    background 160ms var(--ease),
+    color 160ms var(--ease),
+    transform 200ms var(--ease);
+}
+
+.card-favorite:hover {
+  background: rgba(7, 9, 13, 0.85);
+  transform: scale(1.08);
+}
+
+.card-favorite[data-active="true"] {
+  color: var(--accent);
+  background: rgba(7, 9, 13, 0.82);
+}
+
+/* A short pop on the press, so the toggle registers without a toast. */
+.card-favorite:active {
+  transform: scale(0.88);
+}
+
+.card-favorite[data-active="true"]:active {
+  animation: favorite-pop 320ms var(--ease);
+}
+
+@keyframes favorite-pop {
+  0% { transform: scale(0.88); }
+  55% { transform: scale(1.22); }
+  100% { transform: scale(1); }
 }
 
 .card-art {
@@ -810,6 +936,34 @@ button {
   border: 1px solid var(--border);
   transition: background 140ms var(--ease), border-color 140ms var(--ease),
     transform 140ms var(--ease);
+}
+
+.detail-actions {
+  display: flex;
+  /* One row: "Remove progress" only appears on resumable titles, and letting it wrap turns a
+     tidy action bar into two ragged lines. */
+  flex-wrap: nowrap;
+  /* Stretch, not center: once the secondary buttons lose their labels their intrinsic height
+     no longer matches the primary, and centring leaves them visibly short. */
+  align-items: stretch;
+  gap: 10px;
+}
+
+.detail-actions .btn {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* Play and Download carry their labels; the toggles do not. Four labelled buttons come to about
+   605px and the details column is 540px, so something has to give — dropping the labels on the
+   two that are recognisable as icons keeps the row on one line at any width. */
+.btn-compact {
+  width: 42px;
+  padding: 0;
+}
+
+.btn-compact .btn-label {
+  display: none;
 }
 
 .btn:hover:not(:disabled) {
@@ -2391,13 +2545,13 @@ select.input:focus {
   --layer-player: 100;
 }
 
+/* Longhands, not the `padding` shorthand: a shorthand carrying `var()` becomes a pending
+   substitution that wins over the later, more specific phone `padding-bottom`. */
 .app {
-  padding: var(--safe-top) var(--safe-right) var(--safe-bottom) var(--safe-left);
-}
-
-.nav-item-more,
-.mobile-more-backdrop {
-  display: none;
+  padding-top: var(--safe-top);
+  padding-right: var(--safe-right);
+  padding-bottom: var(--safe-bottom);
+  padding-left: var(--safe-left);
 }
 
 @media (hover: none) {
@@ -2412,16 +2566,18 @@ html[data-device="phone"] {
   --topbar-h: 60px;
 }
 
+/* The bottom bar is `64px + safe-bottom` tall, so reserving exactly that as padding leaves a
+   content box that ends at the bar's top edge — whatever the status-bar inset happens to be. */
 html[data-device="phone"] .app {
   display: block;
   height: 100dvh;
   min-height: 0;
-  padding-bottom: calc(68px + var(--safe-bottom));
+  padding-bottom: calc(64px + var(--safe-bottom));
   overflow: hidden;
 }
 
 html[data-device="phone"] .main {
-  height: calc(100dvh - 68px - var(--safe-bottom));
+  height: 100%;
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
@@ -2433,7 +2589,13 @@ html[data-device="phone"] .sidebar {
   position: fixed;
   z-index: var(--layer-nav);
   inset: auto 0 0;
-  width: 100%;
+  /* `width: 100%` here resolves against a stale containing block after a viewport change
+     (rotation, emulation), leaving the bar at the desktop rail width. Letting the left/right
+     insets size it re-resolves correctly every time. */
+  width: auto;
+  /* The desktop rail animates its width; on a full-bleed bar that only produces a visible
+     stretch on rotation. */
+  transition: none;
   height: calc(64px + var(--safe-bottom));
   padding: 4px max(6px, var(--safe-right)) var(--safe-bottom) max(6px, var(--safe-left));
   display: grid;
@@ -2447,13 +2609,14 @@ html[data-device="phone"] .sidebar {
   backdrop-filter: blur(20px);
 }
 
+/* Only the four primary destinations keep a tab; the rest are reachable through More. */
 html[data-device="phone"] .sidebar .brand,
 html[data-device="phone"] .sidebar-bottom,
-html[data-device="phone"] .sidebar .nav-item[data-mobile-secondary="true"] {
+html[data-device="phone"] .sidebar .nav-item:not([data-phone-tab]) {
   display: none;
 }
 
-html[data-device="phone"] .sidebar .nav-item,
+html[data-device="phone"] .sidebar .nav-item[data-phone-tab],
 html[data-device="phone"] .nav-item-more {
   display: flex;
   flex-direction: column;
@@ -2463,9 +2626,21 @@ html[data-device="phone"] .nav-item-more {
   min-width: 0;
   min-height: 54px;
   padding: 5px 2px;
-  border-radius: 10px;
+  border-radius: 12px;
   font-size: 10px;
+  font-weight: 500;
   text-align: center;
+}
+
+/* A filled pill behind the icon reads as "you are here" from a glance, which a colour change
+   alone does not manage at 18px. */
+html[data-device="phone"] .sidebar .nav-item[aria-current="page"] {
+  background: none;
+}
+
+html[data-device="phone"] .sidebar .nav-item[aria-current="page"] .nav-item-glyph::before {
+  opacity: 1;
+  transform: scale(1);
 }
 
 html[data-device="phone"] .sidebar .nav-label {
@@ -2476,38 +2651,163 @@ html[data-device="phone"] .sidebar .nav-label {
   text-overflow: ellipsis;
 }
 
-html[data-device="phone"] .mobile-more-backdrop {
-  position: fixed;
-  z-index: var(--layer-sheet);
-  inset: 0;
+/* Long names ("Free Library") get a phone-sized alias so tabs never ellipsis. */
+html[data-device="phone"] .sidebar .nav-label-short {
+  display: block;
+  font-size: 10px;
+  line-height: 1.05;
+}
+
+html[data-device="phone"] .sidebar .nav-label:has(+ .nav-label-short) {
+  display: none;
+}
+
+/* ── More hub ──────────────────────────────────────────────────────────────── */
+
+.more-page {
+  max-width: 720px;
+}
+
+.more-hero {
   display: flex;
-  align-items: flex-end;
-  padding: 16px 12px calc(76px + var(--safe-bottom));
-  background: rgba(3, 5, 9, 0.58);
-  backdrop-filter: blur(6px);
-}
-
-.mobile-more-menu {
-  width: 100%;
-  padding: 10px 12px 14px;
-  border: 1px solid var(--border-strong);
+  align-items: center;
+  gap: 14px;
+  margin: 10px 0 26px;
+  padding: 18px;
+  border: 1px solid var(--border);
   border-radius: 20px;
-  background: var(--bg-elevated);
-  box-shadow: var(--shadow-pop);
-  animation: slide-in 180ms var(--ease);
+  background:
+    radial-gradient(120% 160% at 0% 0%, var(--accent-soft), transparent 62%),
+    var(--bg-panel);
 }
 
-.mobile-more-handle {
-  width: 36px;
-  height: 4px;
-  margin: 0 auto 8px;
+.more-hero-mark {
+  width: 42px;
+  height: 42px;
+  flex: none;
+}
+
+.more-hero-text {
+  min-width: 0;
+}
+
+.more-hero-title {
+  font-size: 21px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.more-hero-meta {
+  margin-top: 3px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.more-group + .more-group {
+  margin-top: 26px;
+}
+
+.more-group-title {
+  margin: 0 0 10px 4px;
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.more-list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+.more-row {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  width: 100%;
+  min-height: 62px;
+  padding: 10px 14px;
+  text-align: left;
+  transition: background 140ms var(--ease);
+}
+
+.more-row + .more-row {
+  /* An inset rule, so the divider starts past the icon tile rather than cutting the card. */
+  box-shadow: inset 0 1px 0 var(--border);
+}
+
+.more-row:hover,
+.more-row:focus-visible {
+  background: var(--bg-hover);
+}
+
+.more-row:active {
+  background: var(--bg-hover);
+  transform: scale(0.995);
+}
+
+.more-row-icon {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex: none;
+  border-radius: 11px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.more-row[data-tone="system"] .more-row-icon {
+  background: var(--bg-hover);
+  color: var(--text-muted);
+}
+
+.more-row-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
+.more-row-label {
+  font-size: 14px;
+  font-weight: 550;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.more-row-hint {
+  color: var(--text-faint);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.more-row-badge {
+  flex: none;
+  min-width: 22px;
+  padding: 2px 7px;
   border-radius: 999px;
-  background: var(--border-strong);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 600;
+  text-align: center;
 }
 
-.mobile-more-title { padding: 4px 8px 10px; font-size: 17px; font-weight: 650; }
-.mobile-more-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 50px; padding: 0 12px; border-radius: 10px; color: var(--text-muted); text-align: left; }
-.mobile-more-item:active { background: var(--bg-hover); color: var(--text); transform: scale(0.99); }
+.more-row-chevron {
+  flex: none;
+  color: var(--text-faint);
+}
 
 html[data-device="phone"] .topbar { height: var(--topbar-h); padding: 0 14px; gap: 8px; }
 html[data-device="phone"] .topbar > .icon-button { width: 40px; height: 40px; }
@@ -2533,11 +2833,29 @@ html[data-device="phone"] .home-hero-skeleton {
   height: clamp(360px, 56dvh, 460px);
   margin: -68px -14px 24px;
 }
+/* The floating poster card has nowhere to go at this width, so on phones the poster becomes the
+   backdrop itself. Wide layouts blur it because a 2:3 image stretched to 21:9 is unusable; a
+   portrait phone hero is close enough to the poster's own ratio to show it sharp. */
 html[data-device="phone"] .hero-poster-wrap { display: none; }
 html[data-device="phone"] .hero-featured .hero-bg-poster {
-  inset: -8%;
-  background-position: 50% 22%;
-  filter: blur(18px) saturate(0.82) brightness(0.58);
+  inset: 0;
+  background-position: 50% 12%;
+  background-size: cover;
+  filter: none;
+  opacity: 1;
+  transform: none;
+}
+
+/* One bottom-weighted scrim instead of the desktop pair: the left-to-right gradient exists to
+   clear space beside the poster card, which is not on screen here. */
+html[data-device="phone"] .hero::after {
+  background: linear-gradient(
+    to top,
+    var(--bg) 2%,
+    rgba(8, 9, 13, 0.92) 22%,
+    rgba(8, 9, 13, 0.42) 52%,
+    rgba(8, 9, 13, 0.12) 78%
+  );
 }
 html[data-device="phone"] .hero-content { width: 100%; max-width: 100%; padding: 0 16px 52px; }
 html[data-device="phone"] .hero-title {
@@ -2549,6 +2867,32 @@ html[data-device="phone"] .hero-title {
 html[data-device="phone"] .hero-meta { flex-wrap: wrap; gap: 5px 8px; }
 html[data-device="phone"] .hero-desc { -webkit-line-clamp: 2; font-size: 13px; }
 html[data-device="phone"] .hero-dots { right: auto; left: 16px; bottom: 18px; }
+/* Play keeps its label and takes the leftover width; every other action shrinks to a square. */
+html[data-device="phone"] .detail-actions {
+  flex-wrap: nowrap;
+  gap: 8px;
+}
+html[data-device="phone"] .detail-actions .btn {
+  flex: none;
+  width: 46px;
+  min-height: 46px;
+  padding: 0;
+  border-radius: 14px;
+}
+html[data-device="phone"] .detail-actions .btn-primary {
+  flex: 1;
+  width: auto;
+  min-width: 0;
+  padding: 0 14px;
+}
+html[data-device="phone"] .detail-actions .btn:not(.btn-primary) .btn-label {
+  display: none;
+}
+html[data-device="phone"] .detail-actions .btn-primary .btn-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 html[data-device="phone"] .inline-actions { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
 html[data-device="phone"] .inline-actions .btn { width: 100%; min-width: 0; min-height: 46px; padding-inline: 12px; }
 html[data-device="phone"] .details-body,
@@ -2772,11 +3116,24 @@ html[data-device="tv"] .mobile-only-inline { display: none; }
   object-fit: cover;
 }
 
+/* The fixed track list (150 + 220 + 150 + 150 + auto) needs more room than the panel has, and
+   the overflow pushed the submit button outside the card. Equal, shrinkable tracks keep the
+   fields inside, and the button takes a row of its own so it never gets squeezed to three lines. */
 .xtream-form {
   display: grid;
-  grid-template-columns: 150px minmax(220px, 1fr) 150px 150px auto;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: 8px;
   margin-top: 14px;
+}
+
+.xtream-form .input {
+  min-width: 0;
+}
+
+.xtream-form .btn {
+  grid-column: 1 / -1;
+  justify-self: start;
+  white-space: nowrap;
 }
 
 @media (max-width: 900px) {

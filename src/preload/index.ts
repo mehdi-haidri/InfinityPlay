@@ -3,6 +3,7 @@ import type {
   AppConfig,
   AppInfo,
   AudioVariant,
+  DownloadControlResult,
   DownloadRecord,
   DownloadRequest,
   FavoriteItem,
@@ -104,8 +105,8 @@ const api = {
     clearQueue: () => invoke<number>("download:clearQueue"),
     queueSize: () => invoke<number>("download:queueSize"),
     list: () => invoke<DownloadRecord[]>("download:list"),
-    pause: (id: string) => invoke<boolean>("download:pause", id),
-    resume: (id: string) => invoke<boolean>("download:resume", id),
+    pause: (id: string) => invoke<DownloadControlResult>("download:pause", id),
+    resume: (id: string) => invoke<DownloadControlResult>("download:resume", id),
     cancel: (id: string) => invoke<boolean>("download:cancel", id),
     remove: (id: string, deleteFile: boolean) =>
       invoke<DownloadRecord[]>("download:remove", id, deleteFile),

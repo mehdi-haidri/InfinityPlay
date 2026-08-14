@@ -577,6 +577,12 @@ export interface SeasonDownloadRequest {
   resolution: number;
 }
 
+/** Result of pause/resume. `reason` is present only when the UI should explain the refusal. */
+export interface DownloadControlResult {
+  ok: boolean;
+  reason?: string;
+}
+
 export interface DownloadRecord extends DownloadRequest {
   id: string;
   filename: string;

@@ -10,15 +10,23 @@ import {
   Search,
   Settings,
 } from "lucide-react";
-import { useState, type ComponentType } from "react";
+import { type ComponentType, useState } from "react";
 import { useApp, type Route } from "../store";
 import { BrandMark } from "./BrandMark";
 import { DownloadIcon, LiveIcon } from "./CoreIcons";
 
-const ITEMS: { route: Route; label: string; icon: ComponentType<{ size?: string | number }> }[] = [
+type Item = {
+  route: Route;
+  label: string;
+  icon: ComponentType<{ size?: string | number }>;
+  /** Phone label, when the full one is too long for a 20%-wide tab. */
+  shortLabel?: string;
+};
+
+const ITEMS: Item[] = [
   { route: { name: "home" }, label: "Home", icon: Home },
   { route: { name: "search", query: "" }, label: "Search", icon: Search },
-  { route: { name: "free-library" }, label: "Free Library", icon: LibraryBig },
+  { route: { name: "free-library" }, label: "Free Library", icon: LibraryBig, shortLabel: "Library" },
   { route: { name: "livetv" }, label: "Live TV", icon: LiveIcon },
   { route: { name: "history" }, label: "Continue watching", icon: Clock },
   { route: { name: "favorites" }, label: "Favorites", icon: Heart },
@@ -26,13 +34,21 @@ const ITEMS: { route: Route; label: string; icon: ComponentType<{ size?: string 
   { route: { name: "settings" }, label: "Settings", icon: Settings },
 ];
 
+/** The four that keep a tab of their own on phones; the rest move into the More hub. */
+const PHONE_TABS = new Set(["home", "search", "livetv", "downloads"]);
+
+/** Routes that the More tab owns, so it stays highlighted while the user is inside one. */
+const MORE_ROUTES = new Set(["more", "free-library", "history", "favorites", "settings", "about"]);
+
 export function Sidebar() {
   const route = useApp((state) => state.route);
   const navigate = useApp((state) => state.navigate);
   const [collapsed, setCollapsed] = useState(
     () => window.localStorage.getItem("infinityplay:ui:sidebar:v1") === "true",
   );
-  const [moreOpen, setMoreOpen] = useState(false);
+  const activeDownloads = useApp((state) =>
+    state.downloads.filter((entry) => entry.state === "progressing").length,
+  );
 
   const toggle = () => {
     setCollapsed((value) => {
@@ -56,34 +72,41 @@ export function Sidebar() {
         </button>
       </div>
 
-      {ITEMS.map(({ route: target, label, icon: Icon }) => (
+      {ITEMS.map(({ route: target, label, shortLabel, icon: Icon }) => (
         <button
           key={label}
           className="nav-item"
-          data-mobile-secondary={target.name === "downloads" || target.name === "settings" || target.name === "favorites" || target.name === "history" || undefined}
+          /* Every destination stays in the DOM at every size; on phones the CSS hides the ones
+             the More hub owns, so the markup has a single source of truth. */
+          data-phone-tab={PHONE_TABS.has(target.name) || undefined}
           data-focus-key={`nav-${target.name}`}
           data-focus-initial={target.name === "home" || undefined}
           aria-current={route.name === target.name ? "page" : undefined}
-          onClick={() => {
-            setMoreOpen(false);
-            navigate(target);
-          }}
+          onClick={() => navigate(target)}
           title={collapsed ? label : undefined}
         >
-          <Icon size={18} />
+          <span className="nav-item-glyph">
+            <Icon size={18} />
+            {target.name === "downloads" && activeDownloads > 0 && (
+              <span className="nav-item-dot" aria-hidden="true" />
+            )}
+          </span>
           <span className="nav-label">{label}</span>
+          {shortLabel && <span className="nav-label-short">{shortLabel}</span>}
         </button>
       ))}
 
+      {/* Phone-only fifth tab. Hidden everywhere else, where the full list is already visible. */}
       <button
         className="nav-item nav-item-more"
-        data-open={moreOpen}
-        aria-current={["downloads", "settings", "favorites", "about"].includes(route.name) ? "page" : undefined}
-        aria-expanded={moreOpen}
-        aria-controls="mobile-more-menu"
-        onClick={() => setMoreOpen((value) => !value)}
+        data-phone-tab
+        data-focus-key="nav-more"
+        aria-current={MORE_ROUTES.has(route.name) ? "page" : undefined}
+        onClick={() => navigate({ name: "more" })}
       >
-        <MoreHorizontal size={19} />
+        <span className="nav-item-glyph">
+          <MoreHorizontal size={19} />
+        </span>
         <span className="nav-label">More</span>
       </button>
 
@@ -99,21 +122,6 @@ export function Sidebar() {
           <span className="nav-label">About</span>
         </button>
       </div>
-
-      {moreOpen && (
-        <div className="mobile-more-backdrop" onClick={() => setMoreOpen(false)}>
-          <div id="mobile-more-menu" className="mobile-more-menu" role="dialog" aria-label="More destinations" onClick={(event) => event.stopPropagation()}>
-            <div className="mobile-more-handle" />
-            <div className="mobile-more-title">More</div>
-            {[...ITEMS.filter((item) => item.route.name === "history" || item.route.name === "favorites" || item.route.name === "downloads" || item.route.name === "settings"), { route: { name: "about" } as Route, label: "About", icon: Info }].map(({ route: target, label, icon: Icon }) => (
-              <button key={label} className="mobile-more-item" autoFocus={label === "Favorites"} onClick={() => { setMoreOpen(false); navigate(target); }}>
-                <Icon size={20} />
-                <span>{label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
     </nav>
   );
 }

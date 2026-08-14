@@ -1,4 +1,4 @@
-import { Star, X } from "lucide-react";
+import { Heart, Star, X } from "lucide-react";
 import type { CatalogItem } from "@shared/types";
 import { useApp } from "../store";
 import { MediaImage } from "./MediaImage";
@@ -11,10 +11,21 @@ interface Props {
   onOpen?: (item: CatalogItem) => void;
   onRemove?: (item: CatalogItem) => void;
   removeLabel?: string;
+  /** Off on the Favorites page, where the remove control already covers it. */
+  showFavorite?: boolean;
 }
 
-export function PosterCard({ item, progress = 0, onOpen, onRemove, removeLabel = "continue watching" }: Props) {
+export function PosterCard({
+  item,
+  progress = 0,
+  onOpen,
+  onRemove,
+  removeLabel = "continue watching",
+  showFavorite = true,
+}: Props) {
   const navigate = useApp((state) => state.navigate);
+  const toggleFavorite = useApp((state) => state.toggleFavorite);
+  const isFavorite = useApp((state) => state.favorites.some((entry) => entry.id === item.id));
   const open = () => (onOpen ? onOpen(item) : navigate({ name: "details", id: item.id }));
 
   return (
@@ -52,6 +63,27 @@ export function PosterCard({ item, progress = 0, onOpen, onRemove, removeLabel =
         </div>
       </div>
       </button>
+
+      {/* The card itself is a button, so the heart cannot be nested inside it. This overlay is a
+          sibling that mirrors the art box exactly, which keeps the control pinned to the poster
+          rather than to the shell (which is taller by the title block). */}
+      {showFavorite && (
+        <div className="card-favorite-layer" aria-hidden={false}>
+          <button
+            className="card-favorite"
+            data-active={isFavorite}
+            onClick={() => void toggleFavorite(item)}
+            aria-pressed={isFavorite}
+            aria-label={
+              isFavorite ? `Remove ${item.title} from favorites` : `Add ${item.title} to favorites`
+            }
+            title={isFavorite ? "Remove from favorites" : "Add to favorites"}
+          >
+            <Heart size={15} fill={isFavorite ? "currentColor" : "none"} />
+          </button>
+        </div>
+      )}
+
       {onRemove && (
         <button
           className="icon-button card-remove-action"

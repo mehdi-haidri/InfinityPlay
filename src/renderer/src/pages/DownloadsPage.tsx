@@ -131,6 +131,23 @@ export function DownloadsPage() {
     });
   };
 
+  /**
+   * Pause and resume can legitimately refuse — an adaptive transfer is an FFmpeg process, and
+   * Windows offers no way to suspend one. Saying so beats a button that looks like it worked.
+   */
+  const control = async (record: DownloadRecord, action: "pause" | "resume") => {
+    const result = await unwrap(api.downloads[action](record.id)).catch(() => ({
+      ok: false,
+      reason: undefined,
+    }));
+    if (result.ok || !result.reason) return;
+    notify({
+      kind: "info",
+      title: action === "pause" ? "Cannot pause this download" : "Cannot resume this download",
+      body: result.reason,
+    });
+  };
+
   const openExternally = async (record: DownloadRecord) => {
     const error = await unwrap(api.downloads.open(record.id)).catch((cause: Error) => cause.message);
     if (error) notify({ kind: "error", title: "Could not open the file", body: error });
@@ -198,7 +215,7 @@ export function DownloadsPage() {
           {record.state === "progressing" && !isNativeAndroid && (
             <button
               className="icon-button"
-              onClick={() => void api.downloads.pause(record.id)}
+              onClick={() => void control(record, "pause")}
               aria-label="Pause"
               title="Pause"
             >
@@ -209,7 +226,7 @@ export function DownloadsPage() {
           {record.state === "paused" && !isNativeAndroid && (
             <button
               className="icon-button"
-              onClick={() => void api.downloads.resume(record.id)}
+              onClick={() => void control(record, "resume")}
               aria-label="Resume"
               title="Resume"
             >

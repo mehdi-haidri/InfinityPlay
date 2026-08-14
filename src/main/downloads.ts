@@ -11,11 +11,13 @@ import path from "node:path";
 import { spawn, type ChildProcess } from "node:child_process";
 import { app, shell, type BrowserWindow, type DownloadItem } from "electron";
 import type {
+  DownloadControlResult,
   DownloadRecord,
   DownloadRequest,
   Release,
   SeasonDownloadRequest,
 } from "@shared/types";
+import { resumeProcess, suspendProcess } from "./process-control";
 import { getConfig, getDownloadRecords, saveDownloadRecords } from "./store";
 import { MovieBoxService } from "./providers/moviebox";
 import { saveSubtitleFile } from "./providers/subtitles";
@@ -176,6 +178,19 @@ function claimPending(item: DownloadItem): DownloadRecord | undefined {
  */
 export function initDownloads(getWindow: () => BrowserWindow | null): void {
   resolveWindow = getWindow;
+
+  // A suspended FFmpeg does not notice the app closing, so it would sit in the process list
+  // forever holding its output file open. Terminate every child on the way out.
+  app.on("will-quit", () => {
+    for (const child of activeAdaptive.values()) {
+      try {
+        child.kill("SIGKILL");
+      } catch {
+        // The process is already gone; nothing to clean up.
+      }
+    }
+    activeAdaptive.clear();
+  });
 
   const repaired = getDownloadRecords().map((record) => {
     const fileExists = record.savePath ? fs.existsSync(record.savePath) : false;
@@ -637,34 +652,42 @@ export function listDownloads(): DownloadRecord[] {
   return records;
 }
 
-export function pauseDownload(id: string): boolean {
+/**
+ * An adaptive transfer is an FFmpeg process, so pausing it means suspending that process rather
+ * than a Chromium DownloadItem. `process-control` handles the platform difference.
+ */
+export async function pauseDownload(id: string): Promise<DownloadControlResult> {
   const adaptive = activeAdaptive.get(id);
   if (adaptive?.pid) {
-    if (process.platform === "win32") return false;
-    try { adaptive.kill("SIGSTOP"); } catch { return false; }
+    if (!(await suspendProcess(adaptive.pid))) {
+      return { ok: false, reason: "This adaptive transfer could not be suspended." };
+    }
     const record = findRecord(id);
     if (record) broadcast(upsert({ ...record, state: "paused" }));
-    return true;
+    return { ok: true };
   }
   const item = active.get(id);
-  if (!item || item.isPaused()) return false;
+  if (!item || item.isPaused()) return { ok: false };
   item.pause();
-  return true;
+  return { ok: true };
 }
 
-export function resumeDownload(id: string): boolean {
+export async function resumeDownload(id: string): Promise<DownloadControlResult> {
   const adaptive = activeAdaptive.get(id);
   if (adaptive?.pid) {
-    if (process.platform === "win32") return false;
-    try { adaptive.kill("SIGCONT"); } catch { return false; }
+    if (!(await resumeProcess(adaptive.pid))) {
+      return { ok: false, reason: "This adaptive transfer could not be resumed." };
+    }
     const record = findRecord(id);
     if (record) broadcast(upsert({ ...record, state: "progressing" }));
-    return true;
+    return { ok: true };
   }
   const item = active.get(id);
-  if (!item || !item.canResume()) return false;
+  if (!item || !item.canResume()) {
+    return { ok: false, reason: item ? "This transfer cannot be resumed; start it again." : undefined };
+  }
   item.resume();
-  return true;
+  return { ok: true };
 }
 
 export function cancelDownload(id: string): boolean {

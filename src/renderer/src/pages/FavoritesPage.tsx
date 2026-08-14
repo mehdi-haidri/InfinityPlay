@@ -36,7 +36,7 @@ export function FavoritesPage() {
       {visible.length > 0 ? (
         <div className="grid favorites-grid">
           {visible.map((item) => (
-            <PosterCard key={item.id} item={item} onRemove={() => void toggleFavorite(item)} removeLabel="favorites" />
+            <PosterCard key={item.id} item={item} onRemove={() => void toggleFavorite(item)} removeLabel="favorites" showFavorite={false} />
           ))}
         </div>
       ) : (

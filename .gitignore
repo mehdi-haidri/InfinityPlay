@@ -10,3 +10,4 @@ dist/
 build/bin/
 *.apk
 *.txt
+.c*

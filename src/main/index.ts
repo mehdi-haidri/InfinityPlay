@@ -228,6 +228,22 @@ function rewriteMediaRequestHeaders(): void {
 
 }
 
+/**
+ * A second copy of the app shares this one's user-data directory, and the two then race over the
+ * same disk-cache index and download ledger — which surfaces as
+ * "Failed to write the temporary index file" and, worse, silently truncated download records.
+ * Only one instance runs; launching again focuses the window that is already open.
+ */
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (!mainWindow) return;
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
+  });
+}
+
 app.whenReady().then(() => {
   rewriteMediaRequestHeaders();
   installStreamSigner();

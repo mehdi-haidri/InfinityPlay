@@ -15,6 +15,7 @@ import { DownloadsPage } from "./pages/DownloadsPage";
 import { FavoritesPage } from "./pages/FavoritesPage";
 import { PersonPage } from "./pages/PersonPage";
 import { FreeLibraryPage } from "./pages/FreeLibraryPage";
+import { MorePage } from "./pages/MorePage";
 import { formatBytes } from "./lib/format";
 import { useApp } from "./store";
 import { applyDeviceProfile, installTvSpatialNavigation } from "./lib/device";
@@ -60,6 +61,8 @@ function Routes() {
       return <SettingsPage />;
     case "downloads":
       return <DownloadsPage />;
+    case "more":
+      return <MorePage />;
     case "about":
       return <AboutPage />;
   }

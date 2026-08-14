@@ -21,6 +21,14 @@ export function TopBar() {
   const [highlight, setHighlight] = useState(-1);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounced = useDebounced(query, 320);
+  // There is no Ctrl+K on a phone, and the long hint just gets clipped at that width.
+  const device = document.documentElement.dataset.device;
+  const placeholder =
+    device === "phone"
+      ? "Search"
+      : device === "tablet"
+        ? "Search movies, series, anime…"
+        : "Search movies, series, anime…   (Ctrl+K)";
 
   // Keep the field in sync when navigation changes the active search.
   useEffect(() => {
@@ -144,7 +152,7 @@ export function TopBar() {
           <input
             ref={inputRef}
             value={query}
-            placeholder="Search movies, series, anime…   (Ctrl+K)"
+            placeholder={placeholder}
             onChange={(event) => {
               setQuery(event.target.value);
               setOpen(true);
