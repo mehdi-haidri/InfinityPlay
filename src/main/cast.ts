@@ -365,8 +365,20 @@ async function castToChromecast(device: KnownDevice, request: CastRequest, url: 
               if (settled) return;
               settled = true;
               clearTimeout(verdict);
-              if (error) reject(error);
-              else resolve();
+              if (!error) {
+                resolve();
+                return;
+              }
+              // Nothing else tears this down when the caller has no second protocol to try, and a
+              // client left connected keeps reporting the same failure.
+              castClient = null;
+              castMedia = null;
+              try {
+                client.close();
+              } catch {
+                // Already closed.
+              }
+              reject(error);
             };
             // A receiver that has said nothing either way is treated as working: it is playing far
             // more often than not, and a false failure would drop a working cast.
