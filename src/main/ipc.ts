@@ -52,9 +52,12 @@ import {
 } from "./downloads";
 import {
   checkForUpdates,
+  declineUpdate,
   getUpdateStatus,
   installUpdate,
   isAutoUpdateSupported,
+  pauseUpdateDownload,
+  startUpdateDownload,
 } from "./updater";
 import { generateMediaPreview, prepareLiveStream, setDecodableCodecs, stageManifest } from "./live";
 import { toolAvailable, ffmpegVersion } from "./media-tools";
@@ -211,6 +214,9 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
 
   handle("update:status", () => getUpdateStatus());
   handle("update:check", () => checkForUpdates());
+  handle("update:download", () => startUpdateDownload());
+  handle("update:pause", () => pauseUpdateDownload());
+  handle("update:decline", () => declineUpdate());
   handle("update:install", () => installUpdate());
 
   handle("shell:openExternal", (url: string) => {

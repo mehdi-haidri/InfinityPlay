@@ -59,6 +59,13 @@ export interface PlayerRequest {
   headers?: Record<string, string>;
 }
 
+export interface ToastAction {
+  label: string;
+  /** Draws the filled treatment; use it for the action the toast is really asking for. */
+  primary?: boolean;
+  onClick: () => void;
+}
+
 export interface Toast {
   id: number;
   kind: "info" | "error" | "progress";
@@ -68,6 +75,13 @@ export interface Toast {
   downloadId?: string;
   /** Sticky toasts stay until the work finishes or the user dismisses them. */
   sticky?: boolean;
+  /** Buttons rendered under the body. Choosing one dismisses the toast. */
+  actions?: ToastAction[];
+  /**
+   * Identity across re-notifications. A second toast with the same tag replaces the first
+   * instead of stacking — an update that changes state should not leave a trail of cards.
+   */
+  tag?: string;
 }
 
 interface AppState {
@@ -403,7 +417,10 @@ export const useApp = create<AppState>((set, get) => ({
 
   notify: (toast) => {
     const id = ++toastSeq;
-    set({ toasts: [...get().toasts, { ...toast, id }] });
+    const existing = toast.tag
+      ? get().toasts.filter((entry) => entry.tag !== toast.tag)
+      : get().toasts;
+    set({ toasts: [...existing, { ...toast, id }] });
     if (!toast.sticky) {
       setTimeout(() => get().dismissToast(id), toast.kind === "error" ? 6000 : 3500);
     }

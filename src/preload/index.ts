@@ -127,6 +127,9 @@ const api = {
   updates: {
     status: () => invoke<UpdateStatus>("update:status"),
     check: () => invoke<UpdateStatus>("update:check"),
+    download: () => invoke<boolean>("update:download"),
+    pause: () => invoke<boolean>("update:pause"),
+    decline: () => invoke<boolean>("update:decline"),
     install: () => invoke<boolean>("update:install"),
     onStatus: (listener: (status: UpdateStatus) => void) => {
       const wrapped = (_event: unknown, status: UpdateStatus) => listener(status);

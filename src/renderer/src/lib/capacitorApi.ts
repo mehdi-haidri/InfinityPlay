@@ -416,12 +416,18 @@ export const createCapacitorApi = (): InfinityPlayApi => {
     updates: {
       status: () => wrapResult(async () => ({
         state: "unsupported",
-        message: "Android updates are installed manually from GitHub Releases.",
+        message: "Android updates are installed through the system package installer.",
       })),
       check: () => wrapResult(async () => ({
         state: "unsupported",
-        message: "Android updates are installed manually from GitHub Releases.",
+        message: "Android updates are installed through the system package installer.",
       })),
+      // The APK is installed by the system package installer, so there is nothing here to
+      // start, pause, or decline — every control resolves false and the card stays on its
+      // `unsupported` message.
+      download: () => wrapResult(async () => false),
+      pause: () => wrapResult(async () => false),
+      decline: () => wrapResult(async () => false),
       install: () => wrapResult(async () => false),
       onStatus: () => () => {},
     },

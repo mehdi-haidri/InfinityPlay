@@ -2006,6 +2006,20 @@ video::cue {
 }
 
 .toast-content { flex: 1; min-width: 0; }
+
+/* Toasts that ask a question rather than report one. */
+.toast-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.toast-actions .btn {
+  min-height: 32px;
+  padding: 0 12px;
+  font-size: 12px;
+}
 .toast-progress-copy { display: flex; gap: 8px; }
 
 @keyframes slide-in {
@@ -2057,6 +2071,82 @@ video::cue {
 .status-line { display: flex; align-items: center; gap: 8px; }
 .about-role { margin-bottom: 14px; }
 .update-help { padding-top: 4px; max-width: 620px; }
+.update-actions { display: flex; flex-wrap: wrap; gap: 8px; flex: none; }
+
+/* Release notes sit inside the update card. They are long, so the body scrolls rather than
+   pushing the build details off the page. */
+.release-notes-block {
+  margin-top: 14px;
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+
+.release-notes-summary {
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+  list-style: none;
+}
+
+.release-notes-summary::-webkit-details-marker { display: none; }
+
+.release-notes-summary::before {
+  content: "▸";
+  display: inline-block;
+  width: 14px;
+  color: var(--text-faint);
+  transition: transform 160ms var(--ease);
+}
+
+.release-notes-block[open] .release-notes-summary::before {
+  transform: rotate(90deg);
+}
+
+.release-notes {
+  max-height: 340px;
+  overflow-y: auto;
+  margin-top: 10px;
+  padding-right: 6px;
+}
+
+.release-notes-heading {
+  margin: 14px 0 6px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.release-notes-heading:first-child { margin-top: 0; }
+
+.release-notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  list-style: disc;
+}
+
+.release-notes-list li,
+.release-notes-text {
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.release-notes-text { margin: 8px 0; }
+
+.release-notes code {
+  padding: 1px 5px;
+  border-radius: 5px;
+  background: var(--bg-hover);
+  font-size: 12px;
+}
+
+.release-notes strong { color: var(--text); font-weight: 650; }
 .card-secondary-action { margin-top: 6px; width: 100%; }
 
 .switch {
@@ -2633,14 +2723,32 @@ html[data-device="phone"] .nav-item-more {
 }
 
 /* A filled pill behind the icon reads as "you are here" from a glance, which a colour change
-   alone does not manage at 18px. */
+   alone does not manage at 18px. The glyph gets an explicit box so the pill is a deliberate
+   shape rather than the icon's size plus padding — that produced a blob that crowded the label. */
 html[data-device="phone"] .sidebar .nav-item[aria-current="page"] {
   background: none;
+}
+
+html[data-device="phone"] .sidebar .nav-item-glyph {
+  width: 52px;
+  height: 28px;
+  max-width: 100%;
+  margin-inline: auto;
+}
+
+html[data-device="phone"] .sidebar .nav-item-glyph::before {
+  inset: 0;
 }
 
 html[data-device="phone"] .sidebar .nav-item[aria-current="page"] .nav-item-glyph::before {
   opacity: 1;
   transform: scale(1);
+}
+
+/* The glyph is wider than the icon now, so the badge anchors to the icon's edge, not the pill's. */
+html[data-device="phone"] .sidebar .nav-item-dot {
+  top: 2px;
+  right: calc(50% - 13px);
 }
 
 html[data-device="phone"] .sidebar .nav-label {

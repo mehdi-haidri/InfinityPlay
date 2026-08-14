@@ -4,6 +4,7 @@ import { App as CapApp } from "@capacitor/app";
 import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { Splash } from "./components/Splash";
+import { UpdatePrompts } from "./components/UpdatePrompts";
 import { HomePage } from "./pages/HomePage";
 import { SearchPage } from "./pages/SearchPage";
 import { DetailsPage } from "./pages/DetailsPage";
@@ -120,6 +121,24 @@ function Toasts() {
                     </button>
                   </div>
                 </>
+              )}
+
+              {toast.actions && toast.actions.length > 0 && (
+                <div className="toast-actions">
+                  {toast.actions.map((action) => (
+                    <button
+                      key={action.label}
+                      className={`btn btn-sm${action.primary ? " btn-primary" : ""}`}
+                      onClick={() => {
+                        // Dismiss first: an action may replace this toast with the next one.
+                        dismiss(toast.id);
+                        action.onClick();
+                      }}
+                    >
+                      {action.label}
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
 
@@ -250,6 +269,7 @@ export function App() {
         </Suspense>
       )}
       <Toasts />
+      <UpdatePrompts />
       <LiveAnnouncements />
       <Splash ready={booted} />
     </div>

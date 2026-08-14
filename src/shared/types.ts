@@ -628,10 +628,32 @@ export interface AppInfo {
 export type UpdateStatus =
   | { state: "idle" }
   | { state: "checking" }
-  | { state: "available"; version: string }
+  /**
+   * Found, and waiting for the user to accept or decline. Nothing is fetched until they do.
+   * `notes` is that release's description, so About can show what the update contains before
+   * the user commits to it.
+   */
+  | { state: "available"; version: string; notes?: string }
   | { state: "up-to-date"; version: string }
-  | { state: "downloading"; percent: number; transferred: number; total: number }
-  | { state: "downloaded"; version: string }
+  | {
+      state: "downloading";
+      version: string;
+      notes?: string;
+      percent: number;
+      transferred: number;
+      total: number;
+    }
+  | {
+      state: "paused";
+      version: string;
+      notes?: string;
+      percent: number;
+      transferred: number;
+      total: number;
+    }
+  /** Declined for now; the About page still offers it. */
+  | { state: "declined"; version: string; notes?: string }
+  | { state: "downloaded"; version: string; notes?: string }
   | { state: "error"; message: string }
   | { state: "unsupported"; message: string };
 
@@ -725,6 +747,11 @@ export interface InfinityPlayApi {
   updates: {
     status: () => Promise<Result<UpdateStatus>>;
     check: () => Promise<Result<UpdateStatus>>;
+    /** Accepts the offered update and starts (or restarts) the transfer. */
+    download: () => Promise<Result<boolean>>;
+    pause: () => Promise<Result<boolean>>;
+    /** Keeps the update on offer without fetching it. */
+    decline: () => Promise<Result<boolean>>;
     install: () => Promise<Result<boolean>>;
     onStatus: (listener: (status: UpdateStatus) => void) => () => void;
   };

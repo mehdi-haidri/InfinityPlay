@@ -50,6 +50,7 @@
     "@capacitor/filesystem": "^8.1.2",
     "@capacitor/preferences": "^8.0.1",
     "@fontsource-variable/outfit": "^5.3.0",
+    "builder-util-runtime": "^9.7.0",
     "dashjs": "^5.2.0",
     "electron-updater": "^6.8.9",
     "js-md5": "^0.9.2"

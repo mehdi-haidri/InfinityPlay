@@ -1,13 +1,13 @@
 import { useEffect, useState } from "react";
-import { Download, ExternalLink, Mail, RefreshCw, RotateCw } from "lucide-react";
+import { Download, Mail, Pause, Play, RefreshCw, RotateCw } from "lucide-react";
 import { AUTHORS, type AppInfo, type UpdateStatus } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { formatBytes } from "../lib/format";
 import { Spinner } from "../components/States";
 import { PageHeader } from "../components/PageHeader";
+import { ReleaseNotes } from "../components/ReleaseNotes";
+import { newestNotes, notesForVersion } from "../lib/releaseNotes";
 import { useApp } from "../store";
-
-const RELEASES_URL = "https://github.com/ELhadratiOth/InfinityPlay/releases";
 
 /** lucide dropped its brand icons in v1, so the GitHub mark is drawn locally. */
 function GitHubMark({ size = 15 }: { size?: number }) {
@@ -30,14 +30,24 @@ function statusLine(status: UpdateStatus): { text: string; busy: boolean } {
     case "checking":
       return { text: "Checking for updates…", busy: true };
     case "available":
-      return { text: `Version ${status.version} found — downloading…`, busy: true };
+      return { text: `Version ${status.version} is available.`, busy: false };
     case "downloading":
       return {
         text: `Downloading… ${status.percent}% (${formatBytes(status.transferred)} of ${formatBytes(status.total)})`,
         busy: true,
       };
+    case "paused":
+      return {
+        text: `Paused at ${status.percent}% of version ${status.version}.`,
+        busy: false,
+      };
+    case "declined":
+      return { text: `Version ${status.version} is available whenever you want it.`, busy: false };
     case "downloaded":
-      return { text: `Version ${status.version} is ready to install.`, busy: false };
+      return {
+        text: `Version ${status.version} is ready — restart now, or it installs when you close the app.`,
+        busy: false,
+      };
     case "up-to-date":
       return { text: "You are on the latest version.", busy: false };
     case "error":
@@ -50,20 +60,20 @@ function statusLine(status: UpdateStatus): { text: string; busy: boolean } {
 }
 
 function packageHelp(info: AppInfo | null): string {
-  if (!info) return "Release notes and installers are available on GitHub Releases.";
+  if (!info) return "InfinityPlay checks for updates on launch and asks before downloading one.";
   if (info.packageType.includes("macOS")) {
-    return "This unsigned macOS build cannot update itself. Download the next DMG from GitHub Releases and replace the app manually.";
+    return "This macOS build is unsigned, so it cannot replace itself. A signed release will update in place.";
   }
   if (info.packageType === "AppImage") {
-    return "Updates replace the current AppImage after download; keep the file executable.";
+    return "The update is downloaded here and swapped in after a restart; keep the AppImage executable.";
   }
   if (info.packageType.includes("DEB") || info.packageType.includes("RPM") || info.packageType === "pacman") {
-    return "For system packages, download the matching installer from GitHub Releases and install it with your package manager.";
+    return "System packages are updated by your package manager, so this build does not replace itself.";
   }
   if (info.packageType.includes("Android")) {
-    return "For Android and Android TV, download the latest APK from GitHub Releases to update.";
+    return "Android installs its updates through the system package installer.";
   }
-  return "Updates are downloaded from GitHub Releases and installed after restart.";
+  return "Updates are downloaded here and installed when the app restarts.";
 }
 
 export function AboutPage() {
@@ -101,9 +111,24 @@ export function AboutPage() {
     }
   };
 
+  const download = () => void api.updates.download();
+  const pause = () => void api.updates.pause();
+  const decline = () => void api.updates.decline();
+
   const open = (url: string) => void api.system.openExternal(url);
   const line = statusLine(status);
   const isAndroid = info?.runtime === "android";
+
+  /*
+   * Notes are always on screen. Normally they describe the running build, read from the
+   * RELEASES.md bundled with it; once an update is on offer they switch to that release's own
+   * notes, so the user can see what they are accepting before they accept it.
+   */
+  const incomingNotes = "notes" in status && status.notes ? status.notes : null;
+  const incomingVersion = "version" in status && incomingNotes ? status.version : null;
+  const installed = info ? notesForVersion(info.version) ?? newestNotes() : newestNotes();
+  const shownNotes = incomingNotes ?? installed?.body ?? null;
+  const shownVersion = incomingVersion ?? installed?.version ?? info?.version ?? "";
 
   return (
     <div className="page page-narrow">
@@ -152,28 +177,65 @@ export function AboutPage() {
             </div>
           </div>
 
-          {status.state === "downloaded" ? (
-            <button className="btn btn-sm btn-primary" onClick={() => void install()}>
-              <Download size={14} /> Restart & install
-            </button>
-          ) : status.state === "unsupported" ? (
-            <button className="btn btn-sm" onClick={() => open(RELEASES_URL)}>
-              <ExternalLink size={14} /> View releases
-            </button>
-          ) : (
-            <button
-              className="btn btn-sm"
-              onClick={() => void check()}
-              disabled={line.busy}
-            >
-              {line.busy ? <RefreshCw size={14} /> : <RotateCw size={14} />} Check now
-            </button>
-          )}
+          {/* Every state offers exactly the choices that make sense in it, so the card never
+              shows a control that would do nothing. */}
+          <div className="update-actions">
+            {status.state === "downloaded" ? (
+              <button className="btn btn-sm btn-primary" onClick={() => void install()}>
+                <Download size={14} /> Restart & install
+              </button>
+            ) : status.state === "unsupported" ? (
+              // No button: this build cannot replace itself, and sending the user to a browser
+              // is not an update flow. The message alone says why.
+              null
+            ) : status.state === "available" ? (
+              <>
+                <button className="btn btn-sm btn-primary" onClick={download}>
+                  <Download size={14} /> Download update
+                </button>
+                <button className="btn btn-sm" onClick={decline}>
+                  Not now
+                </button>
+              </>
+            ) : status.state === "downloading" ? (
+              <button className="btn btn-sm" onClick={pause}>
+                <Pause size={14} /> Pause
+              </button>
+            ) : status.state === "paused" ? (
+              <>
+                <button className="btn btn-sm btn-primary" onClick={download}>
+                  <Play size={14} /> Resume
+                </button>
+                <button className="btn btn-sm" onClick={decline}>
+                  Cancel
+                </button>
+              </>
+            ) : status.state === "declined" ? (
+              <button className="btn btn-sm btn-primary" onClick={download}>
+                <Download size={14} /> Download update
+              </button>
+            ) : (
+              <button className="btn btn-sm" onClick={() => void check()} disabled={line.busy}>
+                {line.busy ? <RefreshCw size={14} /> : <RotateCw size={14} />} Check now
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="setting-hint update-help">
-          {packageHelp(info)}
+          {status.state === "paused"
+            ? "Resuming starts the transfer again from the beginning — the updater cannot continue a partial download."
+            : packageHelp(info)}
         </div>
+
+        {shownNotes && (
+          <details className="release-notes-block" open>
+            <summary className="release-notes-summary">
+              {incomingNotes ? `What's new in ${shownVersion}` : `Release notes · ${shownVersion}`}
+            </summary>
+            <ReleaseNotes body={shownNotes} />
+          </details>
+        )}
       </section>
 
       {info && (

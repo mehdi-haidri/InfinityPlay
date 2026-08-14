@@ -1,10 +1,58 @@
 # Release Notes
 
-Updates install automatically. InfinityPlay checks on launch and on demand from the **About** page.
+InfinityPlay checks for updates on launch and asks before downloading one. You can also check on demand from the **About** page.
 
 ---
 
-## 0.2.9 (Latest Update)
+## 0.3.0 (Latest Update)
+
+### Updates you control
+- Updates are no longer fetched behind your back. A launch-time check now **offers** the update and waits: accept it, or decline and take it later from **About**.
+- Added **pause** and **resume** for an update in progress, plus a **Cancel** that returns the update to the offer state.
+- When a download finishes you are asked whether to **restart now or later**, both as a toast and on the **About** page. Choosing later installs it the next time you close the app.
+- Removed every "view the releases page" link from the update card. Updates are downloaded and installed inside the app; builds that cannot replace themselves say so plainly instead of sending you to a browser.
+- Toasts can now carry actions, and a repeated notification about the same subject replaces the previous card instead of stacking.
+
+### Mobile navigation
+- Replaced the bottom-bar overflow sheet with a dedicated **More** page: destinations grouped under **Browse** and **System**, each with a description, live counts for Continue watching and Favorites, and the app version in its header.
+- The bottom bar carries **Home**, **Search**, **Live TV**, **Downloads** and **More**. The More tab stays highlighted while you are inside any destination it owns.
+- Redrew the active-tab indicator as a fixed 52x28 pill behind the icon. The previous indicator was sized from the icon plus padding, which produced a blob that crowded the label.
+- Downloads shows a badge on its icon while a transfer is running.
+
+### Mobile layout
+- Fixed the search field overflowing the top bar on every phone width. The field and its input could not shrink below their intrinsic minimum, pushing the row past the screen edge.
+- Search suggestions now truncate long titles instead of pushing the year and media type out of view, and the phone placeholder drops the meaningless `Ctrl+K` hint.
+- The featured poster is now shown sharp as the phone hero backdrop. It was previously blurred and dimmed to near-black, which read as a missing image.
+- Details actions stay on one line: **Play** and **Download** keep their labels while Favorite and Remove progress collapse to icons.
+- Fixed the **Add IPTV login** button rendering outside its panel; the form's fixed column widths exceeded the panel and pushed the button out.
+- Fixed poster art sitting 6px inset from its own card, caused by the browser's default button padding.
+
+### Favorites
+- Added a heart to every poster across the app, so a title can be saved without opening it. It fills when saved and animates on the press.
+
+### Downloads
+- **Pausing an adaptive download now works on Windows.** It previously did nothing at all: pausing an adaptive transfer means suspending its FFmpeg process, which needs POSIX signals that Windows does not provide to Node. Suspend and resume now go through the same `ntdll` entry points a native module would use.
+- Pause and resume now report why they refused, rather than leaving a control that looks like it worked.
+- A suspended transfer is terminated when the app closes, instead of remaining in the process list holding its output file.
+
+### Stability
+- InfinityPlay now runs as a single instance. A second copy shared the same user-data directory, and the two raced over the disk cache — the source of repeated `Failed to write the temporary index file` errors — and over the download ledger. Launching again focuses the window already open.
+
+### Android
+- Added `viewport-fit=cover`, without which the safe-area insets were always zero. The bottom bar rendered under the gesture bar and the top bar under the status bar.
+- Fixed page content running underneath the bottom bar once a status-bar inset is present. The reserved space is now derived from the bar's real height at any inset.
+
+### Validation
+- Passed TypeScript checking across the Electron main, preload, renderer, and Capacitor provider paths, plus a full production renderer build.
+- Measured the phone layout at 320, 360, 390, 412 and 430 px: no top-bar or page overflow, and the active-tab pill fits inside its tab at every width.
+- Verified Windows process suspension against a live process: output frozen while suspended and resumed afterwards.
+- Verified single-instance behaviour by log comparison — nine disk-cache errors with two instances running, none with one.
+- Verified update toasts render their actions, fire the chosen handler, and replace rather than stack.
+- The update download, pause, and resume flow itself is **not** verified end to end: development builds report updates as unsupported because there is no installer to replace, so the flow needs a packaged build with a newer published release to exercise.
+
+---
+
+## 0.2.9
 
 ### Free media and legal availability
 - Added a dedicated **Free Library** for Library of Congress National Screening Room films and freely licensed Wikimedia Commons video, including archive rights and creator labels.

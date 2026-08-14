@@ -8,6 +8,7 @@
  */
 import { app, type BrowserWindow } from "electron";
 import electronUpdater from "electron-updater";
+import { CancellationError, CancellationToken } from "builder-util-runtime";
 import type { UpdateStatus } from "@shared/types";
 
 const { autoUpdater } = electronUpdater;
@@ -15,6 +16,15 @@ const { autoUpdater } = electronUpdater;
 let status: UpdateStatus = { state: "idle" };
 let listenersBound = false;
 let getWindow: () => BrowserWindow | null = () => null;
+
+/** Cancels the transfer in flight. Null whenever nothing is downloading. */
+let downloadToken: CancellationToken | null = null;
+/** The version last offered, kept so pause/resume and decline can name it. */
+let offeredVersion = "";
+/** That release's notes — the GitHub release body, which is RELEASES.md at that version. */
+let offeredNotes: string | undefined;
+/** Last progress seen, so a paused card can show how far it got. */
+let lastProgress = { percent: 0, transferred: 0, total: 0 };
 
 const DEVELOPMENT_UNSUPPORTED_MESSAGE =
   "Updates are only available in an installed build. This looks like a development run.";
@@ -34,6 +44,27 @@ function publishError(error: unknown): void {
   // electron-updater includes full HTTP headers and its internal stack in some messages.
   // The first line contains the useful reason and keeps About readable.
   publish({ state: "error", message: message.split("\n")[0] || "The update check failed." });
+}
+
+/**
+ * `releaseNotes` is a string for a single release, or a list when several versions are being
+ * skipped at once. The list is joined newest-first so About shows every version being crossed.
+ */
+function releaseNotesText(notes: unknown): string | undefined {
+  if (typeof notes === "string") return notes.trim() || undefined;
+  if (!Array.isArray(notes)) return undefined;
+
+  const joined = notes
+    .map((entry) => {
+      const item = entry as { version?: string; note?: string | null };
+      const body = (item.note ?? "").trim();
+      if (!body) return "";
+      return item.version ? `### ${item.version}\n${body}` : body;
+    })
+    .filter(Boolean)
+    .join("\n\n");
+
+  return joined || undefined;
 }
 
 function unsupportedMessage(): string | null {
@@ -58,18 +89,19 @@ function bindListeners(): void {
   if (listenersBound) return;
   listenersBound = true;
 
-  // The app decides when to download and when to restart, so nothing happens implicitly.
+  // Nothing is fetched or installed without the user saying so. `autoInstallOnAppQuit` is the
+  // "later" branch: a downloaded update lands the next time the app closes on its own.
   autoUpdater.autoDownload = false;
   autoUpdater.autoInstallOnAppQuit = true;
 
   autoUpdater.on("checking-for-update", () => publish({ state: "checking" }));
 
   autoUpdater.on("update-available", (info) => {
-    publish({ state: "available", version: info.version });
-    // Fetch straight away; the user is only asked before the restart.
-    autoUpdater.downloadUpdate().catch((error: unknown) => {
-      publishError(error);
-    });
+    offeredVersion = info.version;
+    offeredNotes = releaseNotesText(info.releaseNotes);
+    lastProgress = { percent: 0, transferred: 0, total: 0 };
+    // Offer only. The download waits for `startUpdateDownload`.
+    publish({ state: "available", version: info.version, notes: offeredNotes });
   });
 
   autoUpdater.on("update-not-available", (info) => {
@@ -77,21 +109,61 @@ function bindListeners(): void {
   });
 
   autoUpdater.on("download-progress", (progress) => {
-    publish({
-      state: "downloading",
+    lastProgress = {
       percent: Math.round(progress.percent),
       transferred: progress.transferred,
       total: progress.total,
-    });
+    };
+    publish({ state: "downloading", version: offeredVersion, notes: offeredNotes, ...lastProgress });
   });
 
   autoUpdater.on("update-downloaded", (info) => {
-    publish({ state: "downloaded", version: info.version });
+    downloadToken = null;
+    offeredNotes = releaseNotesText(info.releaseNotes) ?? offeredNotes;
+    publish({ state: "downloaded", version: info.version, notes: offeredNotes });
   });
 
   autoUpdater.on("error", (error) => {
+    // A pause cancels the transfer, and electron-updater reports that as an error. The paused
+    // card is already on screen, so swallow it rather than replacing it with a failure.
+    if (error instanceof CancellationError) return;
     publishError(error);
   });
+}
+
+/**
+ * Accepts the offered update. Also serves as resume: electron-updater has no byte-range resume,
+ * so a paused transfer starts over rather than continuing from where it stopped.
+ */
+export function startUpdateDownload(): boolean {
+  if (!isAutoUpdateSupported()) return false;
+  if (!["available", "paused", "declined"].includes(status.state)) return false;
+
+  bindListeners();
+  downloadToken = new CancellationToken();
+  publish({ state: "downloading", version: offeredVersion, ...lastProgress });
+
+  autoUpdater.downloadUpdate(downloadToken).catch((error: unknown) => {
+    if (error instanceof CancellationError) return;
+    publishError(error);
+  });
+  return true;
+}
+
+export function pauseUpdateDownload(): boolean {
+  if (status.state !== "downloading" || !downloadToken) return false;
+  downloadToken.cancel();
+  downloadToken = null;
+  publish({ state: "paused", version: offeredVersion, notes: offeredNotes, ...lastProgress });
+  return true;
+}
+
+/** Dismisses the offer without fetching it; About keeps a button to take it up later. */
+export function declineUpdate(): boolean {
+  if (status.state === "downloading") pauseUpdateDownload();
+  if (!offeredVersion) return false;
+  publish({ state: "declined", version: offeredVersion, notes: offeredNotes });
+  return true;
 }
 
 export function initUpdater(resolveWindow: () => BrowserWindow | null): void {
@@ -102,8 +174,9 @@ export function initUpdater(resolveWindow: () => BrowserWindow | null): void {
     return;
   }
   bindListeners();
-  // A silent check shortly after launch; failures stay in `status` and surface on the
-  // About page rather than interrupting playback with a dialog.
+  // A check shortly after launch. Finding something publishes `available`, which the renderer
+  // turns into an accept/decline prompt; a failure stays in `status` for the About page instead
+  // of interrupting playback.
   setTimeout(() => void checkForUpdates(), 8_000);
 }
 
