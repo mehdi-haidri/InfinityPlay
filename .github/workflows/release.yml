@@ -292,12 +292,16 @@ jobs:
             release/*.deb
             release/*.rpm
             release/*.pkg.tar.zst
-            release/latest-linux.yml
+            release/latest-linux.yml 
 
   android:
     name: Package Android APK (Android & Android TV)
     needs: validate
     runs-on: ubuntu-22.04
+    # The signing keystore lives in the `secrets` environment, not in repository secrets.
+    # Without this, `secrets.ANDROID_*` resolve to empty and the job silently falls back
+    # to the unsigned validation path.
+    environment: secrets
     env:
       # GitHub does not allow `secrets.*` directly in a step `if`. Resolve the complete
       # four-secret contract once, then use the boolean for every signing-only step.
