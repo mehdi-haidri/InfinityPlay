@@ -1,6 +1,17 @@
 # Release Notes
 
-## 0.3.2 (Latest update)
+## 0.3.3 (Latest update)
+
+### Cast to a TV
+
+- Send anything you are watching to a TV on the same network, from the player's new cast button.
+- Chromecast and DLNA are both supported, so a TV works whether or not it has Google services. Android uses DLNA only, since the Chromecast sender needs Play Services.
+- A TV that answers on both protocols now appears once in the list, and a refusal on the first is retried on the second automatically.
+- Streams are relayed by the app itself. The CDN rejects any player but this one, so handing the address to a TV showed an idle receiver screen and nothing else.
+- Play, pause, seek, and volume from the app while the TV plays; local playback pauses so the two do not run at once.
+- The TV refusing a stream is now reported instead of leaving the receiver blank.
+
+## 0.3.2
 
 ### Audio language control
 

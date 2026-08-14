@@ -38,6 +38,51 @@ public class CastPlugin extends Plugin {
     private static final String SEARCH_TARGET = "urn:schemas-upnp-org:device:MediaRenderer:1";
     private static final int LISTEN_MS = 4000;
 
+    private CastProxy proxy;
+
+    /**
+     * Turns a media URL into one the TV can actually fetch.
+     *
+     * Most URLs are returned unchanged. A CDN stream is republished through a local server,
+     * because that host refuses any client that is not sending the app's own User-Agent.
+     */
+    @PluginMethod
+    public void publish(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null || url.isEmpty()) {
+            call.reject("A url is required.");
+            return;
+        }
+
+        JSObject result = new JSObject();
+        if (!CastProxy.needsProxy(url)) {
+            result.put("url", url);
+            call.resolve(result);
+            return;
+        }
+
+        try {
+            if (proxy == null) proxy = new CastProxy(getContext());
+            result.put("url", proxy.publish(url));
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject("The stream could not be shared: " + error.getMessage());
+        }
+    }
+
+    /** Revokes anything published for the cast that just ended. */
+    @PluginMethod
+    public void unpublish(PluginCall call) {
+        if (proxy != null) proxy.stop();
+        call.resolve();
+    }
+
+    @Override
+    protected void handleOnDestroy() {
+        if (proxy != null) proxy.stop();
+        super.handleOnDestroy();
+    }
+
     /**
      * Returns the LOCATION URLs of every media renderer that answers. The renderer fetches and
      * parses each description itself.

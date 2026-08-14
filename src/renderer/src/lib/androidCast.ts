@@ -24,6 +24,9 @@ import {
 
 interface CastDiscoveryPlugin {
   discover: () => Promise<{ locations: string[] }>;
+  /** Returns a URL the TV can fetch, republishing it locally when the host would refuse the TV. */
+  publish: (options: { url: string }) => Promise<{ url: string }>;
+  unpublish: () => Promise<void>;
 }
 
 const discovery = registerPlugin<CastDiscoveryPlugin>("CastDiscovery");
@@ -85,8 +88,12 @@ export async function androidStartCast(request: CastRequest): Promise<CastSessio
   const transport = description?.transport;
   if (!description || !transport) throw new Error("That device is no longer on the network.");
 
+  // The CDN answers 428 to any client but this app, so those streams are relayed by the phone
+  // rather than handed to the TV. Everything else is returned unchanged.
+  const { url } = await discovery.publish({ url: request.url });
+
   await dlnaLoad(soapFetch, transport, {
-    url: request.url,
+    url,
     title: request.title,
     mimeType: request.mimeType ?? "video/mp4",
     subtitleUrl: request.subtitleUrl,
@@ -176,6 +183,8 @@ export async function androidCastStop(): Promise<boolean> {
   const service = transport();
   stopPolling();
   if (service) await dlnaStop(soapFetch, service).catch(() => undefined);
+  // Nothing should stay reachable on the network once the TV has stopped playing it.
+  await discovery.unpublish().catch(() => undefined);
   const had = session !== null;
   publish(null);
   return had;
