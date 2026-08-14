@@ -24,6 +24,7 @@ export type Route =
   | { name: "details"; id: string; season?: number; episode?: number; audioLocked?: boolean }
   | { name: "person"; id: string; personName: string; avatarUrl: string | null }
   | { name: "livetv" }
+  | { name: "anime" }
   | { name: "free-library" }
   | { name: "history" }
   | { name: "favorites" }

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ComponentType } from "react";
-import { ChevronRight, Clock, Heart, Info, LibraryBig, Settings } from "lucide-react";
+import { ChevronRight, Clock, Heart, Info, LibraryBig, Settings, Sparkles } from "lucide-react";
 import type { AppInfo } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { BrandMark } from "../components/BrandMark";
@@ -41,6 +41,13 @@ export function MorePage() {
     {
       title: "Browse",
       entries: [
+        {
+          route: { name: "anime" },
+          label: "Anime",
+          hint: "Series and films, original audio",
+          icon: Sparkles,
+          tone: "browse",
+        },
         {
           route: { name: "free-library" },
           label: "Free Library",

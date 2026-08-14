@@ -1,12 +1,13 @@
 /**
  * The MovieBox facade the IPC layer talks to: raw client + adapters + a small TTL cache.
  */
-import { DEFAULT_CONFIG } from "@shared/types";
+import { DEFAULT_CONFIG, isAllowedCatalogAudio } from "@shared/types";
 import type {
   AppConfig,
   AudioVariant,
   CatalogItem,
   HomePage,
+  HomeRow,
   MediaDetails,
   MediaType,
   PersonDetails,
@@ -19,7 +20,7 @@ import {
   captionsToSubtitles,
   detailsToMediaDetails,
   homepageToRows,
-  listToCatalogItems,
+  partitionListItems,
   resourceToRelease,
   searchToAudioVariants,
   searchToCatalogItems,
@@ -27,6 +28,55 @@ import {
 
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const CACHE_MAX_ENTRIES = 200;
+
+/**
+ * Runs `work` over `values` with at most `limit` requests in flight.
+ *
+ * The catalog API starts refusing a client that fires too many requests at once — measured, a
+ * run of roughly twenty back-to-back calls exhausted every host — and a row that fills itself by
+ * paging plus looking up substitutes is exactly that kind of burst.
+ */
+async function mapLimit<T, R>(values: T[], limit: number, work: (value: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(values.length);
+  let next = 0;
+
+  const runner = async (): Promise<void> => {
+    while (next < values.length) {
+      const index = next++;
+      results[index] = await work(values[index]);
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(limit, values.length) }, runner));
+  return results;
+}
+
+/**
+ * Lets a few callers through at a time and queues the rest.
+ *
+ * Rows are fetched independently now, so nothing else bounds them: changing an audio or country
+ * setting invalidates every row at once and the screen asks for all eleven together, each of which
+ * pages and looks up substitutes. That is the same burst that gets a client cut off.
+ */
+class Gate {
+  private active = 0;
+  private waiting: (() => void)[] = [];
+
+  constructor(private readonly limit: number) {}
+
+  async run<T>(work: () => Promise<T>): Promise<T> {
+    if (this.active >= this.limit) {
+      await new Promise<void>((resolve) => this.waiting.push(resolve));
+    }
+    this.active++;
+    try {
+      return await work();
+    } finally {
+      this.active--;
+      this.waiting.shift()?.();
+    }
+  }
+}
 
 class TtlCache {
   private entries = new Map<string, { value: unknown; expires: number }>();
@@ -60,6 +110,8 @@ class TtlCache {
 export class MovieBoxService {
   private client = new MovieBoxClient();
   private cache = new TtlCache();
+  /** Bounds how many rows build at once, however many the screen asks for together. */
+  private rowGate = new Gate(3);
   private getConfigFn: () => AppConfig;
 
   constructor(getConfigFn?: () => AppConfig) {
@@ -118,37 +170,175 @@ export class MovieBoxService {
     { title: "Popular series", query: { sort: "ForYou", subjectType: 2 } },
   ];
 
-  async home(): Promise<HomePage> {
+  /** How many cards a row aims for before it stops working at it. */
+  private static readonly ROW_TARGET = 18;
+
+  /**
+   * Pages worth asking for. Measured: a genre catalog is shallow — Horror runs out at page 3, and
+   * Action gained a single title across pages 2 to 6 — so paging further is mostly dead round trips.
+   */
+  private static readonly ROW_MAX_PAGES = 3;
+
+  /**
+   * Builds one browse row, filling it out rather than showing whatever survives page one.
+   *
+   * A genre row used to arrive nearly empty — Thriller returned eighteen titles and displayed one —
+   * because the catalog lists most films only as a Hindi dub and those are dropped. Two levers fix
+   * that: keep paging while the row is short, and for a title the catalog carries only as a dub,
+   * look up the original-audio subject and show that instead. Measured on the Action row, five of
+   * six dropped titles had an original to substitute.
+   */
+  private async buildRow(
+    query: { sort?: string; genre?: string; subjectType?: 1 | 2; country?: string },
+    target = MovieBoxService.ROW_TARGET,
+  ): Promise<CatalogItem[]> {
+    const audio = this.preferredAudio;
+    const items: CatalogItem[] = [];
+    const dubbed: CatalogItem[] = [];
+    const seen = new Set<string>();
+
+    const keyOf = (item: CatalogItem) => `${item.title.toLowerCase()}:${item.mediaType}`;
+
+    for (let page = 1; page <= MovieBoxService.ROW_MAX_PAGES; page++) {
+      const payload = await this.client.listSubjects({ ...query, page });
+      const partition = partitionListItems(payload, audio);
+
+      for (const item of this.screen(partition.items)) {
+        if (seen.has(keyOf(item))) continue;
+        seen.add(keyOf(item));
+        items.push(item);
+      }
+      for (const item of this.screen(partition.dubbed)) {
+        if (seen.has(keyOf(item))) continue;
+        dubbed.push(item);
+      }
+
+      // An empty page means the catalog is exhausted, not that the next one might be better.
+      if ((payload?.items ?? []).length === 0) break;
+      if (items.length >= target) return items.slice(0, target);
+    }
+
+    return [...items, ...(await this.substitutes(dubbed, target - items.length))].slice(0, target);
+  }
+
+  /**
+   * Original-audio stand-ins for titles the browse page only offered as a dub.
+   *
+   * Each one costs a search, so this only runs on a row that is still short, and only for as many
+   * titles as the row needs.
+   */
+  private async substitutes(dubbed: CatalogItem[], needed: number): Promise<CatalogItem[]> {
+    if (needed <= 0 || dubbed.length === 0) return [];
+
+    // Not every title has an original in the catalog, so more candidates are tried than are wanted.
+    const candidates = dubbed.slice(0, Math.min(needed * 2, 16));
+    const resolved = await mapLimit(candidates, 4, async (item) => {
+      try {
+        const variants = await this.audioVariants(item.title, item.mediaType);
+        const best = variants.find((variant) => isAllowedCatalogAudio(variant.language));
+        if (!best) return null;
+        return {
+          ...item,
+          id: best.subjectId,
+          rawTitle: best.rawTitle,
+          audioLanguage: best.language,
+        } satisfies CatalogItem;
+      } catch {
+        // A failed lookup just means this title stays out of the row.
+        return null;
+      }
+    });
+
+    return resolved.filter((item): item is CatalogItem => item !== null).slice(0, needed);
+  }
+
+  /**
+   * The Home screen's row titles, in order and without touching the network.
+   *
+   * Home is fetched one row at a time rather than as a single payload. Building every row up
+   * front took about eight seconds before anything appeared, and most of those rows are below
+   * the fold when it does — so the screen now asks for a row when it is about to be seen.
+   */
+  homeSections(): string[] {
+    return MovieBoxService.HOME_ROWS.map((row) => row.title);
+  }
+
+  /** One Home row, by its index in `homeSections()`. */
+  async homeSection(index: number): Promise<HomeRow> {
+    const section = MovieBoxService.HOME_ROWS[index];
+    if (!section) throw new Error("That section does not exist.");
+
     const audio = this.preferredAudio;
     const { catalogCountry: country, hideAdultContent } = this.getConfigFn();
 
-    return this.cached(`home:${country}:${audio}:${hideAdultContent}`, async () => {
+    return this.cached(`home:${index}:${country}:${audio}:${hideAdultContent}`, () =>
+      this.rowGate.run(async () => {
+        await this.client.init();
+        try {
+          return { title: section.title, items: await this.buildRow({ ...section.query, country }) };
+        } catch {
+          // One dead row should not take the whole screen down.
+          return { title: section.title, items: [] };
+        }
+      }),
+    );
+  }
+
+  /**
+   * Series and films, both needed because the catalog types them apart.
+   *
+   * Only the `Anime` genre. `Animation` looks tempting but returns Rick and Morty, Family Guy and
+   * Ben 10 — western cartoons that do not belong under this heading.
+   */
+  private static readonly ANIME_QUERIES: { sort: string; genre: string; subjectType: 1 | 2 }[] = [
+    { sort: "Hottest", genre: "Anime", subjectType: 2 },
+    { sort: "Hottest", genre: "Anime", subjectType: 1 },
+  ];
+
+  /**
+   * One page of the anime browser. Returns an empty array once the catalog is exhausted.
+   *
+   * The catalog-country setting is deliberately not applied. It filters on production country, so
+   * the default of "United States" returns literally nothing for this genre — measured, raw=0
+   * against 20 for "All".
+   */
+  async anime(page = 1): Promise<CatalogItem[]> {
+    const audio = this.preferredAudio;
+    const { hideAdultContent } = this.getConfigFn();
+    const country = "All";
+
+    return this.cached(`anime:${page}:${audio}:${hideAdultContent}`, () => this.rowGate.run(async () => {
       await this.client.init();
 
-      const rows = await Promise.all(
-        MovieBoxService.HOME_ROWS.map(async ({ title, query }) => {
-          try {
-            const payload = await this.client.listSubjects({ ...query, country });
-            return { title, items: this.screen(listToCatalogItems(payload, audio)) };
-          } catch {
-            // One dead row should not take the whole screen down.
-            return { title, items: [] };
-          }
-        }),
-      );
+      const items: CatalogItem[] = [];
+      const dubbed: CatalogItem[] = [];
+      const seen = new Set<string>();
+      const keyOf = (item: CatalogItem) => `${item.title.toLowerCase()}:${item.mediaType}`;
 
-      const populated = rows.filter((row) => row.items.length > 0);
+      const pages = await mapLimit(MovieBoxService.ANIME_QUERIES, 2, async (query) => {
+        try {
+          return partitionListItems(await this.client.listSubjects({ ...query, country, page }), audio);
+        } catch {
+          return { items: [], dubbed: [] };
+        }
+      });
 
-      // Camcorder rips are frequently the hottest thing in the catalog, but they make a
-      // poor first impression on a full-bleed hero, so they only headline as a last resort.
-      const trending = populated[0]?.items ?? [];
-      const hero = [
-        ...trending.filter((item) => !item.isCam),
-        ...trending.filter((item) => item.isCam),
-      ].slice(0, 6);
+      for (const partition of pages) {
+        for (const item of this.screen(partition.items)) {
+          if (seen.has(keyOf(item))) continue;
+          seen.add(keyOf(item));
+          items.push(item);
+        }
+        for (const item of this.screen(partition.dubbed)) {
+          if (seen.has(keyOf(item))) continue;
+          dubbed.push(item);
+        }
+      }
 
-      return { tabs: [], hero, rows: populated };
-    });
+      // The same substitution the Home rows use: a title the catalog only lists as a Hindi dub
+      // usually also exists in its original audio.
+      return [...items, ...(await this.substitutes(dubbed, 24 - items.length))];
+    }));
   }
 
   /** MovieBox's own curated feed, kept for the "Featured" view. */

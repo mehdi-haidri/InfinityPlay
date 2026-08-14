@@ -741,7 +741,10 @@ export const AUTHOR = AUTHORS[0];
 
 export interface InfinityPlayApi {
   catalog: {
-    home: () => Promise<Result<HomePage>>;
+    /** Row titles for the Home screen. Each row's contents is fetched separately, as it is needed. */
+    homeSections: () => Promise<Result<string[]>>;
+    homeSection: (index: number) => Promise<Result<HomeRow>>;
+    anime: (page?: number) => Promise<Result<CatalogItem[]>>;
     featured: (tabId?: string, page?: number) => Promise<Result<HomePage>>;
     search: (query: string, page?: number) => Promise<Result<CatalogItem[]>>;
     suggest: (query: string) => Promise<Result<CatalogItem[]>>;

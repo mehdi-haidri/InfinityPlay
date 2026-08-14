@@ -102,7 +102,9 @@ function handle<A extends unknown[], R>(
 }
 
 export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void {
-  handle("catalog:home", () => moviebox.home());
+  handle("catalog:homeSections", () => moviebox.homeSections());
+  handle("catalog:homeSection", (index: number) => moviebox.homeSection(index ?? 0));
+  handle("catalog:anime", (page: number) => moviebox.anime(page ?? 1));
   handle("catalog:featured", (tabId: string, page: number) =>
     moviebox.featured(tabId ?? "0", page ?? 1),
   );

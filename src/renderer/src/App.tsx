@@ -15,6 +15,7 @@ import { AboutPage } from "./pages/AboutPage";
 import { DownloadsPage } from "./pages/DownloadsPage";
 import { FavoritesPage } from "./pages/FavoritesPage";
 import { PersonPage } from "./pages/PersonPage";
+import { AnimePage } from "./pages/AnimePage";
 import { FreeLibraryPage } from "./pages/FreeLibraryPage";
 import { MorePage } from "./pages/MorePage";
 import { formatBytes } from "./lib/format";
@@ -52,6 +53,8 @@ function Routes() {
       );
     case "livetv":
       return <LiveTvPage />;
+    case "anime":
+      return <AnimePage />;
     case "free-library":
       return <FreeLibraryPage />;
     case "history":

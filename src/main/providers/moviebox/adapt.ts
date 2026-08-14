@@ -219,11 +219,39 @@ export function searchToCatalogItems(payload: Json, preferredAudio?: string): Ca
  * is dropped here rather than leaking into the UI.
  */
 export function listToCatalogItems(payload: Json, preferredAudio?: string): CatalogItem[] {
+  return partitionListItems(payload, preferredAudio).items;
+}
+
+/** A browse page split into what can be shown and what was dropped for its audio track. */
+export interface CatalogPartition {
+  items: CatalogItem[];
+  /**
+   * Titles this page carried only as an unsupported dub, one entry per title.
+   *
+   * Worth keeping rather than discarding: the catalog lists `Avengers: Endgame [Hindi]` in the
+   * Action row while also holding an original-audio subject for the same film, so a genre row that
+   * drops the dub outright can end up with one card when the catalog has plenty. The caller can
+   * look the original up and show that instead.
+   */
+  dubbed: CatalogItem[];
+}
+
+export function partitionListItems(payload: Json, preferredAudio?: string): CatalogPartition {
   const subjects = (payload?.items ?? []).filter(isWatchableSubject);
-  return dedupeCatalogItems(
-    subjects.map(subjectToCatalogItem).filter(Boolean) as CatalogItem[],
-    preferredAudio,
-  );
+  const all = subjects.map(subjectToCatalogItem).filter(Boolean) as CatalogItem[];
+  const items = dedupeCatalogItems(all, preferredAudio);
+
+  const shown = new Set(items.map((item) => `${item.title.toLowerCase()}:${item.mediaType}`));
+  const dubbed: CatalogItem[] = [];
+  for (const item of all) {
+    if (isAllowedCatalogAudio(item.audioLanguage)) continue;
+    const key = `${item.title.toLowerCase()}:${item.mediaType}`;
+    if (shown.has(key)) continue;
+    shown.add(key);
+    dubbed.push(item);
+  }
+
+  return { items, dubbed };
 }
 
 /**

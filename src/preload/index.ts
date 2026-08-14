@@ -16,6 +16,7 @@ import type {
   Channel,
   ChannelProgramme,
   HomePage,
+  HomeRow,
   MediaDetails,
   MediaType,
   PersonDetails,
@@ -36,7 +37,9 @@ const invoke = <T>(channel: string, ...args: unknown[]): Promise<Result<T>> =>
 
 const api = {
   catalog: {
-    home: () => invoke<HomePage>("catalog:home"),
+    homeSections: () => invoke<string[]>("catalog:homeSections"),
+    homeSection: (index: number) => invoke<HomeRow>("catalog:homeSection", index),
+    anime: (page = 1) => invoke<CatalogItem[]>("catalog:anime", page),
     featured: (tabId = "0", page = 1) => invoke<HomePage>("catalog:featured", tabId, page),
     search: (query: string, page = 1) => invoke<CatalogItem[]>("catalog:search", query, page),
     suggest: (query: string) => invoke<CatalogItem[]>("catalog:suggest", query),

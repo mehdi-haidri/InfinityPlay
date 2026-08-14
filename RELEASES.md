@@ -11,6 +11,21 @@
 - Play, pause, seek, and volume from the app while the TV plays; local playback pauses so the two do not run at once.
 - The TV refusing a stream is now reported instead of leaving the receiver blank.
 
+### Full rows again
+
+- Genre rows were arriving nearly empty — Thriller offered eighteen titles and showed one — because most films are listed only as a Hindi dub and those are filtered out. Rows now keep paging while they are short, and a title the catalog carries only as a dub is shown in its original audio instead.
+- A row with only a handful of titles lays its cards out plainly rather than pretending to be a slider with an empty track.
+
+### Anime
+
+- A section of its own, beside Free Library, with series and films and a filter for each.
+- Loads a page at a time as you scroll, rather than all at once.
+
+### Faster Home and long seasons
+
+- Home no longer waits for every row before showing anything. The hero and the first rows appear on their own, and each row below loads as you reach it.
+- Seasons with hundreds of episodes are drawn in blocks of fifty with a range picker instead of every episode button at once, and the block containing the episode you are on is the one that opens.
+
 ## 0.3.2
 
 ### Audio language control

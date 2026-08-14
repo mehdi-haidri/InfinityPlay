@@ -9,6 +9,7 @@ import {
   PanelLeftOpen,
   Search,
   Settings,
+  Sparkles,
 } from "lucide-react";
 import { type ComponentType, useState } from "react";
 import { useApp, type Route } from "../store";
@@ -26,6 +27,7 @@ type Item = {
 const ITEMS: Item[] = [
   { route: { name: "home" }, label: "Home", icon: Home },
   { route: { name: "search", query: "" }, label: "Search", icon: Search },
+  { route: { name: "anime" }, label: "Anime", icon: Sparkles },
   { route: { name: "free-library" }, label: "Free Library", icon: LibraryBig, shortLabel: "Library" },
   { route: { name: "livetv" }, label: "Live TV", icon: LiveIcon },
   { route: { name: "history" }, label: "Continue watching", icon: Clock },
@@ -38,7 +40,15 @@ const ITEMS: Item[] = [
 const PHONE_TABS = new Set(["home", "search", "livetv", "downloads"]);
 
 /** Routes that the More tab owns, so it stays highlighted while the user is inside one. */
-const MORE_ROUTES = new Set(["more", "free-library", "history", "favorites", "settings", "about"]);
+const MORE_ROUTES = new Set([
+  "more",
+  "anime",
+  "free-library",
+  "history",
+  "favorites",
+  "settings",
+  "about",
+]);
 
 export function Sidebar() {
   const route = useApp((state) => state.route);

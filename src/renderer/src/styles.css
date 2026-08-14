@@ -563,6 +563,32 @@ button {
   display: none;
 }
 
+/* Too few cards to scroll: let them wrap rather than sit in an empty track. */
+.row-scroll[data-sparse] {
+  flex-wrap: wrap;
+  overflow-x: visible;
+}
+
+/* Range picker for a season with more episodes than are worth drawing at once. */
+.episode-blocks {
+  margin-bottom: 14px;
+}
+
+.chip-sm {
+  padding: 5px 11px;
+  font-size: 12px;
+}
+
+/* Sits under an infinite-scroll grid: both the trigger and where its spinner shows. */
+.grid-sentinel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 56px;
+  margin-top: 22px;
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));

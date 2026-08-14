@@ -250,7 +250,9 @@ export const createCapacitorApi = (): InfinityPlayApi => {
 
   return {
     catalog: {
-      home: () => wrapResult(() => moviebox.home()),
+      homeSections: () => wrapResult(async () => moviebox.homeSections()),
+      homeSection: (index: number) => wrapResult(() => moviebox.homeSection(index)),
+      anime: (page = 1) => wrapResult(() => moviebox.anime(page)),
       featured: (tabId = "0", page = 1) => wrapResult(() => moviebox.featured(tabId, page)),
       search: (query: string, page = 1) => wrapResult(() => moviebox.search(query, page)),
       suggest: (query: string) => wrapResult(() => moviebox.suggest(query)),

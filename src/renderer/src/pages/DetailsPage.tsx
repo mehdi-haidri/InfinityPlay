@@ -18,6 +18,9 @@ import { MediaImage } from "../components/MediaImage";
 import { findProgress, useApp } from "../store";
 import { WatchAvailabilityPanel } from "../components/WatchAvailabilityPanel";
 
+/** Episodes drawn at once. Big enough that ordinary seasons stay on one block. */
+const EPISODE_BLOCK = 50;
+
 interface Props {
   id: string;
   /** Carried over when the user switches audio track, so the episode is preserved. */
@@ -49,6 +52,8 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
   const [subtitleChoice, setSubtitleChoice] = useState(preferredSubtitle);
   const [sourceSelection, setSourceSelection] = useState(() => `${initialSeason ?? 1}:${initialEpisode ?? 1}`);
   const [queueingSeason, setQueueingSeason] = useState(false);
+  /** Null follows the selected episode; a number is a block the user chose. */
+  const [episodeBlock, setEpisodeBlock] = useState<number | null>(null);
 
   const details = useAsync<MediaDetails>(() => unwrap(api.catalog.details(id)), [id]);
   const isSeries = details.data?.mediaType === "series" && (details.data?.seasons.length ?? 0) > 0;
@@ -201,6 +206,20 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
   const isFavorite = favorites.some((entry) => entry.id === media.id);
   const activeSeason = media.seasons.find((entry) => entry.number === season) ?? media.seasons[0];
   const resume = findProgress(watchHistory, id, isSeries ? season : 0, isSeries ? episode : 0);
+
+  /*
+   * Long-running shows are drawn a block at a time.
+   *
+   * A One Piece season is over a thousand episodes, and rendering every button at once cost a
+   * visible pause on opening the page for a list nobody reads end to end. Blocks are ranges rather
+   * than numbered pages so the label says where you are ("101–150"), and the visible block follows
+   * whichever episode is selected, so resuming lands on the right one without hunting.
+   */
+  const episodes = activeSeason?.episodes ?? [];
+  const blockStart = Math.floor(episodes.findIndex((entry) => entry.number === episode) / EPISODE_BLOCK);
+  const blockCount = Math.ceil(episodes.length / EPISODE_BLOCK);
+  const activeBlock = Math.min(Math.max(episodeBlock ?? Math.max(blockStart, 0), 0), Math.max(blockCount - 1, 0));
+  const visibleEpisodes = episodes.slice(activeBlock * EPISODE_BLOCK, (activeBlock + 1) * EPISODE_BLOCK);
 
   // The subject being viewed is offered only when it is part of the supported policy;
   // direct links to Hindi or another removed dub can never leak back into the switcher.
@@ -479,6 +498,7 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
                       setSourceSelection("");
                       setSeason(entry.number);
                       setEpisode(1);
+                      setEpisodeBlock(null);
                     }}
                   >
                     Season {entry.number}
@@ -486,8 +506,27 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
                 ))}
               </div>
 
+              {blockCount > 1 && (
+                <div className="chip-row episode-blocks">
+                  {Array.from({ length: blockCount }, (_, index) => {
+                    const from = episodes[index * EPISODE_BLOCK]?.number;
+                    const to = episodes[Math.min((index + 1) * EPISODE_BLOCK, episodes.length) - 1]?.number;
+                    return (
+                      <button
+                        key={index}
+                        className="chip chip-sm"
+                        data-active={index === activeBlock}
+                        onClick={() => setEpisodeBlock(index)}
+                      >
+                        {from === to ? from : `${from}–${to}`}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+
               <div className="episode-grid">
-                {activeSeason.episodes.map((entry) => (
+                {visibleEpisodes.map((entry) => (
                   <button
                     key={entry.number}
                     className="episode"
