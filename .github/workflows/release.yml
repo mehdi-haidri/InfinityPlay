@@ -333,10 +333,43 @@ jobs:
         shell: bash
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
         run: |
           set -euo pipefail
-          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/infinityplay-release.jks"
-          test -s "$RUNNER_TEMP/infinityplay-release.jks" || { echo "::error::Decoded Android keystore is empty"; exit 1; }
+          keystore="$RUNNER_TEMP/infinityplay-release.jks"
+
+          # Tolerate the two ways this secret usually arrives damaged: wrapped across
+          # lines, and carrying the BEGIN/END markers that `certutil -encode` adds on
+          # Windows. Both decode to garbage that only fails later, inside Gradle.
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | grep -v -- '-----' | tr -d '[:space:]' | base64 --decode > "$keystore"
+
+          test -s "$keystore" || { echo "::error::Decoded Android keystore is empty."; exit 1; }
+
+          # A keystore is either JKS (magic FEEDFEED) or PKCS#12 (a DER sequence, 0x30).
+          # Checking the magic here turns Gradle's opaque "DerInputStream.getLength():
+          # lengthTag=..., too big" into a message that names the actual problem.
+          magic=$(head -c 4 "$keystore" | od -An -tx1 | tr -d '[:space:]')
+          case "$magic" in
+            feedfeed*) echo "Keystore format: JKS" ;;
+            30*)       echo "Keystore format: PKCS#12" ;;
+            *)
+              echo "::error::ANDROID_KEYSTORE_BASE64 did not decode to a keystore (leading bytes: $magic). Re-create the secret with: base64 -w0 my-release.jks"
+              exit 1
+              ;;
+          esac
+
+          # Confirm the password opens the store and the alias exists, before Gradle runs.
+          if ! keytool -list -keystore "$keystore" -storepass "$ANDROID_KEYSTORE_PASSWORD" > /dev/null 2>&1; then
+            echo "::error::The keystore decoded correctly, but ANDROID_KEYSTORE_PASSWORD does not open it."
+            exit 1
+          fi
+          if ! keytool -list -keystore "$keystore" -storepass "$ANDROID_KEYSTORE_PASSWORD" -alias "$ANDROID_KEY_ALIAS" > /dev/null 2>&1; then
+            echo "::error::Alias '$ANDROID_KEY_ALIAS' is not in this keystore. Entries found:"
+            keytool -list -keystore "$keystore" -storepass "$ANDROID_KEYSTORE_PASSWORD" 2> /dev/null | grep -E 'Entry' || true
+            exit 1
+          fi
+          echo "Keystore verified: '$ANDROID_KEY_ALIAS' present, password accepted."
 
       - name: Build signed Android release APK
         if: env.ANDROID_SIGNING_ENABLED == 'true'
