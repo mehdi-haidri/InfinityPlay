@@ -3,8 +3,8 @@
  *
  * DLNA only, and deliberately so: the Chromecast sender SDK requires Google Play Services, which
  * de-Googled phones and many TV boxes do not ship, and the brief was that this works on any
- * machine. Discovery is the sole native piece — everything after it reuses the same shared control
- * code the desktop runs, driven by the WebView's own `fetch`.
+ * machine. The shared control code the desktop runs is reused here; only the transport differs,
+ * because a WebView cannot issue UPnP calls at all — see `deviceRequest`.
  */
 import { registerPlugin } from "@capacitor/core";
 import type { CastDevice, CastRequest, CastSession } from "@shared/types";
@@ -28,7 +28,7 @@ interface CastDiscoveryPlugin {
   publish: (options: { url: string }) => Promise<{ url: string }>;
   publishText: (options: { text: string }) => Promise<{ url: string }>;
   /** HTTP against a device on the local network, issued natively to avoid CORS and preflights. */
-  request: (options: {
+  httpRequest: (options: {
     url: string;
     method: string;
     headers: Record<string, string>;
@@ -40,6 +40,15 @@ interface CastDiscoveryPlugin {
 const discovery = registerPlugin<CastDiscoveryPlugin>("CastDiscovery");
 
 /**
+ * True once the installed app is known to be missing the native `httpRequest` method.
+ *
+ * The web layer updates with every sync while the Java side only changes when the APK is rebuilt,
+ * so a build can exist where this method is called but not implemented. Falling back to `fetch`
+ * keeps such a build working exactly as it did before rather than finding no devices at all.
+ */
+let nativeRequestMissing = false;
+
+/**
  * Every request to a device on the network goes through the native side.
  *
  * The WebView cannot make these calls. A UPnP control call is a cross-origin POST with a
@@ -47,13 +56,29 @@ const discovery = registerPlugin<CastDiscoveryPlugin>("CastDiscovery");
  * not CORS, so the preflight is never answered and the call fails as "Failed to fetch" without the
  * TV having seen anything. Java has no origin and sends no preflight.
  */
+async function deviceRequest(
+  url: string,
+  method: string,
+  headers: Record<string, string>,
+  body: string,
+): Promise<{ status: number; body: string }> {
+  if (!nativeRequestMissing) {
+    try {
+      return await discovery.httpRequest({ url, method, headers, body });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // Capacitor reports an absent method rather than a transport failure; anything else is real.
+      if (!/not implemented|unimplemented|does not have|no such method/i.test(message)) throw error;
+      nativeRequestMissing = true;
+    }
+  }
+
+  const response = await fetch(url, { method, headers, body: body || undefined });
+  return { status: response.status, body: await response.text() };
+}
+
 const soapFetch: SoapFetch = async (url, init) => {
-  const { status, body } = await discovery.request({
-    url,
-    method: init.method,
-    headers: init.headers,
-    body: init.body ?? "",
-  });
+  const { status, body } = await deviceRequest(url, init.method, init.headers, init.body ?? "");
   return { ok: status >= 200 && status < 300, status, text: async () => body };
 };
 
@@ -79,7 +104,7 @@ export async function androidDiscover(): Promise<CastDevice[]> {
     locations.map(async (location) => {
       try {
         // Natively too: the description sits on the same origin-less HTTP as the control calls.
-        const response = await discovery.request({ url: location, method: "GET", headers: {}, body: "" });
+        const response = await deviceRequest(location, "GET", {}, "");
         if (response.status < 200 || response.status >= 300) return null;
         const description = parseDescription(response.body, location);
         if (!description.transport) return null;
@@ -120,14 +145,31 @@ export async function androidStartCast(request: CastRequest): Promise<CastSessio
     ? (await discovery.publishText({ text: request.subtitleVtt })).url
     : request.subtitleUrl;
 
-  await dlnaLoad(soapFetch, transport, {
-    url,
-    title: request.title,
-    mimeType: request.mimeType ?? "video/mp4",
-    subtitleUrl,
-    posterUrl: request.posterUrl,
-    durationSeconds: request.durationSeconds,
-  });
+  try {
+    await dlnaLoad(soapFetch, transport, {
+      url,
+      title: request.title,
+      mimeType: request.mimeType ?? "video/mp4",
+      subtitleUrl,
+      posterUrl: request.posterUrl,
+      durationSeconds: request.durationSeconds,
+    });
+  } catch (error) {
+    /*
+     * "Failed to fetch" here is the WebView refusing to send the request, not the TV refusing to
+     * play it: a UPnP control call is a cross-origin POST carrying `SOAPAction`, so the browser
+     * preflights it and a television never answers a preflight. The native path avoids that, and
+     * it only exists in an app rebuilt since it was added — worth saying rather than repeating a
+     * message that points at the television.
+     */
+    const message = error instanceof Error ? error.message : String(error);
+    if (nativeRequestMissing || /failed to fetch|load failed|networkerror/i.test(message)) {
+      throw new Error(
+        "This app build cannot reach the TV's controls. Reinstall the latest build, then try again.",
+      );
+    }
+    throw error;
+  }
 
   if (request.startSeconds && request.startSeconds > 1) {
     // The renderer has to open the stream before it will accept a seek.

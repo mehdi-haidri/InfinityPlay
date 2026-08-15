@@ -105,7 +105,7 @@ public class CastPlugin extends Plugin {
      * origin and no preflight, which is also how the desktop app talks to the same devices.
      */
     @PluginMethod
-    public void request(PluginCall call) {
+    public void httpRequest(PluginCall call) {
         String url = call.getString("url");
         if (url == null || url.isEmpty()) {
             call.reject("A url is required.");
@@ -113,7 +113,7 @@ public class CastPlugin extends Plugin {
         }
         String method = call.getString("method", "GET");
         String body = call.getString("body", "");
-        JSObject headers = call.getObject("headers", new JSObject());
+        JSObject headers = call.getObject("headers");
 
         new Thread(() -> {
             HttpURLConnection connection = null;
