@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Cast, Loader2, Pause, Play, RefreshCw, Square, Tv } from "lucide-react";
-import type { CastDevice, CastRequest, CastSession } from "@shared/types";
+import type { CastDevice, CastRequest, CastSession, SubtitleOption } from "@shared/types";
 import { api, unwrap } from "../lib/api";
+import { loadVttText } from "../lib/castMedia";
 import { useApp } from "../store";
 
 /** Seconds the receiver is nudged by, matching the local player's skip controls. */
 const SKIP = 10;
+
+/** Sentinel for "no captions", so it is distinguishable from a track whose URL is empty. */
+const OFF = "__off__";
 
 function formatClock(seconds: number): string {
   if (!Number.isFinite(seconds) || seconds <= 0) return "0:00";
@@ -28,10 +32,13 @@ export function CastControl({
   onCastingChange,
   autoOpen = false,
   triggerClassName = "icon-button",
+  subtitles = [],
 }: {
   /** Everything the receiver needs; null while nothing is playable yet. */
   media: Omit<CastRequest, "deviceId"> | null;
   onCastingChange?: (casting: boolean) => void;
+  /** Caption tracks offered for this title, so the TV's subtitles are chosen per cast. */
+  subtitles?: SubtitleOption[];
   /** Opens the picker after Android's native player hands off to its DLNA controller. */
   autoOpen?: boolean;
   /**
@@ -48,6 +55,10 @@ export function CastControl({
   const [session, setSession] = useState<CastSession | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const autoOpened = useRef(false);
+  /** The track URL to send, or `OFF`. Starts from whatever the media already carried. */
+  const [subtitleChoice, setSubtitleChoice] = useState<string>(
+    () => subtitles.find((entry) => entry.name === media?.subtitleName)?.url ?? OFF,
+  );
 
   useEffect(() => {
     unwrap(api.cast.session()).then(setSession).catch(() => undefined);
@@ -95,11 +106,33 @@ export function CastControl({
     openPicker();
   }, [autoOpen, media, openPicker, session]);
 
+  /**
+   * Resolves the caption track for this cast.
+   *
+   * The chosen track wins over whatever the app's language preference produced, so sending a film
+   * to a television does not force the same subtitles the phone happens to be set to.
+   */
+  const castSubtitleFields = async (): Promise<Partial<CastRequest>> => {
+    if (subtitleChoice === OFF) {
+      return { subtitleVtt: undefined, subtitleUrl: undefined, subtitleName: undefined, subtitleLanguage: undefined };
+    }
+    const option = subtitles.find((entry) => entry.url === subtitleChoice);
+    if (!option) return {};
+    const vtt = await loadVttText(option.url).catch(() => "");
+    return {
+      subtitleVtt: vtt || undefined,
+      subtitleUrl: option.url,
+      subtitleName: option.name,
+      subtitleLanguage: option.lang,
+    };
+  };
+
   const castTo = async (device: CastDevice) => {
     if (!media) return;
     setOpen(false);
     try {
-      setSession(await unwrap(api.cast.start({ ...media, deviceId: device.id })));
+      const captions = subtitles.length > 0 ? await castSubtitleFields() : {};
+      setSession(await unwrap(api.cast.start({ ...media, ...captions, deviceId: device.id })));
       notify({ kind: "info", title: `Casting to ${device.name}`, body: media.title });
     } catch (error) {
       notify({
@@ -209,6 +242,34 @@ export function CastControl({
           {!scanning && devices.length === 0 && (
             <div className="player-menu-empty">
               No devices found. Make sure the TV is on and on the same Wi-Fi.
+            </div>
+          )}
+
+          {subtitles.length > 0 && (
+            /* Chosen here rather than taken from the app's language setting: what you want on a
+               television is often not what you want on the phone in your hand. */
+            <div className="cast-subtitles">
+              <span className="player-menu-label">Subtitles on the TV</span>
+              <div className="cast-subtitle-chips">
+                <button
+                  className="chip chip-sm"
+                  data-active={subtitleChoice === OFF}
+                  onClick={() => setSubtitleChoice(OFF)}
+                >
+                  Off
+                </button>
+                {subtitles.map((option) => (
+                  <button
+                    key={option.url}
+                    className="chip chip-sm"
+                    data-active={subtitleChoice === option.url}
+                    onClick={() => setSubtitleChoice(option.url)}
+                    title={option.nativeName || option.name}
+                  >
+                    {option.name}
+                  </button>
+                ))}
+              </div>
             </div>
           )}
 

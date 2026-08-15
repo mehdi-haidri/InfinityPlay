@@ -2156,6 +2156,20 @@ html[data-device="phone"] .player-root .cast-wrap .cast-menu {
   inset: auto 10px calc(12px + var(--safe-bottom)) 10px;
 }
 
+/* Caption choice for the television, above the device list it will be sent to. */
+.cast-subtitles {
+  padding: 2px 2px 8px;
+  margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.cast-subtitle-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 8px 2px;
+}
+
 .cast-device {
   display: flex;
   align-items: center;

@@ -27,13 +27,35 @@ interface CastDiscoveryPlugin {
   /** Returns a URL the TV can fetch, republishing it locally when the host would refuse the TV. */
   publish: (options: { url: string }) => Promise<{ url: string }>;
   publishText: (options: { text: string }) => Promise<{ url: string }>;
+  /** HTTP against a device on the local network, issued natively to avoid CORS and preflights. */
+  request: (options: {
+    url: string;
+    method: string;
+    headers: Record<string, string>;
+    body: string;
+  }) => Promise<{ status: number; body: string }>;
   unpublish: () => Promise<void>;
 }
 
 const discovery = registerPlugin<CastDiscoveryPlugin>("CastDiscovery");
 
-const soapFetch: SoapFetch = (url, init) =>
-  fetch(url, { method: init.method, headers: init.headers, body: init.body });
+/**
+ * Every request to a device on the network goes through the native side.
+ *
+ * The WebView cannot make these calls. A UPnP control call is a cross-origin POST with a
+ * `SOAPAction` header, so the browser preflights it with `OPTIONS`; a television answers UPnP and
+ * not CORS, so the preflight is never answered and the call fails as "Failed to fetch" without the
+ * TV having seen anything. Java has no origin and sends no preflight.
+ */
+const soapFetch: SoapFetch = async (url, init) => {
+  const { status, body } = await discovery.request({
+    url,
+    method: init.method,
+    headers: init.headers,
+    body: init.body ?? "",
+  });
+  return { ok: status >= 200 && status < 300, status, text: async () => body };
+};
 
 const known = new Map<string, DlnaDescription>();
 let session: CastSession | null = null;
@@ -56,9 +78,10 @@ export async function androidDiscover(): Promise<CastDevice[]> {
   const devices = await Promise.all(
     locations.map(async (location) => {
       try {
-        const response = await fetch(location, { signal: AbortSignal.timeout(5_000) });
-        if (!response.ok) return null;
-        const description = parseDescription(await response.text(), location);
+        // Natively too: the description sits on the same origin-less HTTP as the control calls.
+        const response = await discovery.request({ url: location, method: "GET", headers: {}, body: "" });
+        if (response.status < 200 || response.status >= 300) return null;
+        const description = parseDescription(response.body, location);
         if (!description.transport) return null;
 
         const id = `dlna:${location}`;

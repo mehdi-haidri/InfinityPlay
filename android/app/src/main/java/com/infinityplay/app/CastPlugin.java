@@ -11,12 +11,18 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 
 import org.json.JSONArray;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
+import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
@@ -87,6 +93,74 @@ public class CastPlugin extends Plugin {
         } catch (Exception error) {
             call.reject("The subtitles could not be shared: " + error.getMessage());
         }
+    }
+
+    /**
+     * Performs an HTTP request against a device on the local network.
+     *
+     * The WebView cannot do this itself. A UPnP control call is a cross-origin POST carrying a
+     * `SOAPAction` header, which makes the browser send a preflight `OPTIONS` first — and a
+     * television's renderer answers UPnP, not CORS, so the preflight goes unanswered and the whole
+     * call fails as "Failed to fetch" before the TV ever sees it. Issued from here there is no
+     * origin and no preflight, which is also how the desktop app talks to the same devices.
+     */
+    @PluginMethod
+    public void request(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null || url.isEmpty()) {
+            call.reject("A url is required.");
+            return;
+        }
+        String method = call.getString("method", "GET");
+        String body = call.getString("body", "");
+        JSObject headers = call.getObject("headers", new JSObject());
+
+        new Thread(() -> {
+            HttpURLConnection connection = null;
+            try {
+                connection = (HttpURLConnection) new URL(url).openConnection();
+                connection.setRequestMethod(method);
+                connection.setConnectTimeout(8000);
+                connection.setReadTimeout(15000);
+                if (headers != null) {
+                    Iterator<String> names = headers.keys();
+                    while (names.hasNext()) {
+                        String name = names.next();
+                        connection.setRequestProperty(name, headers.optString(name));
+                    }
+                }
+                if (body != null && !body.isEmpty()) {
+                    connection.setDoOutput(true);
+                    byte[] payload = body.getBytes(StandardCharsets.UTF_8);
+                    connection.setFixedLengthStreamingMode(payload.length);
+                    try (OutputStream out = connection.getOutputStream()) {
+                        out.write(payload);
+                    }
+                }
+
+                int status = connection.getResponseCode();
+                // A SOAP fault arrives as a 500 with a body worth reading, so errors are read too.
+                InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+                String text = stream == null ? "" : readAll(stream);
+
+                JSObject result = new JSObject();
+                result.put("status", status);
+                result.put("body", text);
+                call.resolve(result);
+            } catch (Exception error) {
+                call.reject(error.getMessage() == null ? "The device did not answer." : error.getMessage(), error);
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        }).start();
+    }
+
+    private static String readAll(InputStream stream) throws IOException {
+        ByteArrayOutputStream buffer = new ByteArrayOutputStream();
+        byte[] chunk = new byte[8192];
+        int read;
+        while ((read = stream.read(chunk)) != -1) buffer.write(chunk, 0, read);
+        return buffer.toString(StandardCharsets.UTF_8.name());
     }
 
     /** Revokes anything published for the cast that just ended. */

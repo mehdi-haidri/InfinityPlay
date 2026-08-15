@@ -1477,7 +1477,7 @@ export function Player() {
           <p className="mobile-cast-copy">
             Choose a DLNA television on the same Wi-Fi. The selected subtitles will be shared with the TV.
           </p>
-          <CastControl media={castMedia} onCastingChange={setCasting} autoOpen />
+          <CastControl media={castMedia} subtitles={subtitles} onCastingChange={setCasting} autoOpen />
           <div className="mobile-cast-actions">
             <button
               className="btn btn-primary"
@@ -1760,7 +1760,7 @@ export function Player() {
               </span>
 
               <div className="player-secondary-controls">
-                <CastControl media={castMedia} onCastingChange={setCasting} />
+                <CastControl media={castMedia} subtitles={subtitles} onCastingChange={setCasting} />
 
                 {request.mediaType === "series" && (request.episode ?? 0) > 1 && (
                   <button

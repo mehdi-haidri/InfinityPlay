@@ -476,7 +476,11 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
             )}
             {/* Sending a title to a television should not require opening the player first. The
                 trigger borrows the shape of the favourite and remove buttons it sits beside. */}
-            <CastControl media={castMedia} triggerClassName="btn btn-ghost btn-compact" />
+            <CastControl
+              media={castMedia}
+              subtitles={subtitles}
+              triggerClassName="btn btn-ghost btn-compact"
+            />
 
             <button
               className="btn btn-ghost btn-compact"
