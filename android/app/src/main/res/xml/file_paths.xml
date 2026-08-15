@@ -2,4 +2,7 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <external-path name="my_images" path="." />
     <cache-path name="my_cache_images" path="." />
+    <!-- Saved videos live in the app's own external Movies folder; another player can only open
+         one of them through a content URI, which needs the folder declared here. -->
+    <external-files-path name="movies" path="Movies/" />
 </paths>

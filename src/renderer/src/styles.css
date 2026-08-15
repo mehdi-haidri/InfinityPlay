@@ -1415,6 +1415,19 @@ button {
   background: #08090d;
 }
 
+.crash-recovery {
+  min-height: 60dvh;
+  display: grid;
+  place-content: center;
+  justify-items: start;
+  gap: 12px;
+  max-width: 680px;
+}
+
+.crash-recovery h1,
+.crash-recovery p { margin: 0; }
+.crash-recovery p { color: var(--text-muted); line-height: 1.55; }
+
 .player-root video {
   width: 100%;
   height: 100%;
@@ -2166,6 +2179,40 @@ video::cue {
 
 html[data-device="phone"] .cast-bar-name { max-width: 84px; }
 html[data-device="phone"] .cast-menu { min-width: 0; }
+
+.mobile-cast-root {
+  display: grid;
+  place-items: center;
+  padding: max(20px, var(--safe-top)) max(18px, var(--safe-right)) max(20px, var(--safe-bottom)) max(18px, var(--safe-left));
+  background:
+    radial-gradient(circle at 50% 18%, color-mix(in srgb, var(--accent) 18%, transparent), transparent 42%),
+    #07080c;
+}
+
+.mobile-cast-card {
+  width: min(100%, 440px);
+  padding: 24px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: color-mix(in srgb, var(--bg-panel) 94%, transparent);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.48);
+}
+
+.mobile-cast-heading { display: flex; align-items: center; gap: 14px; color: var(--accent); }
+.mobile-cast-heading h2 { margin: 0; color: var(--text); font-size: 21px; }
+.mobile-cast-heading p { margin: 3px 0 0; color: var(--text-muted); }
+.mobile-cast-copy { margin: 18px 0; color: var(--text-muted); line-height: 1.55; }
+.mobile-cast-card > .cast-wrap { display: flex; }
+.mobile-cast-card > .cast-wrap > .icon-button { width: 100%; min-height: 48px; border: 1px solid var(--border-strong); border-radius: 12px; }
+.mobile-cast-card .cast-menu { inset: auto 10px calc(12px + var(--safe-bottom)); }
+.mobile-cast-card .cast-bar { width: 100%; justify-content: center; flex-wrap: wrap; padding: 8px; }
+.mobile-cast-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 18px; }
+.mobile-cast-actions .btn { min-height: 46px; }
+
+@media (max-width: 390px) {
+  .mobile-cast-card { padding: 20px; }
+  .mobile-cast-actions { grid-template-columns: 1fr; }
+}
 
 /* Release notes sit inside the update card. They are long, so the body scrolls rather than
    pushing the build details off the page. */

@@ -26,6 +26,20 @@ export function applyDeviceProfile(): DeviceProfile {
   return profile;
 }
 
+/**
+ * Whether saving a file for offline playback makes sense on this device.
+ *
+ * False on Android TV alone. A set-top box has no file manager, no reliable writable storage the
+ * user can reach, and no reason to keep a copy of something it can stream — so offering a download
+ * there is a control that leads nowhere. Every other build, desktop and handheld Android included,
+ * keeps it.
+ */
+export function downloadsSupported(): boolean {
+  const androidNative =
+    /Android/i.test(navigator.userAgent) && Boolean((window as never as { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor?.isNativePlatform?.());
+  return !(androidNative && document.documentElement.dataset.device === "tv");
+}
+
 const FOCUSABLE = [
   "button:not(:disabled)",
   "a[href]",

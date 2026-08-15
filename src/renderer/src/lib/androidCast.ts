@@ -26,6 +26,7 @@ interface CastDiscoveryPlugin {
   discover: () => Promise<{ locations: string[] }>;
   /** Returns a URL the TV can fetch, republishing it locally when the host would refuse the TV. */
   publish: (options: { url: string }) => Promise<{ url: string }>;
+  publishText: (options: { text: string }) => Promise<{ url: string }>;
   unpublish: () => Promise<void>;
 }
 
@@ -92,11 +93,15 @@ export async function androidStartCast(request: CastRequest): Promise<CastSessio
   // rather than handed to the TV. Everything else is returned unchanged.
   const { url } = await discovery.publish({ url: request.url });
 
+  const subtitleUrl = request.subtitleVtt
+    ? (await discovery.publishText({ text: request.subtitleVtt })).url
+    : request.subtitleUrl;
+
   await dlnaLoad(soapFetch, transport, {
     url,
     title: request.title,
     mimeType: request.mimeType ?? "video/mp4",
-    subtitleUrl: request.subtitleUrl,
+    subtitleUrl,
     posterUrl: request.posterUrl,
     durationSeconds: request.durationSeconds,
   });

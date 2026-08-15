@@ -633,6 +633,10 @@ export interface CastRequest {
   mimeType?: string;
   posterUrl?: string;
   subtitleUrl?: string;
+  /** Selected caption track, already normalized to WebVTT for a receiver. */
+  subtitleVtt?: string;
+  subtitleName?: string;
+  subtitleLanguage?: string;
   /** Resume point, so casting continues from where local playback stopped. */
   startSeconds?: number;
   durationSeconds?: number;
@@ -718,7 +722,11 @@ export type UpdateStatus =
   | { state: "declined"; version: string; notes?: string }
   | { state: "downloaded"; version: string; notes?: string }
   | { state: "error"; message: string }
-  | { state: "unsupported"; message: string };
+  /**
+   * This build cannot replace itself. `releaseUrl` is where a new version can be fetched by hand —
+   * Android has no in-app updater, so checking and installing are the user's to do.
+   */
+  | { state: "unsupported"; message: string; releaseUrl?: string; version?: string };
 
 export const AUTHORS = [
   {
@@ -798,8 +806,9 @@ export interface InfinityPlayApi {
     clearQueue: () => Promise<Result<number>>;
     queueSize: () => Promise<Result<number>>;
     list: () => Promise<Result<DownloadRecord[]>>;
-    pause: (id: string) => Promise<Result<boolean>>;
-    resume: (id: string) => Promise<Result<boolean>>;
+    /** Refusals carry a reason, so a control that cannot act says why instead of doing nothing. */
+    pause: (id: string) => Promise<Result<DownloadControlResult>>;
+    resume: (id: string) => Promise<Result<DownloadControlResult>>;
     cancel: (id: string) => Promise<Result<boolean>>;
     remove: (id: string, deleteFile: boolean) => Promise<Result<DownloadRecord[]>>;
     clearFinished: () => Promise<Result<DownloadRecord[]>>;

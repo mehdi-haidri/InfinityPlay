@@ -38,8 +38,14 @@ class JsonFile<T> {
     if (this.cache !== null) return this.cache;
     try {
       this.cache = this.revive(JSON.parse(fs.readFileSync(this.filePath, "utf8")));
-    } catch {
-      this.cache = this.fallback;
+    } catch (error: unknown) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        console.error(`[store] Failed to read ${this.filePath}:`, error);
+        // Do not seed the write cache with defaults after a transient read failure. Doing so lets
+        // the next settings/history update overwrite valid user data that was only briefly locked.
+        throw error;
+      }
+      this.cache = structuredClone(this.fallback);
     }
     return this.cache;
   }
@@ -54,7 +60,8 @@ class JsonFile<T> {
         await fsp.mkdir(path.dirname(target), { recursive: true });
         await fsp.writeFile(temp, JSON.stringify(value, null, 2), "utf8");
         await fsp.rename(temp, target);
-      } catch {
+      } catch (error) {
+        console.error(`[store] Failed to write ${target}:`, error);
         await fsp.rm(temp, { force: true }).catch(() => undefined);
       }
     });

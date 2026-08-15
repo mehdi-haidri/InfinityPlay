@@ -20,6 +20,7 @@ import {
   SkipBack,
   SkipForward,
   SlidersHorizontal,
+  Tv,
   Volume1,
   Volume2,
   VolumeX,
@@ -42,6 +43,7 @@ import { api, unwrap } from "../lib/api";
 import { CastControl } from "./CastControl";
 import { nativePlayer } from "../lib/capacitorApi";
 import { formatTime, qualityLabel } from "../lib/format";
+import { pickCastRelease } from "../lib/castMedia";
 import { registerStreamSignature } from "../lib/streamSigner";
 import { useApp } from "../store";
 
@@ -237,6 +239,7 @@ export function Player() {
   const [buffered, setBuffered] = useState(0);
   /** True while a receiver has the stream; local playback stands down so nothing plays twice. */
   const [casting, setCasting] = useState(false);
+  const [mobileCastMode, setMobileCastMode] = useState(false);
   const [volume, setVolume] = useState(config.volume);
   const [muted, setMuted] = useState(false);
   const [rate, setRate] = useState(1);
@@ -247,6 +250,7 @@ export function Player() {
     lang: string;
     dataUrl: string;
     vttText?: string;
+    sourceUrl?: string;
   } | null>(null);
   const subPosition = config.subtitlePosition === "top" ? 28 : config.subtitlePosition === "middle" ? 54 : 86;
   const [videoFit, setVideoFit] = useState<VideoFit>("contain");
@@ -393,7 +397,7 @@ export function Player() {
   // WebView cannot reliably do either. The native activity also owns quality changes,
   // subtitles and resume, returning the final VOD position when it closes.
   useEffect(() => {
-    if (!request || !isNativeAndroidPlayer || nativeLaunch.current === request.url) return;
+    if (!request || !isNativeAndroidPlayer || mobileCastMode || nativeLaunch.current === request.url) return;
     nativeLaunch.current = request.url;
     let cancelled = false;
     const savedPosition = config.resumeBehavior === "restart" ? 0 : Math.max(0, request.startAt ?? 0);
@@ -401,6 +405,7 @@ export function Player() {
     void nativePlayer.open({
       url: request.url,
       title: request.subtitleLine ? `${request.title} · ${request.subtitleLine}` : request.title,
+      posterUrl: request.posterUrl ?? "",
       positionMs: Math.round(savedPosition * 1000),
       subtitlesJson: JSON.stringify(
         (request.subtitles ?? []).map(({ name, lang, url }) => ({ name, lang, url })),
@@ -418,10 +423,37 @@ export function Player() {
       preferredAudioLanguage: config.preferredAudio ?? "",
       preferredSubtitleLanguage: request.initialSubtitle ?? config.preferredSubtitle ?? "",
       live: request.live,
-    }).then((result) => {
+    }).then(async (result) => {
       if (cancelled) return;
       const position = Math.max(0, result.positionMs / 1000);
       const total = Math.max(0, result.durationMs / 1000);
+      if (result.castRequested) {
+        setCurrent(position);
+        setDuration(total);
+        setStartPosition(position);
+        if (result.subtitleUrl) {
+          try {
+            const dataUrl = await unwrap(api.subtitle.load(result.subtitleUrl));
+            if (cancelled) return;
+            const vttText = dataUrl.startsWith("data:text/vtt;charset=utf-8;base64,")
+              ? decodeBase64Utf8(dataUrl)
+              : "";
+            setSubtitle({
+              name: result.subtitleName || "Subtitles",
+              lang: result.subtitleLanguage || "und",
+              dataUrl,
+              vttText,
+              sourceUrl: result.subtitleUrl,
+            });
+          } catch {
+            // Casting the video remains useful when one optional caption download fails.
+          }
+        } else {
+          setSubtitle(null);
+        }
+        setMobileCastMode(true);
+        return;
+      }
       if (request.subjectId && total > 0) {
         void saveProgress({
           provider: "moviebox",
@@ -444,6 +476,7 @@ export function Player() {
           body: result.error,
         });
       }
+      nativeLaunch.current = "";
       closePlayer();
     }).catch((error) => {
       if (cancelled) return;
@@ -459,7 +492,7 @@ export function Player() {
     return () => {
       cancelled = true;
     };
-  }, [request, isNativeAndroidPlayer, config.resumeBehavior, config.preferredAudio, config.preferredSubtitle, saveProgress, notify, closePlayer]);
+  }, [request, isNativeAndroidPlayer, mobileCastMode, config.resumeBehavior, config.preferredAudio, config.preferredSubtitle, saveProgress, notify, closePlayer]);
 
   // Netflix-style hover frames are generated lazily and bucketed every five seconds.
   // The debounce prevents pointer movement from starting an FFmpeg process per pixel.
@@ -583,7 +616,7 @@ export function Player() {
         } catch {
           /* ignore */
         }
-        setSubtitle({ name: match.name, lang: match.lang, dataUrl, vttText });
+        setSubtitle({ name: match.name, lang: match.lang, dataUrl, vttText, sourceUrl: match.url });
       })
       .catch(() => {
         // A missing caption file is not worth interrupting playback for.
@@ -1015,7 +1048,30 @@ export function Player() {
 
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
-      if (target && ["INPUT", "TEXTAREA", "BUTTON", "SELECT"].includes(target.tagName)) return;
+
+      /*
+       * Only text entry swallows a shortcut.
+       *
+       * Buttons used to be on this list, and since clicking any control leaves the focus on it,
+       * every shortcut stopped working the moment the user touched the play or volume button —
+       * measured: ArrowRight seeks with focus on the body and does nothing with focus on a control.
+       * Space and Enter are still left alone on a focused button, so they press it rather than
+       * doing two things at once.
+       */
+      const tag = target?.tagName ?? "";
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || target?.isContentEditable) return;
+      if (tag === "BUTTON" && (event.key === " " || event.key === "Enter")) return;
+
+      // A modified key belongs to the browser or the OS, not to the player.
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+
+      // Number keys jump to that tenth of the film, the usual video-site behaviour.
+      if (/^[0-9]$/.test(event.key) && duration > 0) {
+        event.preventDefault();
+        void seekTo((Number(event.key) / 10) * duration);
+        wake();
+        return;
+      }
 
       switch (event.key) {
         case " ":
@@ -1025,9 +1081,13 @@ export function Player() {
           togglePlay();
           break;
         case "ArrowRight":
+        case "l":
+          event.preventDefault();
           seekBy(SEEK_STEP);
           break;
         case "ArrowLeft":
+        case "j":
+          event.preventDefault();
           seekBy(-SEEK_STEP);
           break;
         case "ArrowUp":
@@ -1037,6 +1097,16 @@ export function Player() {
         case "ArrowDown":
           event.preventDefault();
           setVolume((value) => Math.max(0, value - 0.05));
+          break;
+        case "Home":
+          event.preventDefault();
+          void seekTo(0);
+          break;
+        case "End":
+          if (duration > 0) {
+            event.preventDefault();
+            void seekTo(Math.max(duration - 5, 0));
+          }
           break;
         case "m":
           setMuted((value) => !value);
@@ -1059,7 +1129,7 @@ export function Player() {
 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [request, togglePlay, seekBy, toggleFullscreen, close, wake]);
+  }, [request, togglePlay, seekBy, seekTo, duration, toggleFullscreen, close, wake]);
 
   useEffect(() => {
     if (!menu) return;
@@ -1306,7 +1376,7 @@ export function Player() {
       } catch {
         /* ignore */
       }
-      setSubtitle({ name: option.name, lang: option.lang, dataUrl, vttText });
+      setSubtitle({ name: option.name, lang: option.lang, dataUrl, vttText, sourceUrl: option.url });
     } catch (error) {
       notify({
         kind: "error",
@@ -1353,19 +1423,21 @@ export function Player() {
    * needs nothing from the app, so casting prefers one and only falls back to the live source.
    */
   const castRelease = useMemo(
-    () =>
-      releases.find((release) => release.kind !== "dash" && release.resolution === selectedResolution)
-      ?? releases.find((release) => release.kind !== "dash"),
+    () => pickCastRelease(releases, selectedResolution),
     [releases, selectedResolution],
   );
 
-  const castUrl = request.live ? sourceUrl : castRelease?.url ?? sourceUrl;
+  const castUrl = request.live ? sourceUrl || request.url : castRelease?.url ?? sourceUrl;
 
   const castMedia = castUrl
     ? {
         url: castUrl,
         title: request.title,
         subtitleLine: request.subtitleLine,
+        subtitleUrl: subtitle?.sourceUrl,
+        subtitleVtt: subtitle?.vttText,
+        subtitleName: subtitle?.name,
+        subtitleLanguage: subtitle?.lang,
         posterUrl: request.posterUrl ?? undefined,
         // A manifest that only this app can authenticate is worth naming, so a failure is legible.
         mimeType: request.live ? "application/x-mpegURL" : undefined,
@@ -1387,6 +1459,49 @@ export function Player() {
   const isPhone = document.documentElement.dataset.device === "phone";
   const pipAvailable = !isTv && Boolean(document.pictureInPictureEnabled && videoRef.current?.requestPictureInPicture);
   const subtitleScale = (config.subtitleSize ?? 100) / 100;
+
+  if (isNativeAndroidPlayer) {
+    // Media3 owns Android playback. Keeping this desktop surface mounted underneath caused it to
+    // show behind Android PiP; only the deliberate DLNA handoff renders a remote controller.
+    if (!mobileCastMode) return null;
+    return (
+      <div className="player-root mobile-cast-root">
+        <div className="mobile-cast-card">
+          <div className="mobile-cast-heading">
+            <Tv size={28} />
+            <div>
+              <h2>Play on your TV</h2>
+              <p>{request.title}</p>
+            </div>
+          </div>
+          <p className="mobile-cast-copy">
+            Choose a DLNA television on the same Wi-Fi. The selected subtitles will be shared with the TV.
+          </p>
+          <CastControl media={castMedia} onCastingChange={setCasting} autoOpen />
+          <div className="mobile-cast-actions">
+            <button
+              className="btn btn-primary"
+              onClick={() => {
+                nativeLaunch.current = "";
+                setMobileCastMode(false);
+              }}
+              disabled={casting}
+            >
+              <Play size={16} /> Continue on phone
+            </button>
+            <button
+              className="btn"
+              onClick={() => {
+                void api.cast.stop().finally(() => closePlayer());
+              }}
+            >
+              <X size={16} /> Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="player-root" data-device={document.documentElement.dataset.device} onKeyDownCapture={playerRemoteKeyDown}>

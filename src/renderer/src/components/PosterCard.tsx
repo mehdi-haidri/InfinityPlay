@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { Heart, Star, X } from "lucide-react";
 import type { CatalogItem } from "@shared/types";
 import { useApp } from "../store";
@@ -15,7 +16,7 @@ interface Props {
   showFavorite?: boolean;
 }
 
-export function PosterCard({
+export const PosterCard = memo(function PosterCard({
   item,
   progress = 0,
   onOpen,
@@ -96,4 +97,4 @@ export function PosterCard({
       )}
     </article>
   );
-}
+});

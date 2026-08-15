@@ -13,6 +13,9 @@ import {
 import { api, unwrap } from "../lib/api";
 import { useAsync } from "../hooks/useAsync";
 import { formatBytes, qualityLabel } from "../lib/format";
+import { downloadsSupported } from "../lib/device";
+import { loadVttText, pickCastRelease, pickCastSubtitle } from "../lib/castMedia";
+import { CastControl } from "../components/CastControl";
 import { EmptyState, ErrorState, LoadingState, Spinner } from "../components/States";
 import { MediaImage } from "../components/MediaImage";
 import { findProgress, useApp } from "../store";
@@ -54,6 +57,10 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
   const [queueingSeason, setQueueingSeason] = useState(false);
   /** Null follows the selected episode; a number is a block the user chose. */
   const [episodeBlock, setEpisodeBlock] = useState<number | null>(null);
+  // Android TV has nowhere useful to put a saved file, so it does not offer to make one.
+  const canDownload = downloadsSupported();
+  /** WebVTT for the caption track a cast would carry, loaded alongside the subtitle list. */
+  const [castVtt, setCastVtt] = useState("");
 
   const details = useAsync<MediaDetails>(() => unwrap(api.catalog.details(id)), [id]);
   const isSeries = details.data?.mediaType === "series" && (details.data?.seasons.length ?? 0) > 0;
@@ -183,6 +190,27 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
     };
   }, [id, captionSource?.resourceId]);
 
+  // Casting straight from here should carry captions too, so the preferred track is fetched with
+  // the list rather than only when the player opens.
+  const castSubtitle = pickCastSubtitle(subtitles, preferredSubtitle);
+  useEffect(() => {
+    if (!castSubtitle) {
+      setCastVtt("");
+      return;
+    }
+    let cancelled = false;
+    loadVttText(castSubtitle.url)
+      .then((text) => {
+        if (!cancelled) setCastVtt(text);
+      })
+      .catch(() => {
+        if (!cancelled) setCastVtt("");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [castSubtitle?.url]);
+
   if (details.loading) return <div className="page"><LoadingState label="Loading title…" /></div>;
   if (details.error)
     return <div className="page"><ErrorState message={details.error} onRetry={details.reload} /></div>;
@@ -215,6 +243,27 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
    * than numbered pages so the label says where you are ("101–150"), and the visible block follows
    * whichever episode is selected, so resuming lands on the right one without hunting.
    */
+  /*
+   * What a television would need to take this over, built from the same progressive-release rule
+   * the player uses. Resumes where the user stopped, so casting from here lands in the same place
+   * as pressing Play would.
+   */
+  const castRelease = pickCastRelease(releases.data ?? [], preferred?.resolution);
+  const castMedia = castRelease
+    ? {
+        url: castRelease.url,
+        title: media.title,
+        subtitleLine: isSeries ? `Season ${season} · Episode ${episode}` : media.year,
+        posterUrl: media.posterUrl ?? undefined,
+        subtitleVtt: castVtt || undefined,
+        subtitleName: castSubtitle?.name,
+        subtitleLanguage: castSubtitle?.lang,
+        startSeconds: resume?.position ?? 0,
+        durationSeconds: resume?.duration ?? 0,
+        live: false,
+      }
+    : null;
+
   const episodes = activeSeason?.episodes ?? [];
   const blockStart = Math.floor(episodes.findIndex((entry) => entry.number === episode) / EPISODE_BLOCK);
   const blockCount = Math.ceil(episodes.length / EPISODE_BLOCK);
@@ -420,16 +469,21 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
                 {preferred ? ` · ${qualityLabel(preferred.resolution)}` : ""}
               </span>
             </button>
-            <button
-              className="btn"
-              disabled={!preferred}
-              onClick={() => preferred && download(preferred)}
-              aria-label="Download"
-              title="Download"
-            >
-              <Download size={17} />
-              <span className="btn-label">Download</span>
-            </button>
+            {canDownload && (
+              <button
+                className="btn"
+                disabled={!preferred}
+                onClick={() => preferred && download(preferred)}
+                aria-label="Download"
+                title="Download"
+              >
+                <Download size={17} />
+                <span className="btn-label">Download</span>
+              </button>
+            )}
+            {/* Sending a title to a television should not require opening the player first. */}
+            <CastControl media={castMedia} />
+
             <button
               className="btn btn-ghost btn-compact"
               data-active={isFavorite || undefined}
@@ -477,15 +531,17 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
                 }}
               >
                 <h2 className="section-title">Episodes</h2>
-                <button
-                  className="btn btn-sm"
-                  onClick={() => void downloadSeason()}
-                  disabled={queueingSeason || (activeSeason?.episodes.length ?? 0) === 0}
-                  title={`Download every episode of season ${season}, one after another`}
-                >
-                  {queueingSeason ? <Spinner /> : <Download size={15} />}
-                  Download season {season}
-                </button>
+                {canDownload && (
+                  <button
+                    className="btn btn-sm"
+                    onClick={() => void downloadSeason()}
+                    disabled={queueingSeason || (activeSeason?.episodes.length ?? 0) === 0}
+                    title={`Download every episode of season ${season}, one after another`}
+                  >
+                    {queueingSeason ? <Spinner /> : <Download size={15} />}
+                    Download season {season}
+                  </button>
+                )}
               </div>
 
               <div className="chip-row" style={{ marginBottom: 16 }}>
@@ -600,35 +656,37 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
                 </span>
                 <span className="release-meta">
                   {release.kind === "dash" ? "Adaptive" : formatBytes(release.sizeBytes)}
-                  <span
-                    className="icon-button"
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`Download ${qualityLabel(release.resolution)}`}
-                    data-disabled={release.kind === "dash" && !ffmpeg}
-                    title={
-                      release.kind === "dash" && !ffmpeg
-                        ? "This quality is adaptive and needs FFmpeg to be saved as a file"
-                        : `Download ${qualityLabel(release.resolution)}`
-                    }
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      download(release);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") {
+                  {canDownload && (
+                    <span
+                      className="icon-button"
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`Download ${qualityLabel(release.resolution)}`}
+                      data-disabled={release.kind === "dash" && !ffmpeg}
+                      title={
+                        release.kind === "dash" && !ffmpeg
+                          ? "This quality is adaptive and needs FFmpeg to be saved as a file"
+                          : `Download ${qualityLabel(release.resolution)}`
+                      }
+                      onClick={(event) => {
                         event.stopPropagation();
                         download(release);
-                      }
-                    }}
-                  >
-                    <Download size={15} />
-                  </span>
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.stopPropagation();
+                          download(release);
+                        }
+                      }}
+                    >
+                      <Download size={15} />
+                    </span>
+                  )}
                 </span>
               </button>
             ))}
 
-            {!ffmpeg && sourcesReady && (releases.data ?? []).some((r) => r.kind === "dash") && (
+            {canDownload && !ffmpeg && sourcesReady && (releases.data ?? []).some((r) => r.kind === "dash") && (
               <div className="setting-hint" style={{ marginTop: 10 }}>
                 Adaptive qualities stream fine but need FFmpeg to download. Install FFmpeg to
                 save them, or pick a quality that lists a file size.

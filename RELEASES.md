@@ -1,6 +1,58 @@
 # Release Notes
 
-## 0.3.3 (Latest update)
+## 0.3.4 (Latest update)
+
+### Subtitles on the television
+
+- Fixed the cause of captions never appearing on a television. The subtitle button showed while the text never arrived, because a receiver fetches a side-loaded caption track under cross-origin rules the app was not answering.
+
+### Cast without opening the player
+
+- The cast button is on the film page itself, so a title can be sent to a television without starting playback first. It resumes where you left off and carries your subtitle track.
+
+### Player keyboard shortcuts
+
+- Arrows, space, `J`/`L`, `M`, `F` and the number keys work again. Every shortcut stopped responding as soon as you clicked any control, because the focused button swallowed the key.
+- New: number keys jump to that tenth of the film, `Home` and `End` go to the start and end.
+
+### Checking for a new version on Android
+
+- The About page now asks GitHub whether a newer release exists and says which version it found, since the Android build has no in-app updater and cannot replace itself.
+- A Release page button opens that release directly, so the new version can be downloaded and installed without hunting for the address.
+
+### Android downloads
+
+- Downloads are handled by the app instead of the system download manager, which could not send the identification the stream host requires and had no way to pause.
+- Pause and resume are now on the downloads screen on the phone, and a paused file continues from where it stopped.
+- Choosing an adaptive quality saves the matching standard-quality file instead of an unplayable placeholder, and says so plainly when a title has no such file.
+- Android TV no longer offers downloads at all, having nowhere useful to put them.
+
+### Mobile player controls
+
+- One cast button instead of two. DLNA moved into the options menu, so casting starts in one place rather than asking which button your television answers on.
+- The control bar uses the same icons as the desktop player.
+
+### Mobile casting that works with more TVs
+
+- Android now includes Google's standard Chromecast sender and route picker alongside the existing DLNA option.
+- Protected streams are shared through a local relay when a television cannot use the original provider URL directly.
+- Chromecast and compatible DLNA televisions receive the selected WebVTT subtitle track from both desktop and mobile.
+- Casting keeps play, pause, seek, volume, and session state synchronized with the television.
+
+### Native mobile playback and PiP
+
+- Android playback stays in the Media3 player for reliable HLS, DASH, HEVC, headers, quality selection, audio tracks, and subtitles.
+- Entering Android Picture-in-Picture now leaves the movie detail page underneath instead of mounting the desktop/web player a second time.
+- The native player exposes Chromecast, DLNA, quality, additional playback options, and PiP in a touch-friendly layout.
+
+### Reliability and safety
+
+- Local media paths are validated before Electron serves them, including real-path checks that prevent traversal through symbolic links.
+- Interrupted settings writes no longer replace valid saved data with an empty fallback.
+- FFmpeg jobs detect stalls and reuse probe results, while route-level error recovery and network status keep failures understandable.
+- Added automated tests for the media server and persisted store, and made them a required release-build gate.
+
+## 0.3.3
 
 ### Cast to a TV
 

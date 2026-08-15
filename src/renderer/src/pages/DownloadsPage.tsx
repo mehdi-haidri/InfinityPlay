@@ -44,7 +44,6 @@ function stateLabel(record: DownloadRecord): string {
 }
 
 export function DownloadsPage() {
-  const isNativeAndroid = Boolean((window as any).Capacitor?.isNativePlatform?.());
   const downloads = useApp((state) => state.downloads);
   const loadDownloads = useApp((state) => state.loadDownloads);
   const removeDownload = useApp((state) => state.removeDownload);
@@ -212,7 +211,7 @@ export function DownloadsPage() {
             </>
           )}
 
-          {record.state === "progressing" && !isNativeAndroid && (
+          {record.state === "progressing" && (
             <button
               className="icon-button"
               onClick={() => void control(record, "pause")}
@@ -223,7 +222,7 @@ export function DownloadsPage() {
             </button>
           )}
 
-          {record.state === "paused" && !isNativeAndroid && (
+          {record.state === "paused" && (
             <button
               className="icon-button"
               onClick={() => void control(record, "resume")}

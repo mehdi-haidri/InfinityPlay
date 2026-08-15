@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { type ComponentType, useState } from "react";
 import { useApp, type Route } from "../store";
+import { downloadsSupported } from "../lib/device";
 import { BrandMark } from "./BrandMark";
 import { DownloadIcon, LiveIcon } from "./CoreIcons";
 
@@ -59,6 +60,8 @@ export function Sidebar() {
   const activeDownloads = useApp((state) =>
     state.downloads.filter((entry) => entry.state === "progressing").length,
   );
+  // A destination that can never hold anything is worse than one tab fewer.
+  const canDownload = downloadsSupported();
 
   const toggle = () => {
     setCollapsed((value) => {
@@ -82,7 +85,7 @@ export function Sidebar() {
         </button>
       </div>
 
-      {ITEMS.map(({ route: target, label, shortLabel, icon: Icon }) => (
+      {ITEMS.filter((item) => item.route.name !== "downloads" || canDownload).map(({ route: target, label, shortLabel, icon: Icon }) => (
         <button
           key={label}
           className="nav-item"

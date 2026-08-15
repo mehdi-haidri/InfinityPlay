@@ -64,6 +64,8 @@ interface NativeDownloadStatus {
 interface InfinityDownloadsPlugin {
   start(options: { url: string; title: string }): Promise<{ id: string }>;
   status(options: { id: string }): Promise<NativeDownloadStatus>;
+  pause(options: { id: string }): Promise<{ ok: boolean }>;
+  resume(options: { id: string }): Promise<{ ok: boolean }>;
   cancel(options: { id: string }): Promise<void>;
   open(options: { id: string }): Promise<void>;
 }
@@ -76,12 +78,17 @@ export interface NativePlayerResult {
   ended: boolean;
   error: string;
   cancelled: boolean;
+  castRequested: boolean;
+  subtitleUrl: string;
+  subtitleName: string;
+  subtitleLanguage: string;
 }
 
 interface InfinityPlayerPlugin {
   open(options: {
     url: string;
     title: string;
+    posterUrl: string;
     positionMs: number;
     subtitlesJson: string;
     releasesJson: string;
@@ -185,6 +192,104 @@ async function saveStoredDownloads(records: DownloadRecord[]): Promise<DownloadR
 
 const moviebox = new MovieBoxService(getSyncConfig);
 
+/** Where a newer build is published. Matches `publish.owner`/`publish.repo` in electron-builder.yml. */
+const RELEASES_URL = "https://github.com/ELhadratiOth/InfinityPlay/releases";
+
+/** `v0.3.4` and `0.3.4-beta.1` both compare as [0, 3, 4]. */
+function versionParts(value: string): number[] {
+  return value
+    .replace(/^v/i, "")
+    .split("-")[0]
+    .split(".")
+    .map((part) => Number.parseInt(part, 10) || 0);
+}
+
+/** True when `candidate` is a later version than `current`. */
+function isNewer(candidate: string, current: string): boolean {
+  const left = versionParts(candidate);
+  const right = versionParts(current);
+  for (let index = 0; index < Math.max(left.length, right.length); index++) {
+    const a = left[index] ?? 0;
+    const b = right[index] ?? 0;
+    if (a !== b) return a > b;
+  }
+  return false;
+}
+
+/**
+ * Asks GitHub what the newest published release is.
+ *
+ * Android has no in-app updater — the APK is installed by the system package installer, and nothing
+ * in the app can replace itself. What it can do is tell the user whether a newer version exists and
+ * hand them the page to get it from, which is otherwise something they would have to remember to
+ * check by hand.
+ */
+async function latestAndroidRelease(): Promise<UpdateStatus> {
+  const unavailable = (message: string): UpdateStatus => ({
+    state: "unsupported",
+    message,
+    releaseUrl: RELEASES_URL,
+  });
+
+  let current = "";
+  try {
+    current = (await CapApp.getInfo()).version;
+  } catch {
+    // Without a version to compare against, the release page is still worth offering.
+    return unavailable("Open the releases page to see whether a newer version is available.");
+  }
+
+  try {
+    const response = await fetch("https://api.github.com/repos/ELhadratiOth/InfinityPlay/releases/latest", {
+      headers: { Accept: "application/vnd.github+json" },
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
+
+    const release = (await response.json()) as { tag_name?: string; name?: string; html_url?: string };
+    const latest = (release.tag_name || release.name || "").trim();
+    if (!latest) return unavailable("The latest release could not be identified. Open the releases page to check.");
+
+    const url = release.html_url || RELEASES_URL;
+    return isNewer(latest, current)
+      ? {
+          state: "unsupported",
+          version: latest.replace(/^v/i, ""),
+          message: `Version ${latest.replace(/^v/i, "")} is available. Open the release page to download and install it.`,
+          releaseUrl: url,
+        }
+      : { state: "unsupported", version: current, message: `InfinityPlay ${current} is the latest version.`, releaseUrl: url };
+  } catch (error) {
+    return unavailable(
+      `Could not reach the releases page (${error instanceof Error ? error.message : "network error"}). Open it in a browser to check.`,
+    );
+  }
+}
+
+/**
+ * The address to actually fetch for an offline copy.
+ *
+ * An adaptive quality is a DASH manifest, not a file. The desktop app muxes one into an MP4 with
+ * FFmpeg; Android has no FFmpeg, so saving the manifest produced a few kilobytes of XML named
+ * `.mp4` that no player would open. A progressive release of the same title is a real file, so the
+ * download quietly uses that instead — and says so plainly when the title has none.
+ */
+async function downloadableUrl(request: DownloadRequest): Promise<string> {
+  if (request.sourceKind !== "dash") return request.url;
+  // Free-media and IPTV downloads have no catalog subject to look a substitute up against.
+  if (!request.subjectId) return request.url;
+
+  const releases = await moviebox.releases(request.subjectId, request.season, request.episode);
+  const progressive =
+    releases.find((release) => release.kind !== "dash" && release.resolution === request.resolution)
+    ?? releases.find((release) => release.kind !== "dash");
+
+  if (!progressive) {
+    throw new Error("This title is only offered as an adaptive stream, which this device cannot save as a file.");
+  }
+  return progressive.url;
+}
+
 const downloadListeners = new Set<(record: DownloadRecord) => void>();
 let downloadPoll: number | undefined;
 
@@ -217,11 +322,33 @@ async function refreshNativeDownloads(): Promise<DownloadRecord[]> {
       }
       return next;
     } catch {
-      return record;
+      /*
+       * Transfers live in the app process, so a record saved before a restart has no job behind it
+       * any more and the plugin answers "not found". Left alone it would sit at its old percentage
+       * for ever with no control that does anything, so it is marked interrupted and the title page
+       * can start it again — the partial file is still on disk and will be resumed from.
+       */
+      const orphaned: DownloadRecord = {
+        ...record,
+        state: "interrupted",
+        failureReason: "This download stopped when the app closed. Start it again to continue.",
+      };
+      anyChanged = true;
+      notifyDownloadProgress(orphaned);
+      return orphaned;
     }
   }));
   if (anyChanged) await saveStoredDownloads(updated);
   return updated;
+}
+
+/** Reflects a pause or resume immediately, rather than waiting for the next poll to notice. */
+async function markDownloadState(id: string, state: DownloadRecord["state"]): Promise<void> {
+  const records = await getStoredDownloads();
+  const updated = records.map((record) => (record.id === id ? { ...record, state } : record));
+  await saveStoredDownloads(updated);
+  const changed = updated.find((record) => record.id === id);
+  if (changed) notifyDownloadProgress(changed);
 }
 
 function syncDownloadPoll() {
@@ -351,9 +478,11 @@ export const createCapacitorApi = (): InfinityPlayApi => {
             ? `-S${String(request.season).padStart(2, "0")}E${String(request.episode).padStart(2, "0")}`
             : "";
           const filename = `${request.title}${episodeSuffix}-${request.resolution || "auto"}p.mp4`;
-          const { id } = await nativeDownloads.start({ url: request.url, title: filename });
+          const url = await downloadableUrl(request);
+          const { id } = await nativeDownloads.start({ url, title: filename });
           const record: DownloadRecord = {
             ...request,
+            url,
             id,
             filename,
             savePath: "Android/InfinityPlay/Movies",
@@ -375,8 +504,22 @@ export const createCapacitorApi = (): InfinityPlayApi => {
       clearQueue: () => wrapResult(async () => 0),
       queueSize: () => wrapResult(async () => 0),
       list: () => wrapResult(() => refreshNativeDownloads()),
-      pause: () => wrapResult(async () => false),
-      resume: () => wrapResult(async () => false),
+      pause: (id: string) =>
+        wrapResult(async () => {
+          const { ok } = await nativeDownloads.pause({ id });
+          if (ok) await markDownloadState(id, "paused");
+          return ok
+            ? { ok: true }
+            : { ok: false, reason: "This download has already finished or stopped." };
+        }),
+      resume: (id: string) =>
+        wrapResult(async () => {
+          const { ok } = await nativeDownloads.resume({ id });
+          if (ok) await markDownloadState(id, "progressing");
+          return ok
+            ? { ok: true }
+            : { ok: false, reason: "This download is not paused." };
+        }),
       cancel: (id: string) =>
         wrapResult(async () => {
           await nativeDownloads.cancel({ id });
@@ -444,14 +587,12 @@ export const createCapacitorApi = (): InfinityPlayApi => {
       onSession: androidOnCastSession,
     },
     updates: {
-      status: () => wrapResult(async () => ({
+      status: () => wrapResult(async (): Promise<UpdateStatus> => ({
         state: "unsupported",
-        message: "Android updates are installed through the system package installer.",
+        message: "Android installs updates through the system package installer. Check here for a newer version.",
+        releaseUrl: RELEASES_URL,
       })),
-      check: () => wrapResult(async () => ({
-        state: "unsupported",
-        message: "Android updates are installed through the system package installer.",
-      })),
+      check: () => wrapResult(latestAndroidRelease),
       // The APK is installed by the system package installer, so there is nothing here to
       // start, pause, or decline — every control resolves false and the card stays on its
       // `unsupported` message.

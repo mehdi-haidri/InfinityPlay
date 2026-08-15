@@ -41,8 +41,21 @@ final class CastProxy {
 
     private static final int MAX_REDIRECTS = 5;
 
+    /**
+     * A Chromecast fetches a side-loaded subtitle track from its own receiver origin and enforces
+     * CORS on it. Without these the track request is blocked, which shows up as a subtitle button
+     * on the television and no captions behind it.
+     */
+    private static final String CORS_HEADERS =
+        "Access-Control-Allow-Origin: *\r\n"
+            + "Access-Control-Allow-Methods: GET, HEAD, OPTIONS\r\n"
+            + "Access-Control-Allow-Headers: Content-Type, Range, Accept-Encoding\r\n"
+            + "Access-Control-Expose-Headers: Content-Length, Content-Range, Accept-Ranges\r\n";
+
     /** token -> upstream URL. Cleared when the cast stops. */
     private final Map<String, String> published = new HashMap<>();
+    /** Generated sidecars, principally WebVTT subtitles. */
+    private final Map<String, PublishedText> publishedText = new HashMap<>();
     private final Context context;
 
     private ServerSocket server;
@@ -71,9 +84,18 @@ final class CastProxy {
         return origin + "/" + token;
     }
 
+    synchronized String publishText(String text, String extension, String contentType) throws IOException {
+        start();
+        String safeExtension = extension != null && extension.matches("\\.[A-Za-z0-9]+") ? extension : ".txt";
+        String token = UUID.randomUUID().toString() + safeExtension;
+        publishedText.put(token, new PublishedText(text.getBytes(StandardCharsets.UTF_8), contentType));
+        return origin + "/" + token;
+    }
+
     /** Revokes everything published and closes the server. */
     synchronized void stop() {
         published.clear();
+        publishedText.clear();
         if (server != null) {
             try {
                 server.close();
@@ -152,9 +174,21 @@ final class CastProxy {
             String token = parts[1].replaceAll("^/+", "").split("\\?")[0];
             String range = headerOf(lines, "range");
 
+            // A Chromecast preflights a side-loaded subtitle track before fetching it.
+            if ("OPTIONS".equals(method)) {
+                write(out, "HTTP/1.1 204 No Content\r\n" + CORS_HEADERS + "Content-Length: 0\r\nConnection: close\r\n\r\n");
+                return;
+            }
+
             String upstream;
+            PublishedText text;
             synchronized (this) {
                 upstream = published.get(token);
+                text = publishedText.get(token);
+            }
+            if (text != null) {
+                serveText(text, method, range, out);
+                return;
             }
             if (upstream == null) {
                 write(out, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
@@ -170,6 +204,47 @@ final class CastProxy {
             } catch (IOException ignored) {
                 // Already closed.
             }
+        }
+    }
+
+    private void serveText(PublishedText text, String method, String range, OutputStream out) throws IOException {
+        int size = text.body.length;
+        int start = 0;
+        int end = Math.max(0, size - 1);
+        int status = 200;
+        if (range != null) {
+            java.util.regex.Matcher match = java.util.regex.Pattern.compile("bytes=(\\d*)-(\\d*)").matcher(range);
+            if (match.find()) {
+                if (!match.group(1).isEmpty()) start = Integer.parseInt(match.group(1));
+                if (!match.group(2).isEmpty()) end = Math.min(Integer.parseInt(match.group(2)), size - 1);
+                status = 206;
+            }
+        }
+        if (start >= size || end < start) {
+            write(out, "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */" + size + "\r\nConnection: close\r\n\r\n");
+            return;
+        }
+        StringBuilder head = new StringBuilder(status == 206 ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n");
+        head.append(CORS_HEADERS)
+            .append("Content-Type: ").append(text.contentType).append("\r\n")
+            .append("Content-Length: ").append(end - start + 1).append("\r\n")
+            .append("Accept-Ranges: bytes\r\n");
+        if (status == 206) head.append("Content-Range: bytes ").append(start).append('-').append(end).append('/').append(size).append("\r\n");
+        head.append("Connection: close\r\n\r\n");
+        write(out, head.toString());
+        if (!"HEAD".equals(method)) {
+            out.write(text.body, start, end - start + 1);
+            out.flush();
+        }
+    }
+
+    private static final class PublishedText {
+        final byte[] body;
+        final String contentType;
+
+        PublishedText(byte[] body, String contentType) {
+            this.body = body;
+            this.contentType = contentType == null || contentType.isEmpty() ? "text/plain; charset=utf-8" : contentType;
         }
     }
 
@@ -206,7 +281,8 @@ final class CastProxy {
             .append(status)
             .append(' ')
             .append(status == 206 ? "Partial Content" : status == 200 ? "OK" : "Error")
-            .append("\r\n");
+            .append("\r\n")
+            .append(CORS_HEADERS);
 
         // Copied from upstream, never invented: these are what decide whether the TV starts and seeks.
         appendHeader(head, connection, "Content-Type", "content-type");

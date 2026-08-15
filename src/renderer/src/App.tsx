@@ -18,6 +18,7 @@ import { PersonPage } from "./pages/PersonPage";
 import { AnimePage } from "./pages/AnimePage";
 import { FreeLibraryPage } from "./pages/FreeLibraryPage";
 import { MorePage } from "./pages/MorePage";
+import { ErrorBoundary } from "./components/ErrorBoundary";
 import { formatBytes } from "./lib/format";
 import { useApp } from "./store";
 import { applyDeviceProfile, installTvSpatialNavigation } from "./lib/device";
@@ -190,6 +191,28 @@ function LiveAnnouncements() {
   );
 }
 
+function NetworkStatus() {
+  const notify = useApp((state) => state.notify);
+
+  useEffect(() => {
+    const offline = () => notify({
+      kind: "error",
+      title: "You are offline",
+      body: "Playback, search, and device discovery will resume when the network returns.",
+    });
+    const online = () => notify({ kind: "info", title: "Back online" });
+    window.addEventListener("offline", offline);
+    window.addEventListener("online", online);
+    if (!navigator.onLine) offline();
+    return () => {
+      window.removeEventListener("offline", offline);
+      window.removeEventListener("online", online);
+    };
+  }, [notify]);
+
+  return null;
+}
+
 export function App() {
   const loadConfig = useApp((state) => state.loadConfig);
   const loadCapabilities = useApp((state) => state.loadCapabilities);
@@ -264,7 +287,9 @@ export function App() {
       <Sidebar />
       <main className="main" id="main-content" tabIndex={-1}>
         <TopBar />
-        <Routes />
+        <ErrorBoundary resetKey={JSON.stringify(route)}>
+          <Routes />
+        </ErrorBoundary>
       </main>
       {player && (
         <Suspense fallback={<div className="player-module-loader" aria-label="Opening player"><div className="spinner" /></div>}>
@@ -274,6 +299,7 @@ export function App() {
       <Toasts />
       <UpdatePrompts />
       <LiveAnnouncements />
+      <NetworkStatus />
       <Splash ready={booted} />
     </div>
   );

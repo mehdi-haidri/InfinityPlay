@@ -1,6 +1,6 @@
 {
   "name": "infinityplay",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Desktop app for finding and streaming movies, TV shows, anime and live TV.",
   "desktopName": "InfinityPlay.desktop",
   "main": "./out/main/index.js",
@@ -33,6 +33,7 @@
     "start": "electron-vite preview",
     "build": "electron-vite build",
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "vitest run",
     "dist": "electron-vite build && electron-builder --publish never",
     "dist:win": "electron-vite build && electron-builder --win --publish never",
     "dist:mac": "electron-vite build && electron-builder --mac --publish never",
@@ -75,6 +76,7 @@
     "react-dom": "^19.2.8",
     "typescript": "^7.0.2",
     "vite": "^7.3.6",
+    "vitest": "^4.1.10",
     "zustand": "^5.0.15"
   }
 }

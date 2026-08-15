@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Download, Mail, Pause, Play, RefreshCw, RotateCw } from "lucide-react";
+import { Download, ExternalLink, Mail, Pause, Play, RefreshCw, RotateCw } from "lucide-react";
 import { AUTHORS, type AppInfo, type UpdateStatus } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { formatBytes } from "../lib/format";
@@ -89,6 +89,8 @@ export function AboutPage() {
 
   const check = async () => {
     try {
+      // Builds that answer synchronously would otherwise give no sign the button did anything.
+      setStatus({ state: "checking" });
       setStatus(await unwrap(api.updates.check()));
     } catch (error) {
       notify({
@@ -186,9 +188,23 @@ export function AboutPage() {
                 <Download size={14} /> Restart & install
               </button>
             ) : status.state === "unsupported" ? (
-              // No button: this build cannot replace itself, and sending the user to a browser
-              // is not an update flow. The message alone says why.
-              null
+              /* This build cannot replace itself. Where releases are published somewhere the user
+                 can reach — Android, which has no in-app updater at all — it can still say whether
+                 a newer version exists and open the page to get it. Builds without such a place
+                 show no button, since the message alone is the whole story. */
+              status.releaseUrl ? (
+                <>
+                  <button className="btn btn-sm" onClick={() => void check()} disabled={line.busy}>
+                    {line.busy ? <RefreshCw size={14} /> : <RotateCw size={14} />} Check now
+                  </button>
+                  <button
+                    className="btn btn-sm btn-primary"
+                    onClick={() => void unwrap(api.system.openExternal(status.releaseUrl!))}
+                  >
+                    <ExternalLink size={14} /> Release page
+                  </button>
+                </>
+              ) : null
             ) : status.state === "available" ? (
               <>
                 <button className="btn btn-sm btn-primary" onClick={download}>

@@ -68,6 +68,7 @@ const SUPPORTED_VIDEO_CODECS = {
 const prepared = new Map<string, { source: string; startAt: number; createdAt: number; temporary?: boolean }>();
 const probeCache = new Map<string, { codec: string; duration: number; checkedAt: number }>();
 const CACHE_MS = 6 * 60 * 60 * 1000;
+const PROBE_CACHE_MAX = 80;
 const previewCache = new Map<string, { dataUrl: string; createdAt: number }>();
 const PREVIEW_CACHE_MS = 30 * 60 * 1000;
 const PREVIEW_CACHE_MAX = 140;
@@ -80,6 +81,15 @@ function prunePrepared(): void {
       }
       prepared.delete(key);
     }
+  }
+}
+
+function cacheProbe(source: string, value: { codec: string; duration: number; checkedAt: number }): void {
+  probeCache.delete(source);
+  probeCache.set(source, value);
+  const cutoff = Date.now() - CACHE_MS;
+  for (const [key, entry] of probeCache) {
+    if (entry.checkedAt < cutoff || probeCache.size > PROBE_CACHE_MAX) probeCache.delete(key);
   }
 }
 
@@ -101,7 +111,7 @@ function probeMedia(source: string): Promise<{ codec: string; duration: number }
           const codecMatch = xml.match(/codecs="([^"]+)"/i);
           const codec = codecMatch ? codecMatch[1] : "h264";
           const result = { codec, duration, checkedAt: Date.now() };
-          probeCache.set(source, result);
+          cacheProbe(source, result);
           return Promise.resolve(result);
         }
       }
@@ -122,7 +132,7 @@ function probeMedia(source: string): Promise<{ codec: string; duration: number }
         try { child.kill("SIGKILL"); } catch { /* ignore */ }
       }
       const result = { codec, duration, checkedAt: Date.now() };
-      if (codec || duration > 0) probeCache.set(source, result);
+      if (codec || duration > 0) cacheProbe(source, result);
       resolve(result);
     };
 

@@ -33,9 +33,10 @@ const MIME: Record<string, string> = {
 
 /** What a token stands for: a file on disk, or a remote URL this process fetches on the TV's behalf. */
 type Publication = { kind: "file"; file: string } | { kind: "remote"; url: string };
+type TextPublication = { kind: "text"; body: Buffer; contentType: string };
 
 /** token -> publication. Cleared when the cast stops. */
-const published = new Map<string, Publication>();
+const published = new Map<string, Publication | TextPublication>();
 let server: http.Server | null = null;
 let origin = "";
 
@@ -130,12 +131,68 @@ function proxy(target: string, request: http.IncomingMessage, response: http.Ser
   upstream.end();
 }
 
+/**
+ * Cross-origin headers, on every response.
+ *
+ * A Chromecast fetches a side-loaded subtitle track from its own receiver origin and enforces CORS
+ * on it — with no `Access-Control-Allow-Origin` the track request is blocked, which is why the
+ * subtitle button appeared on the TV while the captions themselves never arrived. The receiver
+ * preflights first, so `OPTIONS` has to be answered and `Range` has to be an allowed header.
+ */
+function allowCrossOrigin(response: http.ServerResponse): void {
+  response.setHeader("Access-Control-Allow-Origin", "*");
+  response.setHeader("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
+  response.setHeader("Access-Control-Allow-Headers", "Content-Type, Range, Accept-Encoding");
+  response.setHeader("Access-Control-Expose-Headers", "Content-Length, Content-Range, Accept-Ranges");
+}
+
 function serve(request: http.IncomingMessage, response: http.ServerResponse): void {
+  allowCrossOrigin(response);
+
+  if (request.method === "OPTIONS") {
+    response.writeHead(204).end();
+    return;
+  }
+
   const token = (request.url ?? "").replace(/^\/+/, "").split("?")[0];
   const entry = published.get(token);
 
   if (!entry) {
     response.writeHead(404).end();
+    return;
+  }
+
+  if (entry.kind === "text") {
+    const range = /bytes=(\d*)-(\d*)/.exec(request.headers.range ?? "");
+    const size = entry.body.length;
+    if (request.method === "HEAD") {
+      response.writeHead(200, {
+        "Content-Length": size,
+        "Content-Type": entry.contentType,
+        "Accept-Ranges": "bytes",
+      }).end();
+      return;
+    }
+    if (range) {
+      const start = range[1] ? Number.parseInt(range[1], 10) : 0;
+      const end = range[2] ? Math.min(Number.parseInt(range[2], 10), size - 1) : size - 1;
+      if (Number.isNaN(start) || start >= size || end < start) {
+        response.writeHead(416, { "Content-Range": `bytes */${size}` }).end();
+        return;
+      }
+      response.writeHead(206, {
+        "Content-Range": `bytes ${start}-${end}/${size}`,
+        "Content-Length": end - start + 1,
+        "Content-Type": entry.contentType,
+        "Accept-Ranges": "bytes",
+      }).end(entry.body.subarray(start, end + 1));
+      return;
+    }
+    response.writeHead(200, {
+      "Content-Length": size,
+      "Content-Type": entry.contentType,
+      "Accept-Ranges": "bytes",
+    }).end(entry.body);
     return;
   }
 
@@ -262,6 +319,19 @@ export async function publicMediaUrl(url: string): Promise<string> {
   const base = await ensureServer();
   const token = `${randomUUID()}${path.extname(file)}`;
   published.set(token, { kind: "file", file });
+  return `${base}/${token}`;
+}
+
+/** Publishes generated sidecar data such as the selected WebVTT track to the TV. */
+export async function publicTextUrl(
+  body: string,
+  extension = ".vtt",
+  contentType = "text/vtt; charset=utf-8",
+): Promise<string> {
+  const base = await ensureServer();
+  const safeExtension = /^\.[a-z0-9]+$/i.test(extension) ? extension : ".txt";
+  const token = `${randomUUID()}${safeExtension}`;
+  published.set(token, { kind: "text", body: Buffer.from(body, "utf8"), contentType });
   return `${base}/${token}`;
 }
 
