@@ -27,12 +27,19 @@ export function CastControl({
   media,
   onCastingChange,
   autoOpen = false,
+  triggerClassName = "icon-button",
 }: {
   /** Everything the receiver needs; null while nothing is playable yet. */
   media: Omit<CastRequest, "deviceId"> | null;
   onCastingChange?: (casting: boolean) => void;
   /** Opens the picker after Android's native player hands off to its DLNA controller. */
   autoOpen?: boolean;
+  /**
+   * Class for the button that opens the picker. The player's controls are bare icon buttons, while
+   * the details page sits this beside bordered pills — the trigger takes whichever shape its
+   * neighbours have so it does not read as a stray control.
+   */
+  triggerClassName?: string;
 }) {
   const notify = useApp((state) => state.notify);
   const [open, setOpen] = useState(false);
@@ -170,7 +177,7 @@ export function CastControl({
   return (
     <div className="cast-wrap" ref={panelRef}>
       <button
-        className="icon-button"
+        className={triggerClassName}
         onClick={() => (open ? setOpen(false) : openPicker())}
         aria-label="Cast to a device"
         title="Cast to a device"

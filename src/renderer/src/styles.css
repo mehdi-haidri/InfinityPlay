@@ -2123,24 +2123,73 @@ video::cue {
 
 .cast-wrap { position: relative; display: inline-flex; }
 
-.cast-menu { min-width: 268px; }
+/*
+ * The device picker is reached from the player overlay and from the film page, so it cannot rely on
+ * the player's stacking context. Without a layer of its own the list opened underneath the sections
+ * below it — and underneath the bottom bar on a phone — which read as the picker not opening.
+ */
+.cast-menu {
+  z-index: var(--layer-sheet);
+  min-width: 268px;
+  max-width: min(320px, calc(100vw - 28px));
+}
+
+/* On the film page it is an ordinary popover hanging off its button, not part of a video overlay. */
+.detail-actions .cast-menu {
+  right: 0;
+  bottom: calc(100% + 10px);
+}
+
+/*
+ * A phone gets the full-width sheet the other menus use, lifted clear of the navigation bar.
+ * Scoped through `.cast-wrap` deliberately: the generic phone rule for `.player-menu` is declared
+ * later in this file, so an equally specific selector here would lose to it.
+ */
+html[data-device="phone"] .cast-wrap .cast-menu {
+  position: fixed;
+  inset: auto 10px calc(76px + var(--safe-bottom)) 10px;
+  max-width: none;
+}
+
+html[data-device="phone"] .player-root .cast-wrap .cast-menu {
+  /* Inside the player there is no navigation bar to clear. */
+  inset: auto 10px calc(12px + var(--safe-bottom)) 10px;
+}
 
 .cast-device {
   display: flex;
   align-items: center;
-  gap: 11px;
+  gap: 12px;
   width: 100%;
-  min-height: 48px;
-  padding: 8px 10px;
-  border-radius: 10px;
+  min-height: 52px;
+  padding: 9px 11px;
+  border-radius: 12px;
   color: var(--text-muted);
   text-align: left;
 }
 
 .cast-device:hover { background: var(--bg-hover); color: var(--text); }
 
+/* The screen icon is the row's anchor, so it gets a tile of its own rather than floating in text. */
+.cast-device > svg {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 9px;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+
 .cast-device-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.cast-device-name { color: var(--text); font-size: 13px; font-weight: 550; }
+.cast-device-name {
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .cast-device-kind { color: var(--text-faint); font-size: 11px; }
 
 /* The transport bar replaces the cast button once a receiver has the stream. */

@@ -341,13 +341,6 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
       });
       return;
     }
-    if (release.kind === "dash") {
-      notify({
-        kind: "info",
-        title: `Preparing ${qualityLabel(release.resolution)}`,
-        body: "InfinityPlay will save this adaptive quality as a standalone MP4.",
-      });
-    }
     void beginDownload({
       url: release.url,
       // Captions hang off a progressive release; the adaptive manifest has no caption id.
@@ -481,8 +474,9 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
                 <span className="btn-label">Download</span>
               </button>
             )}
-            {/* Sending a title to a television should not require opening the player first. */}
-            <CastControl media={castMedia} />
+            {/* Sending a title to a television should not require opening the player first. The
+                trigger borrows the shape of the favourite and remove buttons it sits beside. */}
+            <CastControl media={castMedia} triggerClassName="btn btn-ghost btn-compact" />
 
             <button
               className="btn btn-ghost btn-compact"
