@@ -82,8 +82,27 @@ const LOCAL_MEDIA_CORS = {
  */
 function registerLocalMediaProtocol(): void {
   protocol.handle(LOCAL_MEDIA_SCHEME, async (request) => {
-    const target = new URL(request.url).searchParams.get("path");
-    if (!target) return new Response("Missing path", { status: 400 });
+    const requested = new URL(request.url).searchParams.get("path");
+    if (!requested) return new Response("Missing path", { status: 400 });
+
+    // Resolve symlinks as well as `..`: a path that merely starts with Downloads is not enough
+    // (for example, `Downloads-old`), and a symlink inside Downloads may point anywhere.
+    let target: string;
+    try {
+      target = await fs.promises.realpath(requested);
+      const roots = await Promise.all(
+        [app.getPath("downloads"), app.getPath("temp"), app.getPath("userData")].map(async (root) =>
+          fs.promises.realpath(root).catch(() => path.resolve(root)),
+        ),
+      );
+      const allowed = roots.some((root) => {
+        const relative = path.relative(root, target);
+        return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+      });
+      if (!allowed) return new Response("Forbidden", { status: 403 });
+    } catch {
+      return new Response("Not found", { status: 404 });
+    }
 
     let size: number;
     try {

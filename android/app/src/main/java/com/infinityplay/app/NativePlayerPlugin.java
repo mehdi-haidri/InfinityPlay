@@ -23,6 +23,7 @@ public class NativePlayerPlugin extends Plugin {
         Intent intent = new Intent(getContext(), NativePlayerActivity.class);
         intent.putExtra(NativePlayerActivity.EXTRA_URL, url);
         intent.putExtra(NativePlayerActivity.EXTRA_TITLE, call.getString("title", "InfinityPlay"));
+        intent.putExtra(NativePlayerActivity.EXTRA_POSTER_URL, call.getString("posterUrl", ""));
         intent.putExtra(NativePlayerActivity.EXTRA_POSITION_MS, Math.max(0L, call.getLong("positionMs", 0L)));
         intent.putExtra(NativePlayerActivity.EXTRA_SUBTITLES_JSON, call.getString("subtitlesJson", "[]"));
         intent.putExtra(NativePlayerActivity.EXTRA_RELEASES_JSON, call.getString("releasesJson", "[]"));
@@ -43,6 +44,10 @@ public class NativePlayerPlugin extends Plugin {
         result.put("ended", data != null && data.getBooleanExtra(NativePlayerActivity.RESULT_ENDED, false));
         result.put("error", data == null ? "" : data.getStringExtra(NativePlayerActivity.RESULT_ERROR));
         result.put("cancelled", activityResult.getResultCode() != Activity.RESULT_OK);
+        result.put("castRequested", data != null && data.getBooleanExtra(NativePlayerActivity.RESULT_CAST_REQUESTED, false));
+        result.put("subtitleUrl", data == null ? "" : data.getStringExtra(NativePlayerActivity.RESULT_SUBTITLE_URL));
+        result.put("subtitleName", data == null ? "" : data.getStringExtra(NativePlayerActivity.RESULT_SUBTITLE_NAME));
+        result.put("subtitleLanguage", data == null ? "" : data.getStringExtra(NativePlayerActivity.RESULT_SUBTITLE_LANGUAGE));
         call.resolve(result);
     }
 }

@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { memo, useRef } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { CatalogItem } from "@shared/types";
 import { PosterCard } from "./PosterCard";
@@ -11,7 +11,7 @@ interface Props {
   onRemove?: (item: CatalogItem) => void;
 }
 
-export function Row({ title, items, progressOf, onOpen, onRemove }: Props) {
+export const Row = memo(function Row({ title, items, progressOf, onOpen, onRemove }: Props) {
   const scroller = useRef<HTMLDivElement>(null);
 
   const scrollBy = (direction: 1 | -1) => {
@@ -58,4 +58,4 @@ export function Row({ title, items, progressOf, onOpen, onRemove }: Props) {
       </div>
     </section>
   );
-}
+});

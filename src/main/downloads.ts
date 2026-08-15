@@ -515,7 +515,28 @@ function startAdaptiveDownload(
   activeAdaptive.set(record.id, child);
   const errors: Buffer[] = [];
   let settled = false;
+  let lastActivity = Date.now();
+  const stallTimer = setInterval(() => {
+    const current = findRecord(record.id);
+    if (current?.state === "paused") {
+      lastActivity = Date.now();
+      return;
+    }
+    if (Date.now() - lastActivity <= 60_000 || settled) return;
+    settled = true;
+    activeAdaptive.delete(record.id);
+    child.kill("SIGKILL");
+    clearInterval(stallTimer);
+    finishAdaptiveDownload(
+      record,
+      partPath,
+      manifestPath,
+      false,
+      "Download stalled because no data arrived for 60 seconds.",
+    );
+  }, 10_000);
   child.stderr?.on("data", (chunk: Buffer) => {
+    lastActivity = Date.now();
     errors.push(chunk);
     if (errors.length > 20) errors.shift();
     try {
@@ -529,11 +550,13 @@ function startAdaptiveDownload(
   child.once("error", (error) => {
     if (settled) return;
     settled = true;
+    clearInterval(stallTimer);
     finishAdaptiveDownload(record, partPath, manifestPath, false, error.message);
   });
   child.once("close", (code, signal) => {
     if (settled) return;
     settled = true;
+    clearInterval(stallTimer);
     activeAdaptive.delete(record.id);
     if (signal) return;
     const message = Buffer.concat(errors).toString("utf8").trim().split("\n").at(-1);

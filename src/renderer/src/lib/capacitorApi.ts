@@ -76,12 +76,17 @@ export interface NativePlayerResult {
   ended: boolean;
   error: string;
   cancelled: boolean;
+  castRequested: boolean;
+  subtitleUrl: string;
+  subtitleName: string;
+  subtitleLanguage: string;
 }
 
 interface InfinityPlayerPlugin {
   open(options: {
     url: string;
     title: string;
+    posterUrl: string;
     positionMs: number;
     subtitlesJson: string;
     releasesJson: string;

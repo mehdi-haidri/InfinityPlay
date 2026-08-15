@@ -27,8 +27,9 @@ import java.util.Set;
  * follows — reading the device description and posting SOAP actions — is plain HTTP and is handled
  * by the shared TypeScript so both platforms run the same control path.
  *
- * Chromecast is deliberately absent. Its sender library needs Google Play Services, which
- * de-Googled phones and many TV boxes do not have; DLNA needs nothing but the network.
+ * Chromecast is handled by the Google Cast sender in NativePlayerActivity. Keeping SSDP/DLNA in
+ * this separate plugin preserves a standards-based fallback for televisions and phones without
+ * Google Play Services.
  */
 @CapacitorPlugin(name = "CastDiscovery")
 public class CastPlugin extends Plugin {
@@ -67,6 +68,24 @@ public class CastPlugin extends Plugin {
             call.resolve(result);
         } catch (Exception error) {
             call.reject("The stream could not be shared: " + error.getMessage());
+        }
+    }
+
+    /** Publishes a generated WebVTT sidecar that a TV on the LAN can fetch. */
+    @PluginMethod
+    public void publishText(PluginCall call) {
+        String text = call.getString("text");
+        if (text == null || text.isEmpty()) {
+            call.reject("Subtitle text is required.");
+            return;
+        }
+        try {
+            if (proxy == null) proxy = new CastProxy(getContext());
+            JSObject result = new JSObject();
+            result.put("url", proxy.publishText(text, ".vtt", "text/vtt; charset=utf-8"));
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject("The subtitles could not be shared: " + error.getMessage());
         }
     }
 

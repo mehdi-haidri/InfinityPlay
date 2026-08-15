@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Cast, Loader2, Pause, Play, RefreshCw, Square, Tv } from "lucide-react";
 import type { CastDevice, CastRequest, CastSession } from "@shared/types";
 import { api, unwrap } from "../lib/api";
@@ -26,10 +26,13 @@ function formatClock(seconds: number): string {
 export function CastControl({
   media,
   onCastingChange,
+  autoOpen = false,
 }: {
   /** Everything the receiver needs; null while nothing is playable yet. */
   media: Omit<CastRequest, "deviceId"> | null;
   onCastingChange?: (casting: boolean) => void;
+  /** Opens the picker after Android's native player hands off to its DLNA controller. */
+  autoOpen?: boolean;
 }) {
   const notify = useApp((state) => state.notify);
   const [open, setOpen] = useState(false);
@@ -37,6 +40,7 @@ export function CastControl({
   const [scanning, setScanning] = useState(false);
   const [session, setSession] = useState<CastSession | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const autoOpened = useRef(false);
 
   useEffect(() => {
     unwrap(api.cast.session()).then(setSession).catch(() => undefined);
@@ -57,7 +61,7 @@ export function CastControl({
     return () => document.removeEventListener("mousedown", onDown);
   }, [open]);
 
-  const scan = async () => {
+  const scan = useCallback(async () => {
     setScanning(true);
     try {
       setDevices(await unwrap(api.cast.discover()));
@@ -70,13 +74,19 @@ export function CastControl({
     } finally {
       setScanning(false);
     }
-  };
+  }, [notify]);
 
-  const openPicker = () => {
+  const openPicker = useCallback(() => {
     setOpen(true);
     // Devices come and go, so every opening re-scans rather than trusting a stale list.
     void scan();
-  };
+  }, [scan]);
+
+  useEffect(() => {
+    if (!autoOpen || autoOpened.current || session || !media) return;
+    autoOpened.current = true;
+    openPicker();
+  }, [autoOpen, media, openPicker, session]);
 
   const castTo = async (device: CastDevice) => {
     if (!media) return;

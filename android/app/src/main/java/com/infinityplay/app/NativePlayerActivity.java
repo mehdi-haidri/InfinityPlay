@@ -17,6 +17,7 @@ import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import android.widget.Toast;
 
 import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.Nullable;
@@ -41,6 +42,18 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory;
 import androidx.media3.exoplayer.trackselection.DefaultTrackSelector;
 import androidx.media3.ui.PlayerView;
 import androidx.media3.ui.AspectRatioFrameLayout;
+import androidx.mediarouter.app.MediaRouteButton;
+
+import com.google.android.gms.cast.MediaInfo;
+import com.google.android.gms.cast.MediaLoadRequestData;
+import com.google.android.gms.cast.MediaMetadata;
+import com.google.android.gms.cast.MediaTrack;
+import com.google.android.gms.cast.framework.CastButtonFactory;
+import com.google.android.gms.cast.framework.CastContext;
+import com.google.android.gms.cast.framework.CastSession;
+import com.google.android.gms.cast.framework.SessionManagerListener;
+import com.google.android.gms.cast.framework.media.RemoteMediaClient;
+import com.google.android.gms.common.images.WebImage;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -50,12 +63,18 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 
 /** Full-screen Media3 player for Android VOD, HLS/DASH IPTV, and RTSP sources. */
 @OptIn(markerClass = UnstableApi.class)
 public class NativePlayerActivity extends AppCompatActivity {
     public static final String EXTRA_URL = "url";
     public static final String EXTRA_TITLE = "title";
+    public static final String EXTRA_POSTER_URL = "posterUrl";
     public static final String EXTRA_POSITION_MS = "positionMs";
     public static final String EXTRA_SUBTITLES_JSON = "subtitlesJson";
     public static final String EXTRA_RELEASES_JSON = "releasesJson";
@@ -67,6 +86,10 @@ public class NativePlayerActivity extends AppCompatActivity {
     public static final String RESULT_DURATION_MS = "durationMs";
     public static final String RESULT_ENDED = "ended";
     public static final String RESULT_ERROR = "error";
+    public static final String RESULT_CAST_REQUESTED = "castRequested";
+    public static final String RESULT_SUBTITLE_URL = "subtitleUrl";
+    public static final String RESULT_SUBTITLE_NAME = "subtitleName";
+    public static final String RESULT_SUBTITLE_LANGUAGE = "subtitleLanguage";
 
     private PlayerView playerView;
     private TextView qualityButton;
@@ -81,6 +104,10 @@ public class NativePlayerActivity extends AppCompatActivity {
     private long startPositionMs;
     private boolean ended;
     private boolean live;
+    private boolean castRequested;
+    private CastContext castContext;
+    private CastProxy castProxy;
+    private SessionManagerListener<CastSession> castSessionListener;
     private String playbackError = "";
     private String signedQuery = "";
     private String signedHost = "";
@@ -164,6 +191,8 @@ public class NativePlayerActivity extends AppCompatActivity {
         quickActions.addView(qualityButton);
         quickActions.addView(audioButton);
         quickActions.addView(optionsButton);
+        quickActions.addView(createActionButton("DLNA", view -> requestDlnaCast()));
+        addChromecastButton();
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && getPackageManager().hasSystemFeature("android.software.picture_in_picture")) {
             pipButton = createActionButton("PiP", view -> enterPip());
             quickActions.addView(pipButton);
@@ -184,6 +213,187 @@ public class NativePlayerActivity extends AppCompatActivity {
                 finish();
             }
         });
+    }
+
+    /** Google's standard route picker; DLNA remains available beside it for non-Google TVs. */
+    private void addChromecastButton() {
+        try {
+            castContext = CastContext.getSharedInstance(this);
+            MediaRouteButton button = new MediaRouteButton(this);
+            LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(dp(48), dp(42));
+            layout.setMarginStart(dp(6));
+            button.setLayoutParams(layout);
+            button.setContentDescription("Cast to Chromecast");
+            CastButtonFactory.setUpMediaRouteButton(getApplicationContext(), button);
+            quickActions.addView(button);
+            castSessionListener = new SessionManagerListener<CastSession>() {
+                @Override public void onSessionStarting(CastSession session) {}
+                @Override public void onSessionStarted(CastSession session, String sessionId) { loadRemoteMedia(session); }
+                @Override public void onSessionStartFailed(CastSession session, int error) {
+                    Toast.makeText(NativePlayerActivity.this, "Chromecast connection failed.", Toast.LENGTH_SHORT).show();
+                }
+                @Override public void onSessionEnding(CastSession session) {}
+                @Override public void onSessionEnded(CastSession session, int error) {
+                    if (castProxy != null) castProxy.stop();
+                    castProxy = null;
+                }
+                @Override public void onSessionResuming(CastSession session, String sessionId) {}
+                @Override public void onSessionResumed(CastSession session, boolean wasSuspended) { loadRemoteMedia(session); }
+                @Override public void onSessionResumeFailed(CastSession session, int error) {}
+                @Override public void onSessionSuspended(CastSession session, int reason) {}
+            };
+        } catch (Exception unavailable) {
+            // Phones without Google Play services still retain the adjacent DLNA action.
+            castContext = null;
+            castSessionListener = null;
+        }
+    }
+
+    @Nullable
+    private JSONObject selectedSubtitle() {
+        if (player != null) {
+            for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
+                if (group.getType() != C.TRACK_TYPE_TEXT) continue;
+                for (int index = 0; index < group.length; index++) {
+                    if (!group.isTrackSelected(index)) continue;
+                    String id = group.getTrackFormat(index).id;
+                    if (id != null && id.startsWith("infinityplay-subtitle-")) {
+                        try {
+                            int selected = Integer.parseInt(id.substring("infinityplay-subtitle-".length()));
+                            return new JSONArray(getIntent().getStringExtra(EXTRA_SUBTITLES_JSON)).optJSONObject(selected);
+                        } catch (Exception ignored) {
+                            // Fall through to the configured-language match below.
+                        }
+                    }
+                }
+            }
+        }
+        try {
+            String wanted = getIntent().getStringExtra(EXTRA_PREFERRED_SUBTITLE);
+            if (wanted == null || wanted.isEmpty() || "off".equalsIgnoreCase(wanted)) return null;
+            JSONArray options = new JSONArray(getIntent().getStringExtra(EXTRA_SUBTITLES_JSON));
+            for (int index = 0; index < options.length(); index++) {
+                JSONObject option = options.optJSONObject(index);
+                if (option == null) continue;
+                if (wanted.equalsIgnoreCase(option.optString("lang")) || wanted.equalsIgnoreCase(option.optString("name"))) {
+                    return option;
+                }
+            }
+        } catch (Exception ignored) {
+            // Casting without captions remains available.
+        }
+        return null;
+    }
+
+    private String castMimeType(String url) {
+        String path = Uri.parse(url).getPath();
+        String lower = path == null ? "" : path.toLowerCase(java.util.Locale.ROOT);
+        if (lower.endsWith(".m3u8")) return MimeTypes.APPLICATION_M3U8;
+        if (lower.endsWith(".mpd")) return MimeTypes.APPLICATION_MPD;
+        if (lower.endsWith(".webm")) return MimeTypes.VIDEO_WEBM;
+        return MimeTypes.VIDEO_MP4;
+    }
+
+    private String fetchSubtitleVtt(String url) throws Exception {
+        if (url == null || !(url.startsWith("http://") || url.startsWith("https://"))) return "";
+        HttpURLConnection connection = (HttpURLConnection) new URL(url).openConnection();
+        connection.setConnectTimeout(15_000);
+        connection.setReadTimeout(15_000);
+        connection.setRequestProperty("User-Agent", "InfinityPlay Android");
+        try (InputStream input = connection.getInputStream(); ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            byte[] buffer = new byte[16 * 1024];
+            int read;
+            while ((read = input.read(buffer)) != -1) output.write(buffer, 0, read);
+            String raw = output.toString(StandardCharsets.UTF_8.name())
+                .replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .replace("\uFEFF", "");
+            if (raw.trim().startsWith("WEBVTT")) return raw;
+            StringBuilder vtt = new StringBuilder("WEBVTT\n\n");
+            for (String line : raw.split("\n", -1)) {
+                if (line.trim().matches("\\d+")) continue;
+                if (line.contains("-->")) line = line.replace(',', '.');
+                vtt.append(line).append('\n');
+            }
+            return vtt.toString();
+        } finally {
+            connection.disconnect();
+        }
+    }
+
+    private void loadRemoteMedia(CastSession session) {
+        if (session == null) return;
+        final long position = player == null ? startPositionMs : Math.max(0L, player.getCurrentPosition());
+        final JSONObject release = activeRelease();
+        final String originalUrl = release.optString("url", getIntent().getStringExtra(EXTRA_URL));
+        final JSONObject subtitle = selectedSubtitle();
+
+        new Thread(() -> {
+            String videoUrl = originalUrl;
+            String subtitleUrl = "";
+            try {
+                if (CastProxy.needsProxy(originalUrl)) {
+                    if (castProxy == null) castProxy = new CastProxy(getApplicationContext());
+                    videoUrl = castProxy.publish(originalUrl);
+                }
+                if (subtitle != null) {
+                    String vtt = fetchSubtitleVtt(subtitle.optString("url", ""));
+                    if (!vtt.isEmpty()) {
+                        if (castProxy == null) castProxy = new CastProxy(getApplicationContext());
+                        subtitleUrl = castProxy.publishText(vtt, ".vtt", "text/vtt; charset=utf-8");
+                    }
+                }
+            } catch (Exception error) {
+                final String message = error.getMessage();
+                runOnUiThread(() -> Toast.makeText(
+                    NativePlayerActivity.this,
+                    message == null ? "The stream could not be shared with Chromecast." : message,
+                    Toast.LENGTH_LONG
+                ).show());
+                return;
+            }
+
+            final String remoteVideoUrl = videoUrl;
+            final String remoteSubtitleUrl = subtitleUrl;
+            runOnUiThread(() -> {
+                CastSession active = castContext == null ? null : castContext.getSessionManager().getCurrentCastSession();
+                if (active == null || active != session) return;
+                RemoteMediaClient client = active.getRemoteMediaClient();
+                if (client == null) return;
+
+                MediaMetadata metadata = new MediaMetadata(MediaMetadata.MEDIA_TYPE_MOVIE);
+                metadata.putString(MediaMetadata.KEY_TITLE, getIntent().getStringExtra(EXTRA_TITLE));
+                String posterUrl = getIntent().getStringExtra(EXTRA_POSTER_URL);
+                if (posterUrl != null && !posterUrl.isEmpty()) metadata.addImage(new WebImage(Uri.parse(posterUrl)));
+
+                MediaInfo.Builder info = new MediaInfo.Builder(remoteVideoUrl)
+                    .setContentType(castMimeType(originalUrl))
+                    .setStreamType(live ? MediaInfo.STREAM_TYPE_LIVE : MediaInfo.STREAM_TYPE_BUFFERED)
+                    .setMetadata(metadata);
+                long[] activeTracks = null;
+                if (!remoteSubtitleUrl.isEmpty()) {
+                    String name = subtitle == null ? "Subtitles" : subtitle.optString("name", "Subtitles");
+                    String language = subtitle == null ? "und" : subtitle.optString("lang", "und");
+                    MediaTrack track = new MediaTrack.Builder(1L, MediaTrack.TYPE_TEXT)
+                        .setContentId(remoteSubtitleUrl)
+                        .setContentType("text/vtt")
+                        .setSubtype(MediaTrack.SUBTYPE_SUBTITLES)
+                        .setName(name)
+                        .setLanguage(language)
+                        .build();
+                    info.setMediaTracks(java.util.Collections.singletonList(track));
+                    activeTracks = new long[] {1L};
+                }
+                MediaLoadRequestData.Builder load = new MediaLoadRequestData.Builder()
+                    .setMediaInfo(info.build())
+                    .setAutoplay(true)
+                    .setCurrentTime(live ? 0L : position);
+                if (activeTracks != null) load.setActiveTrackIds(activeTracks);
+                client.load(load.build());
+                if (player != null) player.pause();
+                Toast.makeText(NativePlayerActivity.this, "Playing on Chromecast", Toast.LENGTH_SHORT).show();
+            });
+        }, "infinityplay-chromecast-load").start();
     }
 
     private int dp(int value) {
@@ -222,6 +432,14 @@ public class NativePlayerActivity extends AppCompatActivity {
         } catch (Exception ignored) {
             playerView.showController();
         }
+    }
+
+    /** Returns to the shared mobile cast controller, which discovers standards-based DLNA TVs. */
+    private void requestDlnaCast() {
+        castRequested = true;
+        if (player != null) player.pause();
+        finishWithResult(true);
+        finish();
     }
 
     private void enterImmersiveMode() {
@@ -342,6 +560,7 @@ public class NativePlayerActivity extends AppCompatActivity {
                         : MimeTypes.APPLICATION_SUBRIP;
                     subtitleConfigurations.add(
                         new MediaItem.SubtitleConfiguration.Builder(Uri.parse(subtitleUrl))
+                            .setId("infinityplay-subtitle-" + index)
                             .setMimeType(mime)
                             .setLanguage(subtitle.optString("lang", "und"))
                             .setLabel(subtitle.optString("name", "Subtitle"))
@@ -641,18 +860,29 @@ public class NativePlayerActivity extends AppCompatActivity {
         result.putExtra(RESULT_DURATION_MS, duration);
         result.putExtra(RESULT_ENDED, ended);
         result.putExtra(RESULT_ERROR, playbackError);
+        result.putExtra(RESULT_CAST_REQUESTED, castRequested);
+        JSONObject selectedSubtitle = selectedSubtitle();
+        result.putExtra(RESULT_SUBTITLE_URL, selectedSubtitle == null ? "" : selectedSubtitle.optString("url", ""));
+        result.putExtra(RESULT_SUBTITLE_NAME, selectedSubtitle == null ? "" : selectedSubtitle.optString("name", ""));
+        result.putExtra(RESULT_SUBTITLE_LANGUAGE, selectedSubtitle == null ? "" : selectedSubtitle.optString("lang", ""));
         setResult(completedNormally ? Activity.RESULT_OK : Activity.RESULT_CANCELED, result);
     }
 
     @Override
     protected void onStart() {
         super.onStart();
+        if (castContext != null && castSessionListener != null) {
+            castContext.getSessionManager().addSessionManagerListener(castSessionListener, CastSession.class);
+        }
         initializePlayer();
     }
 
     @Override
     protected void onStop() {
         finishWithResult(true);
+        if (castContext != null && castSessionListener != null) {
+            castContext.getSessionManager().removeSessionManagerListener(castSessionListener, CastSession.class);
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode()) {
             super.onStop();
             return;
@@ -672,6 +902,8 @@ public class NativePlayerActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         releasePlayer();
+        CastSession active = castContext == null ? null : castContext.getSessionManager().getCurrentCastSession();
+        if (active == null && castProxy != null) castProxy.stop();
         super.onDestroy();
     }
 

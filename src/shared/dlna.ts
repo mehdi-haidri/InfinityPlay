@@ -116,7 +116,9 @@ export function didlMetadata(media: DlnaMedia): string {
     ? `<upnp:albumArtURI>${escapeXml(media.posterUrl)}</upnp:albumArtURI>`
     : "";
   const captions = media.subtitleUrl
-    ? `<sec:CaptionInfoEx sec:type="vtt">${escapeXml(media.subtitleUrl)}</sec:CaptionInfoEx>` +
+    ? `<sec:CaptionInfo sec:type="vtt">${escapeXml(media.subtitleUrl)}</sec:CaptionInfo>` +
+      `<sec:CaptionInfoEx sec:type="vtt">${escapeXml(media.subtitleUrl)}</sec:CaptionInfoEx>` +
+      `<pv:subtitleFileUri>${escapeXml(media.subtitleUrl)}</pv:subtitleFileUri>` +
       `<res protocolInfo="http-get:*:text/vtt:*">${escapeXml(media.subtitleUrl)}</res>`
     : "";
 
@@ -124,7 +126,8 @@ export function didlMetadata(media: DlnaMedia): string {
     `<DIDL-Lite xmlns="urn:schemas-upnp-org:metadata-1-0/DIDL-Lite/" ` +
     `xmlns:dc="http://purl.org/dc/elements/1.1/" ` +
     `xmlns:upnp="urn:schemas-upnp-org:metadata-1-0/upnp/" ` +
-    `xmlns:sec="http://www.sec.co.kr/">` +
+    `xmlns:sec="http://www.sec.co.kr/" ` +
+    `xmlns:pv="http://www.pv.com/pvns/">` +
     `<item id="0" parentID="-1" restricted="1">` +
     `<dc:title>${escapeXml(media.title)}</dc:title>` +
     `<upnp:class>object.item.videoItem</upnp:class>` +

@@ -43,6 +43,8 @@ final class CastProxy {
 
     /** token -> upstream URL. Cleared when the cast stops. */
     private final Map<String, String> published = new HashMap<>();
+    /** Generated sidecars, principally WebVTT subtitles. */
+    private final Map<String, PublishedText> publishedText = new HashMap<>();
     private final Context context;
 
     private ServerSocket server;
@@ -71,9 +73,18 @@ final class CastProxy {
         return origin + "/" + token;
     }
 
+    synchronized String publishText(String text, String extension, String contentType) throws IOException {
+        start();
+        String safeExtension = extension != null && extension.matches("\\.[A-Za-z0-9]+") ? extension : ".txt";
+        String token = UUID.randomUUID().toString() + safeExtension;
+        publishedText.put(token, new PublishedText(text.getBytes(StandardCharsets.UTF_8), contentType));
+        return origin + "/" + token;
+    }
+
     /** Revokes everything published and closes the server. */
     synchronized void stop() {
         published.clear();
+        publishedText.clear();
         if (server != null) {
             try {
                 server.close();
@@ -153,8 +164,14 @@ final class CastProxy {
             String range = headerOf(lines, "range");
 
             String upstream;
+            PublishedText text;
             synchronized (this) {
                 upstream = published.get(token);
+                text = publishedText.get(token);
+            }
+            if (text != null) {
+                serveText(text, method, range, out);
+                return;
             }
             if (upstream == null) {
                 write(out, "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
@@ -170,6 +187,46 @@ final class CastProxy {
             } catch (IOException ignored) {
                 // Already closed.
             }
+        }
+    }
+
+    private void serveText(PublishedText text, String method, String range, OutputStream out) throws IOException {
+        int size = text.body.length;
+        int start = 0;
+        int end = Math.max(0, size - 1);
+        int status = 200;
+        if (range != null) {
+            java.util.regex.Matcher match = java.util.regex.Pattern.compile("bytes=(\\d*)-(\\d*)").matcher(range);
+            if (match.find()) {
+                if (!match.group(1).isEmpty()) start = Integer.parseInt(match.group(1));
+                if (!match.group(2).isEmpty()) end = Math.min(Integer.parseInt(match.group(2)), size - 1);
+                status = 206;
+            }
+        }
+        if (start >= size || end < start) {
+            write(out, "HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */" + size + "\r\nConnection: close\r\n\r\n");
+            return;
+        }
+        StringBuilder head = new StringBuilder(status == 206 ? "HTTP/1.1 206 Partial Content\r\n" : "HTTP/1.1 200 OK\r\n");
+        head.append("Content-Type: ").append(text.contentType).append("\r\n")
+            .append("Content-Length: ").append(end - start + 1).append("\r\n")
+            .append("Accept-Ranges: bytes\r\n");
+        if (status == 206) head.append("Content-Range: bytes ").append(start).append('-').append(end).append('/').append(size).append("\r\n");
+        head.append("Connection: close\r\n\r\n");
+        write(out, head.toString());
+        if (!"HEAD".equals(method)) {
+            out.write(text.body, start, end - start + 1);
+            out.flush();
+        }
+    }
+
+    private static final class PublishedText {
+        final byte[] body;
+        final String contentType;
+
+        PublishedText(byte[] body, String contentType) {
+            this.body = body;
+            this.contentType = contentType == null || contentType.isEmpty() ? "text/plain; charset=utf-8" : contentType;
         }
     }
 

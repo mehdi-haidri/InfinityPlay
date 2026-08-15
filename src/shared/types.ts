@@ -633,6 +633,10 @@ export interface CastRequest {
   mimeType?: string;
   posterUrl?: string;
   subtitleUrl?: string;
+  /** Selected caption track, already normalized to WebVTT for a receiver. */
+  subtitleVtt?: string;
+  subtitleName?: string;
+  subtitleLanguage?: string;
   /** Resume point, so casting continues from where local playback stopped. */
   startSeconds?: number;
   durationSeconds?: number;

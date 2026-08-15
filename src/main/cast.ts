@@ -32,7 +32,7 @@ import {
   type DlnaService,
   type SoapFetch,
 } from "@shared/dlna";
-import { publicMediaUrl, stopMediaServer } from "./media-server";
+import { publicMediaUrl, publicTextUrl, stopMediaServer } from "./media-server";
 
 // castv2-client predates the protocol freezing in place; it ships no types.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -464,6 +464,10 @@ async function castOnce(request: CastRequest, deviceId: string): Promise<CastSes
   // A receiver cannot read `ipmedia://` or a local path, so downloaded files are republished
   // on the LAN for the duration of the cast.
   const url = await publicMediaUrl(request.url);
+  const subtitleUrl = request.subtitleVtt
+    ? await publicTextUrl(request.subtitleVtt)
+    : request.subtitleUrl;
+  const receiverRequest = { ...request, subtitleUrl };
 
   session = {
     device: { id: device.id, name: device.name, protocol: device.protocol, detail: device.detail },
@@ -478,9 +482,9 @@ async function castOnce(request: CastRequest, deviceId: string): Promise<CastSes
 
   try {
     if (device.protocol === "chromecast") {
-      await castToChromecast(device, request, url);
+      await castToChromecast(device, receiverRequest, url);
     } else {
-      await castToDlna(device, request, url);
+      await castToDlna(device, receiverRequest, url);
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : "The device refused the stream.";

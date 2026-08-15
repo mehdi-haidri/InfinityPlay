@@ -33,9 +33,10 @@ const MIME: Record<string, string> = {
 
 /** What a token stands for: a file on disk, or a remote URL this process fetches on the TV's behalf. */
 type Publication = { kind: "file"; file: string } | { kind: "remote"; url: string };
+type TextPublication = { kind: "text"; body: Buffer; contentType: string };
 
 /** token -> publication. Cleared when the cast stops. */
-const published = new Map<string, Publication>();
+const published = new Map<string, Publication | TextPublication>();
 let server: http.Server | null = null;
 let origin = "";
 
@@ -136,6 +137,40 @@ function serve(request: http.IncomingMessage, response: http.ServerResponse): vo
 
   if (!entry) {
     response.writeHead(404).end();
+    return;
+  }
+
+  if (entry.kind === "text") {
+    const range = /bytes=(\d*)-(\d*)/.exec(request.headers.range ?? "");
+    const size = entry.body.length;
+    if (request.method === "HEAD") {
+      response.writeHead(200, {
+        "Content-Length": size,
+        "Content-Type": entry.contentType,
+        "Accept-Ranges": "bytes",
+      }).end();
+      return;
+    }
+    if (range) {
+      const start = range[1] ? Number.parseInt(range[1], 10) : 0;
+      const end = range[2] ? Math.min(Number.parseInt(range[2], 10), size - 1) : size - 1;
+      if (Number.isNaN(start) || start >= size || end < start) {
+        response.writeHead(416, { "Content-Range": `bytes */${size}` }).end();
+        return;
+      }
+      response.writeHead(206, {
+        "Content-Range": `bytes ${start}-${end}/${size}`,
+        "Content-Length": end - start + 1,
+        "Content-Type": entry.contentType,
+        "Accept-Ranges": "bytes",
+      }).end(entry.body.subarray(start, end + 1));
+      return;
+    }
+    response.writeHead(200, {
+      "Content-Length": size,
+      "Content-Type": entry.contentType,
+      "Accept-Ranges": "bytes",
+    }).end(entry.body);
     return;
   }
 
@@ -262,6 +297,19 @@ export async function publicMediaUrl(url: string): Promise<string> {
   const base = await ensureServer();
   const token = `${randomUUID()}${path.extname(file)}`;
   published.set(token, { kind: "file", file });
+  return `${base}/${token}`;
+}
+
+/** Publishes generated sidecar data such as the selected WebVTT track to the TV. */
+export async function publicTextUrl(
+  body: string,
+  extension = ".vtt",
+  contentType = "text/vtt; charset=utf-8",
+): Promise<string> {
+  const base = await ensureServer();
+  const safeExtension = /^\.[a-z0-9]+$/i.test(extension) ? extension : ".txt";
+  const token = `${randomUUID()}${safeExtension}`;
+  published.set(token, { kind: "text", body: Buffer.from(body, "utf8"), contentType });
   return `${base}/${token}`;
 }
 
