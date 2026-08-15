@@ -2124,50 +2124,161 @@ video::cue {
 .cast-wrap { position: relative; display: inline-flex; }
 
 /*
- * The device picker is reached from the player overlay and from the film page, so it cannot rely on
- * the player's stacking context. Without a layer of its own the list opened underneath the sections
- * below it — and underneath the bottom bar on a phone — which read as the picker not opening.
+ * The device picker is a dialog, not a dropdown.
+ *
+ * Anchored to its button it was clipped by whatever it hung out of — off the top of the window on
+ * the film page — so the device list below the language list could not be reached. Centred and
+ * portalled into <body>, nothing can clip it and it behaves the same on a phone and a desktop.
  */
-.cast-menu {
-  z-index: var(--layer-sheet);
-  min-width: 268px;
-  max-width: min(320px, calc(100vw - 28px));
-}
-
-/* On the film page it is an ordinary popover hanging off its button, not part of a video overlay. */
-.detail-actions .cast-menu {
-  right: 0;
-  bottom: calc(100% + 10px);
-}
-
-/*
- * A phone gets the full-width sheet the other menus use, lifted clear of the navigation bar.
- * Scoped through `.cast-wrap` deliberately: the generic phone rule for `.player-menu` is declared
- * later in this file, so an equally specific selector here would lose to it.
- */
-html[data-device="phone"] .cast-wrap .cast-menu {
+.cast-modal-backdrop {
   position: fixed;
-  inset: auto 10px calc(76px + var(--safe-bottom)) 10px;
-  max-width: none;
+  inset: 0;
+  z-index: var(--layer-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(4, 6, 12, 0.62);
+  backdrop-filter: blur(3px);
+  animation: cast-fade 140ms ease-out;
 }
 
-html[data-device="phone"] .player-root .cast-wrap .cast-menu {
-  /* Inside the player there is no navigation bar to clear. */
-  inset: auto 10px calc(12px + var(--safe-bottom)) 10px;
+.cast-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(420px, 100%);
+  max-height: min(72dvh, 560px);
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  box-shadow: var(--shadow-pop);
+  overflow: hidden;
+  animation: cast-rise 160ms ease-out;
 }
 
-/* Caption choice for the television, above the device list it will be sent to. */
-.cast-subtitles {
-  padding: 2px 2px 8px;
-  margin-bottom: 4px;
+.cast-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 16px 12px;
   border-bottom: 1px solid var(--border);
 }
 
+.cast-modal-title { color: var(--text); font-size: 15px; font-weight: 650; }
+.cast-modal-sub {
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 300px;
+}
+
+.cast-modal-body { overflow-y: auto; padding: 6px 10px 10px; }
+
+.cast-section { padding: 8px 4px; }
+.cast-section + .cast-section { border-top: 1px solid var(--border); }
+
+.cast-section-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 4px 6px 8px;
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-faint);
+}
+
+.cast-refresh {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--text-muted);
+  font-size: 11px;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.cast-refresh:hover:not(:disabled) { color: var(--text); }
+.cast-refresh:disabled { opacity: 0.6; }
+
+.cast-empty { padding: 10px 8px; color: var(--text-faint); font-size: 12.5px; }
+
+/* Its own chip class: inside the old menu these inherited the full-width row styling and stacked
+   into a tall list instead of reading as a row of choices. */
+.cast-chip {
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12.5px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.cast-chip:hover { color: var(--text); border-color: var(--text-faint); }
+
+.cast-chip[data-active="true"] {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+  border-color: var(--accent);
+  color: var(--text);
+  font-weight: 550;
+}
+
+.cast-modal-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 11px 16px;
+  border-top: 1px solid var(--border);
+  color: var(--text-faint);
+  font-size: 11.5px;
+}
+
+.cast-modal-foot strong { color: var(--text-muted); font-weight: 600; }
+
+@keyframes cast-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes cast-rise {
+  from { opacity: 0; transform: translateY(8px) scale(0.985); }
+  to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cast-modal-backdrop,
+  .cast-modal { animation: none; }
+}
+
+/* On a phone it meets the bottom edge, which is where a thumb already is. */
+html[data-device="phone"] .cast-modal-backdrop {
+  align-items: flex-end;
+  padding: 0;
+}
+
+html[data-device="phone"] .cast-modal {
+  width: 100%;
+  max-height: 82dvh;
+  border-radius: 20px 20px 0 0;
+  border-bottom: 0;
+  padding-bottom: var(--safe-bottom);
+}
+
+/* Caption choice for the television, above the device list it will be sent to. */
 .cast-subtitle-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
-  padding: 6px 8px 2px;
+  gap: 7px;
+  padding: 2px 6px;
 }
 
 .cast-device {
@@ -2860,6 +2971,8 @@ select.input:focus {
   --layer-nav: 60;
   --layer-sheet: 80;
   --layer-player: 100;
+  /* Above the player: the cast dialog is opened from inside it. */
+  --layer-modal: 120;
 }
 
 /* Longhands, not the `padding` shorthand: a shorthand carrying `var()` becomes a pending

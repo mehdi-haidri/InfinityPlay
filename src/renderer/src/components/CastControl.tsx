@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Cast, Loader2, Pause, Play, RefreshCw, Square, Tv } from "lucide-react";
+import { createPortal } from "react-dom";
+import { Cast, Loader2, Pause, Play, RefreshCw, Square, Tv, X } from "lucide-react";
 import type { CastDevice, CastRequest, CastSession, SubtitleOption } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { loadVttText } from "../lib/castMedia";
@@ -69,14 +70,20 @@ export function CastControl({
     onCastingChange?.(session !== null);
   }, [session, onCastingChange]);
 
-  // Clicking away closes the picker, matching the other player menus.
+  /*
+   * Escape closes the dialog. Clicking away is handled by the backdrop itself — a document-level
+   * listener would fire for the dialog's own content too, since it is portalled outside this tree.
+   */
   useEffect(() => {
     if (!open) return;
-    const onDown = (event: MouseEvent) => {
-      if (!panelRef.current?.contains(event.target as Node)) setOpen(false);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      // The player also closes on Escape; this dialog is on top, so it consumes the key.
+      event.stopPropagation();
+      setOpen(false);
     };
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [open]);
 
   const scan = useCallback(async () => {
@@ -220,73 +227,119 @@ export function CastControl({
         <Cast size={19} />
       </button>
 
-      {open && (
-        <div className="player-menu cast-menu" role="dialog" aria-label="Cast to a device">
-          <div className="player-menu-head">
-            <span className="player-menu-label">Cast to</span>
-            <button
-              className="player-menu-more"
-              onClick={() => void scan()}
-              disabled={scanning}
-              aria-label="Search again"
-              title="Search again"
-            >
-              <RefreshCw size={13} /> {scanning ? "Searching…" : "Refresh"}
-            </button>
-          </div>
-
-          {scanning && devices.length === 0 && (
-            <div className="player-menu-empty">Looking for TVs on your network…</div>
-          )}
-
-          {!scanning && devices.length === 0 && (
-            <div className="player-menu-empty">
-              No devices found. Make sure the TV is on and on the same Wi-Fi.
-            </div>
-          )}
-
-          {subtitles.length > 0 && (
-            /* Chosen here rather than taken from the app's language setting: what you want on a
-               television is often not what you want on the phone in your hand. */
-            <div className="cast-subtitles">
-              <span className="player-menu-label">Subtitles on the TV</span>
-              <div className="cast-subtitle-chips">
-                <button
-                  className="chip chip-sm"
-                  data-active={subtitleChoice === OFF}
-                  onClick={() => setSubtitleChoice(OFF)}
-                >
-                  Off
+      {/*
+        A dialog rather than a dropdown, and rendered into <body>.
+        Anchored to its button it was clipped by whatever it hung out of — off the top of the window
+        on the film page — so the device list under the language list could not be reached at all.
+      */}
+      {open
+        && createPortal(
+          <div
+            className="cast-modal-backdrop"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) setOpen(false);
+            }}
+          >
+            <div className="cast-modal" role="dialog" aria-modal="true" aria-label="Cast to a device">
+              <div className="cast-modal-head">
+                <div>
+                  <div className="cast-modal-title">Cast to a device</div>
+                  {media?.title && <div className="cast-modal-sub">{media.title}</div>}
+                </div>
+                <button className="icon-button" onClick={() => setOpen(false)} aria-label="Close" title="Close">
+                  <X size={16} />
                 </button>
-                {subtitles.map((option) => (
-                  <button
-                    key={option.url}
-                    className="chip chip-sm"
-                    data-active={subtitleChoice === option.url}
-                    onClick={() => setSubtitleChoice(option.url)}
-                    title={option.nativeName || option.name}
-                  >
-                    {option.name}
-                  </button>
-                ))}
+              </div>
+
+              {/* Devices first. The point of opening this is to pick a television, and a long
+                  language list above them pushed the only TV off the bottom of the panel. */}
+              <div className="cast-modal-body">
+                <section className="cast-section">
+                  <div className="cast-section-title">
+                    <span>Devices</span>
+                    <button
+                      className="cast-refresh"
+                      onClick={() => void scan()}
+                      disabled={scanning}
+                      aria-label="Search again"
+                    >
+                      <RefreshCw size={13} /> {scanning ? "Searching…" : "Refresh"}
+                    </button>
+                  </div>
+
+                  {scanning && devices.length === 0 && (
+                    <div className="cast-empty">Looking for TVs on your network…</div>
+                  )}
+
+                  {!scanning && devices.length === 0 && (
+                    <div className="cast-empty">
+                      No devices found. Make sure the TV is on and on the same Wi-Fi.
+                    </div>
+                  )}
+
+                  {devices.map((device) => (
+                    <button key={device.id} className="cast-device" onClick={() => void castTo(device)}>
+                      <Tv size={16} />
+                      <span className="cast-device-text">
+                        <span className="cast-device-name">{device.name}</span>
+                        <span className="cast-device-kind">
+                          {device.protocol === "chromecast" ? "Chromecast" : "DLNA"}
+                          {device.detail ? ` · ${device.detail}` : ""}
+                        </span>
+                      </span>
+                    </button>
+                  ))}
+                </section>
+
+                {subtitles.length > 0 && (
+                  /* Chosen here rather than taken from the app's language setting: what you want on
+                     a television is often not what you want on the phone in your hand. */
+                  <section className="cast-section">
+                    <div className="cast-section-title">Subtitles on the TV</div>
+                    <div className="cast-subtitle-chips">
+                      <button
+                        type="button"
+                        className="cast-chip"
+                        data-active={subtitleChoice === OFF}
+                        onClick={() => setSubtitleChoice(OFF)}
+                      >
+                        Off
+                      </button>
+                      {subtitles.map((option) => (
+                        <button
+                          type="button"
+                          key={option.url}
+                          className="cast-chip"
+                          data-active={subtitleChoice === option.url}
+                          onClick={() => setSubtitleChoice(option.url)}
+                          title={option.nativeName || option.name}
+                        >
+                          {option.name}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+                )}
+              </div>
+
+              {/* Choosing a language changes nothing on its own — the cast starts on the device. */}
+              <div className="cast-modal-foot">
+                {subtitles.length > 0 && (
+                  <span>
+                    Subtitles:{" "}
+                    <strong>
+                      {subtitleChoice === OFF
+                        ? "Off"
+                        : subtitles.find((option) => option.url === subtitleChoice)?.name ?? "Off"}
+                    </strong>
+                  </span>
+                )}
+                <span>Pick a device to start.</span>
               </div>
             </div>
-          )}
-
-          {devices.map((device) => (
-            <button key={device.id} className="cast-device" onClick={() => void castTo(device)}>
-              <Tv size={16} />
-              <span className="cast-device-text">
-                <span className="cast-device-name">{device.name}</span>
-                <span className="cast-device-kind">
-                  {device.protocol === "chromecast" ? "Chromecast" : "DLNA"}
-                  {device.detail ? ` · ${device.detail}` : ""}
-                </span>
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
+          </div>,
+          document.body,
+        )}
     </div>
   );
 }
