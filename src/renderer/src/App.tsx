@@ -14,6 +14,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { AboutPage } from "./pages/AboutPage";
 import { DownloadsPage } from "./pages/DownloadsPage";
 import { FavoritesPage } from "./pages/FavoritesPage";
+import { WatchLaterPage } from "./pages/WatchLaterPage";
 import { PersonPage } from "./pages/PersonPage";
 import { AnimePage } from "./pages/AnimePage";
 import { FreeLibraryPage } from "./pages/FreeLibraryPage";
@@ -62,6 +63,8 @@ function Routes() {
       return <HistoryPage />;
     case "favorites":
       return <FavoritesPage />;
+    case "watch-later":
+      return <WatchLaterPage />;
     case "settings":
       return <SettingsPage />;
     case "downloads":
@@ -219,6 +222,7 @@ export function App() {
   const loadWatchHistory = useApp((state) => state.loadWatchHistory);
   const loadDownloads = useApp((state) => state.loadDownloads);
   const loadFavorites = useApp((state) => state.loadFavorites);
+  const loadWatchLater = useApp((state) => state.loadWatchLater);
   const watchDownloads = useApp((state) => state.watchDownloads);
   const route = useApp((state) => state.route);
   const player = useApp((state) => state.player);
@@ -268,12 +272,12 @@ export function App() {
   useEffect(() => {
     // The splash lifts once the persisted state is in, so the first frame behind it is
     // the real UI rather than empty shells.
-    void Promise.allSettled([loadConfig(), loadWatchHistory(), loadDownloads(), loadFavorites(), loadCapabilities()]).then(() =>
+    void Promise.allSettled([loadConfig(), loadWatchHistory(), loadDownloads(), loadFavorites(), loadWatchLater(), loadCapabilities()]).then(() =>
       setBooted(true),
     );
     // One subscription for the whole app: progress feeds both the toasts and the page.
     return watchDownloads();
-  }, [loadConfig, loadWatchHistory, loadDownloads, loadFavorites, loadCapabilities, watchDownloads]);
+  }, [loadConfig, loadWatchHistory, loadDownloads, loadFavorites, loadWatchLater, loadCapabilities, watchDownloads]);
 
   // Every route change starts at the top, the way a browser would.
   useEffect(() => {

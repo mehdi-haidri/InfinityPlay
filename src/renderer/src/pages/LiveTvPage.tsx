@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { BadgeCheck, Globe, LayoutGrid, ListVideo, Radio, RotateCw, Search, Users } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { BadgeCheck, ChevronLeft, ChevronRight, Globe, LayoutGrid, ListVideo, Radio, RotateCw, Search, Users } from "lucide-react";
 import type { Channel, ChannelProgramme, PlaylistSource, XtreamSource } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { useAsync, useDebounced } from "../hooks/useAsync";
@@ -8,6 +8,9 @@ import { useApp } from "../store";
 import { PageHeader } from "../components/PageHeader";
 import { MediaImage } from "../components/MediaImage";
 import { FilterSelect, type FilterOption } from "../components/FilterSelect";
+
+/** Channels drawn per page. A long provider list is thousands of entries. */
+const CHANNELS_PER_PAGE = 20;
 
 export function LiveTvPage() {
   const playlists = useApp((state) => state.config.playlists);
@@ -20,6 +23,7 @@ export function LiveTvPage() {
   const [country, setCountry] = useState("All");
   const [query, setQuery] = useState("");
   const [refreshToken, setRefreshToken] = useState(0);
+  const [page, setPage] = useState(1);
   const debouncedQuery = useDebounced(query, 220);
 
   type SourceChoice =
@@ -96,7 +100,27 @@ export function LiveTvPage() {
     });
   }, [data, group, country, debouncedQuery]);
 
-  const epgChannelIds = useMemo(() => channels.slice(0, 400).map((entry) => entry.id).filter(Boolean), [channels]);
+  /*
+   * One page of channels at a time.
+   *
+   * A large playlist is thousands of entries; the list used to draw the first 400 and tell the
+   * user to narrow the filter to reach the rest, which left most of a provider's channels with no
+   * way to reach them at all.
+   */
+  const pageCount = Math.max(1, Math.ceil(channels.length / CHANNELS_PER_PAGE));
+  const currentPage = Math.min(page, pageCount);
+  const visibleChannels = useMemo(
+    () => channels.slice((currentPage - 1) * CHANNELS_PER_PAGE, currentPage * CHANNELS_PER_PAGE),
+    [channels, currentPage],
+  );
+
+  // Any change to what is being filtered puts the user back on the first page.
+  useEffect(() => {
+    setPage(1);
+  }, [group, country, debouncedQuery, source?.key]);
+
+  // Only the channels on screen need their programme looked up.
+  const epgChannelIds = useMemo(() => visibleChannels.map((entry) => entry.id).filter(Boolean), [visibleChannels]);
   const epgKey = epgChannelIds.join("|");
   const programmes = useAsync<Record<string, ChannelProgramme[]>>(
     () => {
@@ -219,7 +243,7 @@ export function LiveTvPage() {
               <EmptyState title="No channels match" body="Try another country or group, or clear the filter." />
             ) : (
               <div className="grid" style={{ gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))" }}>
-                {channels.slice(0, 400).map((channel) => (
+                {visibleChannels.map((channel) => (
                   <button
                     key={`${channel.id}-${channel.streamUrl}`}
                     className="panel"
@@ -247,10 +271,32 @@ export function LiveTvPage() {
                 ))}
               </div>
             )}
-            {channels.length > 400 && (
-              <p style={{ color: "var(--text-faint)", marginTop: 16 }}>
-                Showing the first 400 of {channels.length}. Narrow the filter to see the rest.
-              </p>
+            {pageCount > 1 && (
+              <nav className="channel-pager" aria-label="Channel pages">
+                <button
+                  className="btn btn-sm"
+                  onClick={() => setPage(currentPage - 1)}
+                  disabled={currentPage <= 1}
+                >
+                  <ChevronLeft size={15} /> Previous
+                </button>
+
+                <span className="channel-pager-status">
+                  Page {currentPage} of {pageCount}
+                  <span className="channel-pager-range">
+                    {(currentPage - 1) * CHANNELS_PER_PAGE + 1}–
+                    {Math.min(currentPage * CHANNELS_PER_PAGE, channels.length)} of {channels.length}
+                  </span>
+                </span>
+
+                <button
+                  className="btn btn-sm"
+                  onClick={() => setPage(currentPage + 1)}
+                  disabled={currentPage >= pageCount}
+                >
+                  Next <ChevronRight size={15} />
+                </button>
+              </nav>
             )}
           </div>
         </div>

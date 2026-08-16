@@ -6,6 +6,7 @@ import type {
   DownloadRecord,
   DownloadRequest,
   FavoriteItem,
+  WatchLaterItem,
   Release,
   SubtitleOption,
   WatchHistoryItem,
@@ -28,6 +29,7 @@ export type Route =
   | { name: "free-library" }
   | { name: "history" }
   | { name: "favorites" }
+  | { name: "watch-later" }
   | { name: "settings" }
   | { name: "downloads" }
   /** Phone-only hub for the destinations that do not fit in the bottom bar. */
@@ -113,6 +115,11 @@ interface AppState {
 
   favorites: FavoriteItem[];
   loadFavorites: () => Promise<void>;
+  /** Titles put aside to watch another time. Separate from favourites; a title can be in both. */
+  watchLater: WatchLaterItem[];
+  loadWatchLater: () => Promise<void>;
+  toggleWatchLater: (item: CatalogItem) => Promise<void>;
+  clearWatchLater: () => Promise<void>;
   toggleFavorite: (item: CatalogItem) => Promise<void>;
 
   player: PlayerRequest | null;
@@ -284,6 +291,44 @@ export const useApp = create<AppState>((set, get) => ({
       set({ favorites: await unwrap(api.favorites.list()) });
     } catch {
       set({ favorites: [] });
+    }
+  },
+
+  watchLater: [],
+
+  loadWatchLater: async () => {
+    try {
+      set({ watchLater: await unwrap(api.watchLater.list()) });
+    } catch {
+      set({ watchLater: [] });
+    }
+  },
+
+  toggleWatchLater: async (item) => {
+    // Applied locally first so the control responds immediately, then reconciled with the store.
+    const previous = get().watchLater;
+    const exists = previous.some((entry) => entry.id === item.id);
+    set({
+      watchLater: exists
+        ? previous.filter((entry) => entry.id !== item.id)
+        : [{ ...item, addedAt: Date.now() }, ...previous],
+    });
+    try {
+      set({ watchLater: await unwrap(api.watchLater.toggle(item)) });
+    } catch {
+      set({ watchLater: previous });
+      get().notify({ kind: "error", title: "Could not update Watch later" });
+    }
+  },
+
+  clearWatchLater: async () => {
+    const previous = get().watchLater;
+    set({ watchLater: [] });
+    try {
+      set({ watchLater: await unwrap(api.watchLater.clear()) });
+    } catch {
+      set({ watchLater: previous });
+      get().notify({ kind: "error", title: "Could not clear Watch later" });
     }
   },
 

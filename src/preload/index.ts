@@ -10,6 +10,7 @@ import type {
   DownloadRecord,
   DownloadRequest,
   FavoriteItem,
+  WatchLaterItem,
   FreeMediaItem,
   FreeMediaProvider,
   CatalogItem,
@@ -101,6 +102,11 @@ const api = {
   favorites: {
     list: () => invoke<FavoriteItem[]>("favorites:list"),
     toggle: (item: CatalogItem) => invoke<FavoriteItem[]>("favorites:toggle", item),
+  },
+  watchLater: {
+    list: () => invoke<WatchLaterItem[]>("watchLater:list"),
+    toggle: (item: CatalogItem) => invoke<WatchLaterItem[]>("watchLater:toggle", item),
+    clear: () => invoke<WatchLaterItem[]>("watchLater:clear"),
   },
   downloads: {
     start: (request: DownloadRequest) => invoke<DownloadRecord>("download:start", request),

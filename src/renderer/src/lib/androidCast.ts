@@ -115,7 +115,11 @@ export async function androidDiscover(): Promise<CastDevice[]> {
           id,
           name: description.name,
           protocol: "dlna",
-          detail: description.model,
+          // Naming the transport here makes it visible in the picker whether this build is talking
+          // to the TV natively or through the WebView, which decides what a failure means.
+          detail: [description.model, nativeRequestMissing ? "browser" : "native"]
+            .filter(Boolean)
+            .join(" · "),
         };
         return device;
       } catch {
@@ -137,23 +141,40 @@ export async function androidStartCast(request: CastRequest): Promise<CastSessio
   const transport = description?.transport;
   if (!description || !transport) throw new Error("That device is no longer on the network.");
 
+  /*
+   * Casting has several steps that fail for unrelated reasons, and a bare message from whichever
+   * one broke ("Failed to fetch") named neither the step nor the cause — which cost several rounds
+   * of guessing. Each step now says which it was, so a report identifies the stage directly.
+   */
+  const step = async <T>(stage: string, work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const transport = nativeRequestMissing ? "browser" : "native";
+      throw new Error(`${stage} failed (${transport}): ${message}`);
+    }
+  };
+
   // The CDN answers 428 to any client but this app, so those streams are relayed by the phone
   // rather than handed to the TV. Everything else is returned unchanged.
-  const { url } = await discovery.publish({ url: request.url });
+  const { url } = await step("Sharing the video", () => discovery.publish({ url: request.url }));
 
   const subtitleUrl = request.subtitleVtt
-    ? (await discovery.publishText({ text: request.subtitleVtt })).url
+    ? (await step("Sharing the subtitles", () => discovery.publishText({ text: request.subtitleVtt! }))).url
     : request.subtitleUrl;
 
   try {
-    await dlnaLoad(soapFetch, transport, {
-      url,
-      title: request.title,
-      mimeType: request.mimeType ?? "video/mp4",
-      subtitleUrl,
-      posterUrl: request.posterUrl,
-      durationSeconds: request.durationSeconds,
-    });
+    await step("Telling the TV to play", () =>
+      dlnaLoad(soapFetch, transport, {
+        url,
+        title: request.title,
+        mimeType: request.mimeType ?? "video/mp4",
+        subtitleUrl,
+        posterUrl: request.posterUrl,
+        durationSeconds: request.durationSeconds,
+      }),
+    );
   } catch (error) {
     /*
      * "Failed to fetch" here is the WebView refusing to send the request, not the TV refusing to
@@ -163,10 +184,9 @@ export async function androidStartCast(request: CastRequest): Promise<CastSessio
      * message that points at the television.
      */
     const message = error instanceof Error ? error.message : String(error);
-    if (nativeRequestMissing || /failed to fetch|load failed|networkerror/i.test(message)) {
-      throw new Error(
-        "This app build cannot reach the TV's controls. Reinstall the latest build, then try again.",
-      );
+    // The detail is kept: it names the stage and the transport, which is what identifies the cause.
+    if (nativeRequestMissing && /failed to fetch|load failed|networkerror/i.test(message)) {
+      throw new Error(`${message} — this build cannot reach the TV's controls; reinstall the latest one.`);
     }
     throw error;
   }

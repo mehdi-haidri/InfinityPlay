@@ -1,5 +1,6 @@
 import {
   Clock,
+  Clock3,
   Home,
   Heart,
   Info,
@@ -7,7 +8,6 @@ import {
   MoreHorizontal,
   PanelLeftClose,
   PanelLeftOpen,
-  Search,
   Settings,
   Sparkles,
 } from "lucide-react";
@@ -27,18 +27,18 @@ type Item = {
 
 const ITEMS: Item[] = [
   { route: { name: "home" }, label: "Home", icon: Home },
-  { route: { name: "search", query: "" }, label: "Search", icon: Search },
   { route: { name: "anime" }, label: "Anime", icon: Sparkles },
   { route: { name: "free-library" }, label: "Free Library", icon: LibraryBig, shortLabel: "Library" },
   { route: { name: "livetv" }, label: "Live TV", icon: LiveIcon },
   { route: { name: "history" }, label: "Continue watching", icon: Clock },
   { route: { name: "favorites" }, label: "Favorites", icon: Heart },
+  { route: { name: "watch-later" }, label: "Watch later", icon: Clock3 },
   { route: { name: "downloads" }, label: "Downloads", icon: DownloadIcon },
   { route: { name: "settings" }, label: "Settings", icon: Settings },
 ];
 
-/** The four that keep a tab of their own on phones; the rest move into the More hub. */
-const PHONE_TABS = new Set(["home", "search", "livetv", "downloads"]);
+/** The ones that keep a tab of their own on phones; the rest move into the More hub. */
+const PHONE_TABS = new Set(["home", "livetv", "downloads"]);
 
 /** Routes that the More tab owns, so it stays highlighted while the user is inside one. */
 const MORE_ROUTES = new Set([
@@ -47,6 +47,7 @@ const MORE_ROUTES = new Set([
   "free-library",
   "history",
   "favorites",
+  "watch-later",
   "settings",
   "about",
 ]);
@@ -109,7 +110,7 @@ export function Sidebar() {
         </button>
       ))}
 
-      {/* Phone-only fifth tab. Hidden everywhere else, where the full list is already visible. */}
+      {/* Phone-only tab. Hidden everywhere else, where the full list is already visible. */}
       <button
         className="nav-item nav-item-more"
         data-phone-tab

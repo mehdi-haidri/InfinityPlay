@@ -487,6 +487,16 @@ export interface FavoriteItem extends CatalogItem {
   addedAt: number;
 }
 
+/**
+ * A title put aside to watch another time.
+ *
+ * Kept apart from favourites on purpose: a favourite is something you liked and want to keep,
+ * while this is a queue you intend to empty. The same title can reasonably be in both.
+ */
+export interface WatchLaterItem extends CatalogItem {
+  addedAt: number;
+}
+
 export interface AppConfig {
   theme: "midnight" | "noir" | "ember" | "ocean" | "forest" | "plum";
   /** Country the Home rows are filtered to; one of `CATALOG_COUNTRIES`. */
@@ -799,6 +809,11 @@ export interface InfinityPlayApi {
   favorites: {
     list: () => Promise<Result<FavoriteItem[]>>;
     toggle: (item: CatalogItem) => Promise<Result<FavoriteItem[]>>;
+  };
+  watchLater: {
+    list: () => Promise<Result<WatchLaterItem[]>>;
+    toggle: (item: CatalogItem) => Promise<Result<WatchLaterItem[]>>;
+    clear: () => Promise<Result<WatchLaterItem[]>>;
   };
   downloads: {
     start: (request: DownloadRequest) => Promise<Result<DownloadRecord>>;

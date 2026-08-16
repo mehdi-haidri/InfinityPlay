@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { AudioLines, Captions, Download, Heart, Play, Star, Trash2 } from "lucide-react";
+import { AudioLines, Captions, Clock3, Download, Heart, Play, Star, Trash2 } from "lucide-react";
 import {
   isAllowedCatalogAudio,
   ORIGINAL_AUDIO,
@@ -46,6 +46,8 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
   const ffmpeg = useApp((state) => state.ffmpeg);
   const favorites = useApp((state) => state.favorites);
   const toggleFavorite = useApp((state) => state.toggleFavorite);
+  const toggleWatchLater = useApp((state) => state.toggleWatchLater);
+  const watchLater = useApp((state) => state.watchLater);
 
   const preferredSubtitle = useApp((state) => state.config.preferredSubtitle);
 
@@ -232,6 +234,7 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
 
   const media = details.data;
   const isFavorite = favorites.some((entry) => entry.id === media.id);
+  const isQueued = watchLater.some((entry) => entry.id === media.id);
   const activeSeason = media.seasons.find((entry) => entry.number === season) ?? media.seasons[0];
   const resume = findProgress(watchHistory, id, isSeries ? season : 0, isSeries ? episode : 0);
 
@@ -492,6 +495,17 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
             >
               <Heart size={17} fill={isFavorite ? "currentColor" : "none"} />
               <span className="btn-label">{isFavorite ? "Favorited" : "Favorite"}</span>
+            </button>
+            <button
+              className="btn btn-ghost btn-compact"
+              data-active={isQueued || undefined}
+              onClick={() => void toggleWatchLater(media)}
+              aria-pressed={isQueued}
+              aria-label={isQueued ? "Remove from Watch later" : "Save to Watch later"}
+              title={isQueued ? "Remove from Watch later" : "Watch later"}
+            >
+              <Clock3 size={17} />
+              <span className="btn-label">{isQueued ? "Saved" : "Watch later"}</span>
             </button>
             {watchHistory.some((entry) => entry.subjectId === id) && (
               <button

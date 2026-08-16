@@ -1,5 +1,5 @@
 import { useEffect, useState, type ComponentType } from "react";
-import { ChevronRight, Clock, Heart, Info, LibraryBig, Settings, Sparkles } from "lucide-react";
+import { ChevronRight, Clock, Clock3, Heart, Info, LibraryBig, Settings, Sparkles } from "lucide-react";
 import type { AppInfo } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { BrandMark } from "../components/BrandMark";
@@ -16,13 +16,14 @@ type Entry = {
 };
 
 /**
- * The phone bottom bar carries four destinations plus this hub. Everything else lives here,
+ * The phone bottom bar carries a few destinations plus this hub. Everything else lives here,
  * grouped so the list reads as two short sections rather than one long scroll.
  */
 export function MorePage() {
   const navigate = useApp((state) => state.navigate);
   const favorites = useApp((state) => state.favorites);
   const watchHistory = useApp((state) => state.watchHistory);
+  const watchLater = useApp((state) => state.watchLater);
   const [info, setInfo] = useState<AppInfo | null>(null);
 
   useEffect(() => {
@@ -61,6 +62,14 @@ export function MorePage() {
           hint: "Pick up where you stopped",
           icon: Clock,
           badge: watchHistory.length,
+          tone: "browse",
+        },
+        {
+          route: { name: "watch-later" },
+          label: "Watch later",
+          hint: "Titles you saved for another time",
+          icon: Clock3,
+          badge: watchLater.length,
           tone: "browse",
         },
         {

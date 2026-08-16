@@ -15,6 +15,7 @@ import {
   type DownloadRecord,
   type CatalogItem,
   type FavoriteItem,
+  type WatchLaterItem,
   type WatchHistoryItem,
 } from "@shared/types";
 
@@ -142,6 +143,26 @@ export function toggleFavorite(item: CatalogItem): FavoriteItem[] {
       : [{ ...item, addedAt: Date.now() }, ...current],
   );
 }
+
+/** The watch-later queue. Its own file, so clearing one list never touches the other. */
+const watchLaterFile = new JsonFile<WatchLaterItem[]>("watch-later.json", [], (raw) =>
+  Array.isArray(raw) ? (raw as WatchLaterItem[]) : [],
+);
+
+export const getWatchLater = (): WatchLaterItem[] =>
+  [...watchLaterFile.read()].sort((a, b) => b.addedAt - a.addedAt);
+
+export function toggleWatchLater(item: CatalogItem): WatchLaterItem[] {
+  const current = watchLaterFile.read();
+  const exists = current.some((entry) => entry.id === item.id);
+  return watchLaterFile.write(
+    exists
+      ? current.filter((entry) => entry.id !== item.id)
+      : [{ ...item, addedAt: Date.now() }, ...current],
+  );
+}
+
+export const clearWatchLater = (): WatchLaterItem[] => watchLaterFile.write([]);
 
 const downloadsFile = new JsonFile<DownloadRecord[]>("downloads.json", [], (raw) =>
   Array.isArray(raw) ? (raw as DownloadRecord[]) : [],

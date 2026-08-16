@@ -1,5 +1,5 @@
 import { memo } from "react";
-import { Heart, Star, X } from "lucide-react";
+import { Clock3, Heart, Star, X } from "lucide-react";
 import type { CatalogItem } from "@shared/types";
 import { useApp } from "../store";
 import { MediaImage } from "./MediaImage";
@@ -27,6 +27,8 @@ export const PosterCard = memo(function PosterCard({
   const navigate = useApp((state) => state.navigate);
   const toggleFavorite = useApp((state) => state.toggleFavorite);
   const isFavorite = useApp((state) => state.favorites.some((entry) => entry.id === item.id));
+  const toggleWatchLater = useApp((state) => state.toggleWatchLater);
+  const isQueued = useApp((state) => state.watchLater.some((entry) => entry.id === item.id));
   const open = () => (onOpen ? onOpen(item) : navigate({ name: "details", id: item.id }));
 
   return (
@@ -81,6 +83,20 @@ export const PosterCard = memo(function PosterCard({
             title={isFavorite ? "Remove from favorites" : "Add to favorites"}
           >
             <Heart size={15} fill={isFavorite ? "currentColor" : "none"} />
+          </button>
+
+          {/* Saving for later is a different intent from liking, so it gets its own control. */}
+          <button
+            className="card-favorite card-watch-later"
+            data-active={isQueued}
+            onClick={() => void toggleWatchLater(item)}
+            aria-pressed={isQueued}
+            aria-label={
+              isQueued ? `Remove ${item.title} from watch later` : `Save ${item.title} for later`
+            }
+            title={isQueued ? "Remove from Watch later" : "Watch later"}
+          >
+            <Clock3 size={15} />
           </button>
         </div>
       )}

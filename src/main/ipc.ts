@@ -29,12 +29,15 @@ import { findWatchAvailability } from "./providers/watch";
 import { fetchSubtitleAsVttDataUrl } from "./providers/subtitles";
 import {
   clearHistory,
+  clearWatchLater,
   getConfig,
   getHistory,
   getFavorites,
+  getWatchLater,
   recordHistory,
   removeHistory,
   toggleFavorite,
+  toggleWatchLater,
   updateConfig,
 } from "./store";
 import {
@@ -168,6 +171,9 @@ export function registerIpcHandlers(getWindow: () => BrowserWindow | null): void
   handle("history:clear", () => clearHistory());
   handle("favorites:list", () => getFavorites());
   handle("favorites:toggle", (item: CatalogItem) => toggleFavorite(item));
+  handle("watchLater:list", () => getWatchLater());
+  handle("watchLater:toggle", (item: CatalogItem) => toggleWatchLater(item));
+  handle("watchLater:clear", () => clearWatchLater());
 
   handle("download:start", (request: DownloadRequest) => startDownload(request));
   handle("download:startSeason", (request: SeasonDownloadRequest) =>

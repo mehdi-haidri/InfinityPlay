@@ -20,6 +20,7 @@ import type {
   AudioVariant,
   CatalogItem,
   FavoriteItem,
+  WatchLaterItem,
   FreeMediaProvider,
   Channel,
   DownloadRecord,
@@ -51,6 +52,7 @@ const STORAGE_KEYS = {
   HISTORY: "infinityplay_history",
   DOWNLOADS: "infinityplay_downloads",
   FAVORITES: "infinityplay_favorites",
+  WATCH_LATER: "infinityplay_watch_later",
 };
 
 interface NativeDownloadStatus {
@@ -169,6 +171,21 @@ async function getStoredFavorites(): Promise<FavoriteItem[]> {
 
 async function saveStoredFavorites(items: FavoriteItem[]): Promise<FavoriteItem[]> {
   await Preferences.set({ key: STORAGE_KEYS.FAVORITES, value: JSON.stringify(items) });
+  return items;
+}
+
+async function getStoredWatchLater(): Promise<WatchLaterItem[]> {
+  try {
+    const { value } = await Preferences.get({ key: STORAGE_KEYS.WATCH_LATER });
+    if (value) return JSON.parse(value);
+  } catch {
+    // An unreadable queue should not stop the rest of the library loading.
+  }
+  return [];
+}
+
+async function saveStoredWatchLater(items: WatchLaterItem[]): Promise<WatchLaterItem[]> {
+  await Preferences.set({ key: STORAGE_KEYS.WATCH_LATER, value: JSON.stringify(items) });
   return items;
 }
 
@@ -469,6 +486,20 @@ export const createCapacitorApi = (): InfinityPlayApi => {
               : [{ ...item, addedAt: Date.now() }, ...favorites],
           );
         }),
+    },
+    watchLater: {
+      list: () => wrapResult(() => getStoredWatchLater()),
+      toggle: (item: CatalogItem) =>
+        wrapResult(async () => {
+          const queue = await getStoredWatchLater();
+          const exists = queue.some((entry) => entry.id === item.id);
+          return saveStoredWatchLater(
+            exists
+              ? queue.filter((entry) => entry.id !== item.id)
+              : [{ ...item, addedAt: Date.now() }, ...queue],
+          );
+        }),
+      clear: () => wrapResult(() => saveStoredWatchLater([])),
     },
     downloads: {
       start: (request: DownloadRequest) =>
