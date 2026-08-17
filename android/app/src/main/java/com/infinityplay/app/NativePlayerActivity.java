@@ -95,6 +95,7 @@ public class NativePlayerActivity extends AppCompatActivity {
     public static final String RESULT_SUBTITLE_URL = "subtitleUrl";
     public static final String RESULT_SUBTITLE_NAME = "subtitleName";
     public static final String RESULT_SUBTITLE_LANGUAGE = "subtitleLanguage";
+    public static final String RESULT_SUBTITLE_CHANGED = "subtitleChanged";
     public static final String RESULT_EPISODE_STEP = "episodeStep";
 
     private PlayerView playerView;
@@ -112,6 +113,8 @@ public class NativePlayerActivity extends AppCompatActivity {
     private int activeReleaseIndex;
     private long startPositionMs;
     private boolean ended;
+    /** The setting only updates globally when the viewer actually changes this picker. */
+    private boolean subtitleChanged;
     private boolean live;
     private boolean castRequested;
     private CastContext castContext;
@@ -187,7 +190,9 @@ public class NativePlayerActivity extends AppCompatActivity {
         playerView.setControllerHideOnTouch(true);
         playerView.setControllerShowTimeoutMs(3500);
         playerView.setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING);
-        playerView.setShowSubtitleButton(true);
+        // The app owns one subtitle picker in the overflow menu. Leaving Media3's built-in button
+        // on created a second, independent way to change captions with different persistence.
+        playerView.setShowSubtitleButton(false);
         playerView.setShowNextButton(false);
         playerView.setShowPreviousButton(false);
         playerView.setContentDescription(getIntent().getStringExtra(EXTRA_TITLE));
@@ -201,6 +206,13 @@ public class NativePlayerActivity extends AppCompatActivity {
         quickActions = new LinearLayout(this);
         quickActions.setOrientation(LinearLayout.HORIZONTAL);
         quickActions.setGravity(Gravity.CENTER_VERTICAL);
+        playerView.setControllerVisibilityListener(new PlayerView.ControllerVisibilityListener() {
+            @Override
+            public void onVisibilityChanged(int visibility) {
+                if (quickActions == null || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode())) return;
+                quickActions.setVisibility(visibility == View.VISIBLE ? View.VISIBLE : View.GONE);
+            }
+        });
         /*
          * One control per action, drawn with the same glyphs as the desktop player.
          *
@@ -942,6 +954,7 @@ public class NativePlayerActivity extends AppCompatActivity {
         new AlertDialog.Builder(this)
             .setTitle("Subtitles")
             .setSingleChoiceItems(labels.toArray(new String[0]), selected, (dialog, which) -> {
+                subtitleChanged = true;
                 DefaultTrackSelector.Parameters.Builder parameters = trackSelector.buildUponParameters()
                     .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, which == 0);
@@ -1029,6 +1042,7 @@ public class NativePlayerActivity extends AppCompatActivity {
         result.putExtra(RESULT_SUBTITLE_URL, selectedSubtitle == null ? "" : selectedSubtitle.optString("url", ""));
         result.putExtra(RESULT_SUBTITLE_NAME, selectedSubtitle == null ? "" : selectedSubtitle.optString("name", ""));
         result.putExtra(RESULT_SUBTITLE_LANGUAGE, selectedSubtitle == null ? "" : selectedSubtitle.optString("lang", ""));
+        result.putExtra(RESULT_SUBTITLE_CHANGED, subtitleChanged);
         result.putExtra(RESULT_EPISODE_STEP, episodeStep);
         setResult(completedNormally ? Activity.RESULT_OK : Activity.RESULT_CANCELED, result);
     }
@@ -1090,7 +1104,10 @@ public class NativePlayerActivity extends AppCompatActivity {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
         if (quickActions != null) quickActions.setVisibility(isInPictureInPictureMode ? View.GONE : View.VISIBLE);
         if (isInPictureInPictureMode) playerView.hideController();
-        else playerView.showController();
+        else {
+            playerView.showController();
+            if (quickActions != null) quickActions.setVisibility(View.VISIBLE);
+        }
     }
 
     @Override

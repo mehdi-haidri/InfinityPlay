@@ -51,6 +51,7 @@ public class NativePlayerPlugin extends Plugin {
         result.put("subtitleUrl", data == null ? "" : data.getStringExtra(NativePlayerActivity.RESULT_SUBTITLE_URL));
         result.put("subtitleName", data == null ? "" : data.getStringExtra(NativePlayerActivity.RESULT_SUBTITLE_NAME));
         result.put("subtitleLanguage", data == null ? "" : data.getStringExtra(NativePlayerActivity.RESULT_SUBTITLE_LANGUAGE));
+        result.put("subtitleChanged", data != null && data.getBooleanExtra(NativePlayerActivity.RESULT_SUBTITLE_CHANGED, false));
         result.put("episodeStep", data == null ? 0 : data.getIntExtra(NativePlayerActivity.RESULT_EPISODE_STEP, 0));
         call.resolve(result);
     }
