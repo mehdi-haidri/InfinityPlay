@@ -5,6 +5,7 @@ import type {
   Channel,
   DownloadRecord,
   DownloadRequest,
+  Episode,
   FavoriteItem,
   WatchLaterItem,
   Release,
@@ -54,8 +55,8 @@ export interface PlayerRequest {
   resolution?: number;
   releases?: Release[];
   subtitles?: SubtitleOption[];
-  /** Episodes in the current season; lets the player advance when one ends. */
-  episodeCount?: number;
+  /** Ordered across every available season, used by all players for previous/next navigation. */
+  episodeSequence?: Pick<Episode, "season" | "number">[];
   /** Subtitle to switch on at start; falls back to `config.preferredSubtitle`. */
   initialSubtitle?: string;
   /** HTTP headers required by protected IPTV manifests and their media segments. */

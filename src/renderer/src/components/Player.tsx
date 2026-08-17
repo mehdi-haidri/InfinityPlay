@@ -228,6 +228,8 @@ export function Player() {
   const previewCache = useRef(new Map<string, string | null>());
   const androidFallbackTried = useRef(false);
   const nativeLaunch = useRef("");
+  /** Native Android returns an episode step after its full-screen activity has closed. */
+  const nativeEpisodeStep = useRef<(step: -1 | 1) => Promise<boolean | undefined>>(async () => false);
 
   const [sourceUrl, setSourceUrl] = useState("");
   const [selectedSourceUrl, setSelectedSourceUrl] = useState("");
@@ -393,6 +395,20 @@ export function Player() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.url]);
 
+  /** Finds a neighbouring episode in the complete series order, including season boundaries. */
+  const adjacentEpisode = useCallback((step: -1 | 1) => {
+    if (!request || request.live || !request.subjectId || !request.season || !request.episode) return null;
+    const episodes = request.episodeSequence ?? [];
+    const currentIndex = episodes.findIndex(
+      (entry) => entry.season === request.season && entry.number === request.episode,
+    );
+    if (currentIndex < 0) return null;
+    return episodes[currentIndex + step] ?? null;
+  }, [request]);
+
+  const hasPreviousEpisode = adjacentEpisode(-1) !== null;
+  const hasNextEpisode = adjacentEpisode(1) !== null;
+
   // Media3 handles HEVC VOD and IPTV manifests that need Referer/User-Agent headers.
   // WebView cannot reliably do either. The native activity also owns quality changes,
   // subtitles and resume, returning the final VOD position when it closes.
@@ -422,6 +438,9 @@ export function Player() {
       headersJson: JSON.stringify(request.headers ?? {}),
       preferredAudioLanguage: config.preferredAudio ?? "",
       preferredSubtitleLanguage: request.initialSubtitle ?? config.preferredSubtitle ?? "",
+      hasPreviousEpisode,
+      hasNextEpisode,
+      autoplayNext: config.autoplayNext && hasNextEpisode,
       live: request.live,
     }).then(async (result) => {
       if (cancelled) return;
@@ -469,6 +488,9 @@ export function Player() {
           timestamp: Date.now(),
         });
       }
+      if (result.episodeStep === -1 || result.episodeStep === 1) {
+        if (await nativeEpisodeStep.current(result.episodeStep)) return;
+      }
       if (result.error) {
         notify({
           kind: "error",
@@ -492,7 +514,7 @@ export function Player() {
     return () => {
       cancelled = true;
     };
-  }, [request, isNativeAndroidPlayer, mobileCastMode, config.resumeBehavior, config.preferredAudio, config.preferredSubtitle, saveProgress, notify, closePlayer]);
+  }, [request, isNativeAndroidPlayer, mobileCastMode, config.resumeBehavior, config.preferredAudio, config.preferredSubtitle, config.autoplayNext, hasPreviousEpisode, hasNextEpisode, saveProgress, notify, closePlayer]);
 
   // Netflix-style hover frames are generated lazily and bucketed every five seconds.
   // The debounce prevents pointer movement from starting an FFmpeg process per pixel.
@@ -881,21 +903,17 @@ export function Player() {
     setStartPosition(target);
   }, [duration, prepared?.transcoded, request]);
 
-  /**
-   * Rolls the player straight into the next episode of the same season when the
-   * `autoplayNext` setting is on. Silent when there is no next episode or no source.
-   */
+  /** Resolves a fresh signed source before changing episode, for local and native players alike. */
   const playAdjacentEpisode = useCallback(async (step: -1 | 1, autoplay = false) => {
     if (!request || request.live || (autoplay && !config.autoplayNext)) return;
-    const { subjectId, season: currentSeason, episode: currentEpisode, episodeCount } = request;
-    if (!subjectId || !currentSeason || !currentEpisode || !episodeCount) return;
-    const targetEpisode = currentEpisode + step;
-    if (targetEpisode < 1 || targetEpisode > episodeCount) return;
+    const { subjectId } = request;
+    const target = adjacentEpisode(step);
+    if (!subjectId || !target) return false;
 
     try {
       setWaiting(true);
-      const nextReleases = await unwrap(api.catalog.releases(subjectId, currentSeason, targetEpisode));
-      if (nextReleases.length === 0) return;
+      const nextReleases = await unwrap(api.catalog.releases(subjectId, target.season, target.number));
+      if (nextReleases.length === 0) return false;
 
       const chosen =
         nextReleases.find((release) => release.resolution === activeRelease?.resolution) ??
@@ -906,30 +924,37 @@ export function Player() {
 
       openPlayer({
         ...request,
-        subtitleLine: `Season ${currentSeason} · Episode ${targetEpisode} · ${qualityLabel(chosen.resolution)}`,
+        subtitleLine: `Season ${target.season} · Episode ${target.number} · ${qualityLabel(chosen.resolution)}`,
         url: chosen.url,
         resolution: chosen.resolution,
         resourceId: chosen.resourceId,
-        episode: targetEpisode,
+        season: target.season,
+        episode: target.number,
         startAt: 0,
         releases: nextReleases,
         subtitles: nextSubtitles,
       });
+      return true;
     } catch (error) {
       notify({
         kind: "error",
         title: `Could not start the ${step > 0 ? "next" : "previous"} episode`,
         body: error instanceof Error ? error.message : undefined,
       });
+      return false;
     } finally {
       setWaiting(false);
     }
-  }, [request, config.autoplayNext, activeRelease?.resolution, openPlayer, notify]);
+  }, [request, config.autoplayNext, activeRelease?.resolution, adjacentEpisode, openPlayer, notify]);
 
   const playNextEpisode = useCallback(
     () => playAdjacentEpisode(1, true),
     [playAdjacentEpisode],
   );
+
+  // The Android activity is launched above this callback's declaration, so it calls the latest
+  // resolver through a ref once it returns a previous/next request.
+  nativeEpisodeStep.current = playAdjacentEpisode;
 
   const close = useCallback(() => {
     const video = videoRef.current;
@@ -1444,6 +1469,21 @@ export function Player() {
         live: request.live,
         startSeconds: request.live ? 0 : current,
         durationSeconds: request.live ? 0 : duration,
+        episodeContext:
+          request.mediaType === "series" && request.subjectId && request.season && request.episode
+            ? {
+                subjectId: request.subjectId,
+                season: request.season,
+                episode: request.episode,
+                episodes: request.episodeSequence ?? [],
+                resolution: castRelease?.resolution ?? selectedResolution,
+                subtitle: {
+                  off: !subtitle,
+                  name: subtitle?.name,
+                  language: subtitle?.lang,
+                },
+              }
+            : undefined,
       }
     : null;
 
@@ -1762,7 +1802,7 @@ export function Player() {
               <div className="player-secondary-controls">
                 <CastControl media={castMedia} subtitles={subtitles} onCastingChange={setCasting} />
 
-                {request.mediaType === "series" && (request.episode ?? 0) > 1 && (
+                {hasPreviousEpisode && (
                   <button
                     className="icon-button player-episode-control"
                     onClick={() => void playAdjacentEpisode(-1)}
@@ -1773,7 +1813,7 @@ export function Player() {
                   </button>
                 )}
 
-                {request.mediaType === "series" && (
+                {hasNextEpisode && (
                   <button
                     className="icon-button player-episode-control"
                     onClick={() => void playAdjacentEpisode(1)}

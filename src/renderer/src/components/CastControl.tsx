@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Cast, Loader2, Pause, Play, RefreshCw, Square, Tv, X } from "lucide-react";
+import { Cast, Loader2, Pause, Play, RefreshCw, SkipBack, SkipForward, Square, Tv, X } from "lucide-react";
 import type { CastDevice, CastRequest, CastSession, SubtitleOption } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { loadVttText } from "../lib/castMedia";
+import { pickCastRelease } from "../lib/castMedia";
 import { useApp } from "../store";
 
 /** Seconds the receiver is nudged by, matching the local player's skip controls. */
@@ -53,12 +54,15 @@ export function CastControl({
   controllerOnly?: boolean;
 }) {
   const notify = useApp((state) => state.notify);
+  const autoplayNext = useApp((state) => state.config.autoplayNext);
   const [open, setOpen] = useState(false);
   const [devices, setDevices] = useState<CastDevice[]>([]);
   const [scanning, setScanning] = useState(false);
   const [session, setSession] = useState<CastSession | null>(null);
+  const [changingEpisode, setChangingEpisode] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
   const autoOpened = useRef(false);
+  const autoAdvancedEpisode = useRef("");
   /** The track URL to send, or `OFF`. Starts from whatever the media already carried. */
   const [subtitleChoice, setSubtitleChoice] = useState<string>(
     () => subtitles.find((entry) => entry.name === media?.subtitleName)?.url ?? OFF,
@@ -142,7 +146,19 @@ export function CastControl({
     setOpen(false);
     try {
       const captions = subtitles.length > 0 ? await castSubtitleFields() : {};
-      setSession(await unwrap(api.cast.start({ ...media, ...captions, deviceId: device.id })));
+      const context = media.episodeContext
+        ? {
+            ...media.episodeContext,
+            subtitle: subtitleChoice === OFF
+              ? { off: true }
+              : {
+                  off: false,
+                  name: captions.subtitleName ?? media.episodeContext.subtitle?.name,
+                  language: captions.subtitleLanguage ?? media.episodeContext.subtitle?.language,
+                },
+          }
+        : undefined;
+      setSession(await unwrap(api.cast.start({ ...media, ...captions, episodeContext: context, deviceId: device.id })));
       notify({ kind: "info", title: `Casting to ${device.name}`, body: media.title });
     } catch (error) {
       notify({
@@ -162,6 +178,94 @@ export function CastControl({
     setSession(null);
   };
 
+  /** Resolves a fresh, direct stream for the neighbour; signed stream URLs cannot be reused. */
+  const changeEpisode = useCallback(async (step: -1 | 1, automatic = false): Promise<boolean> => {
+    const context = session?.episodeContext;
+    if (!session || !context || (automatic && !autoplayNext)) return false;
+    const index = context.episodes.findIndex(
+      (entry) => entry.season === context.season && entry.number === context.episode,
+    );
+    const target = index < 0 ? undefined : context.episodes[index + step];
+    if (!target) return false;
+
+    try {
+      setChangingEpisode(true);
+      const releases = await unwrap(api.catalog.releases(context.subjectId, target.season, target.number));
+      const release = pickCastRelease(releases, context.resolution);
+      if (!release) throw new Error("The next episode has no direct stream for a TV.");
+
+      let subtitleUrl: string | undefined;
+      let subtitleVtt: string | undefined;
+      let subtitleName: string | undefined;
+      let subtitleLanguage: string | undefined;
+      if (!context.subtitle?.off && release.resourceId) {
+        const options = await unwrap(api.catalog.subtitles(context.subjectId, release.resourceId)).catch(() => []);
+        const chosen = options.find(
+          (option) =>
+            option.lang.toLowerCase() === context.subtitle?.language?.toLowerCase()
+            || option.name.toLowerCase() === context.subtitle?.name?.toLowerCase(),
+        );
+        if (chosen) {
+          subtitleUrl = chosen.url;
+          subtitleVtt = (await loadVttText(chosen.url).catch(() => "")) || undefined;
+          subtitleName = chosen.name;
+          subtitleLanguage = chosen.lang;
+        }
+      }
+
+      const nextContext = {
+        ...context,
+        season: target.season,
+        episode: target.number,
+        resolution: release.resolution,
+        subtitle: context.subtitle?.off
+          ? { off: true }
+          : { off: false, name: subtitleName ?? context.subtitle?.name, language: subtitleLanguage ?? context.subtitle?.language },
+      };
+      setSession(await unwrap(api.cast.start({
+        deviceId: session.device.id,
+        url: release.url,
+        title: session.title,
+        subtitleLine: `Season ${target.season} · Episode ${target.number}`,
+        subtitleUrl,
+        subtitleVtt,
+        subtitleName,
+        subtitleLanguage,
+        live: false,
+        episodeContext: nextContext,
+      })));
+      return true;
+    } catch (error) {
+      if (!automatic) {
+        notify({
+          kind: "error",
+          title: `Could not start the ${step > 0 ? "next" : "previous"} episode`,
+          body: error instanceof Error ? error.message : undefined,
+        });
+      }
+      return false;
+    } finally {
+      setChangingEpisode(false);
+    }
+  }, [session, autoplayNext, notify]);
+
+  const episodeContext = session?.episodeContext;
+  const episodeIndex = episodeContext
+    ? episodeContext.episodes.findIndex(
+        (entry) => entry.season === episodeContext.season && entry.number === episodeContext.episode,
+      )
+    : -1;
+  const hasPreviousEpisode = episodeIndex > 0;
+  const hasNextEpisode = episodeContext !== undefined && episodeIndex >= 0 && episodeIndex < episodeContext.episodes.length - 1;
+
+  useEffect(() => {
+    if (!session || session.state !== "ended" || !autoplayNext || !hasNextEpisode) return;
+    const key = `${session.device.id}:${episodeContext?.season}:${episodeContext?.episode}`;
+    if (autoAdvancedEpisode.current === key) return;
+    autoAdvancedEpisode.current = key;
+    void changeEpisode(1, true);
+  }, [session, autoplayNext, hasNextEpisode, episodeContext?.season, episodeContext?.episode, changeEpisode]);
+
   if (session) {
     const playing = session.state === "playing";
     const busy = session.state === "loading" || session.state === "buffering";
@@ -176,6 +280,30 @@ export function CastControl({
           <Tv size={16} />
           <span className="cast-bar-name">{session.device.name}</span>
         </span>
+
+        {hasPreviousEpisode && (
+          <button
+            className="icon-button"
+            onClick={() => void changeEpisode(-1)}
+            aria-label="Previous episode on device"
+            title="Previous episode"
+            disabled={busy || changingEpisode}
+          >
+            <SkipBack size={18} />
+          </button>
+        )}
+
+        {hasNextEpisode && (
+          <button
+            className="icon-button"
+            onClick={() => void changeEpisode(1)}
+            aria-label="Next episode on device"
+            title="Next episode"
+            disabled={busy || changingEpisode}
+          >
+            {changingEpisode ? <Loader2 className="cast-spin" size={18} /> : <SkipForward size={18} />}
+          </button>
+        )}
 
         <button
           className="icon-button"
