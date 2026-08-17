@@ -27,6 +27,8 @@ export interface DlnaMedia {
   mimeType: string;
   /** Sidecar captions. Renderer support varies, so this is advisory. */
   subtitleUrl?: string;
+  /** MIME type of the sidecar, used by renderers that distinguish SRT from WebVTT. */
+  subtitleMimeType?: string;
   posterUrl?: string;
   durationSeconds?: number;
 }
@@ -115,11 +117,13 @@ export function didlMetadata(media: DlnaMedia): string {
   const poster = media.posterUrl
     ? `<upnp:albumArtURI>${escapeXml(media.posterUrl)}</upnp:albumArtURI>`
     : "";
+  const subtitleMimeType = media.subtitleMimeType ?? "text/vtt";
+  const subtitleType = subtitleMimeType === "application/x-subrip" ? "srt" : "vtt";
   const captions = media.subtitleUrl
-    ? `<sec:CaptionInfo sec:type="vtt">${escapeXml(media.subtitleUrl)}</sec:CaptionInfo>` +
-      `<sec:CaptionInfoEx sec:type="vtt">${escapeXml(media.subtitleUrl)}</sec:CaptionInfoEx>` +
+    ? `<sec:CaptionInfo sec:type="${subtitleType}">${escapeXml(media.subtitleUrl)}</sec:CaptionInfo>` +
+      `<sec:CaptionInfoEx sec:type="${subtitleType}">${escapeXml(media.subtitleUrl)}</sec:CaptionInfoEx>` +
       `<pv:subtitleFileUri>${escapeXml(media.subtitleUrl)}</pv:subtitleFileUri>` +
-      `<res protocolInfo="http-get:*:text/vtt:*">${escapeXml(media.subtitleUrl)}</res>`
+      `<res protocolInfo="http-get:*:${escapeXml(subtitleMimeType)}:*">${escapeXml(media.subtitleUrl)}</res>`
     : "";
 
   return (
@@ -132,9 +136,12 @@ export function didlMetadata(media: DlnaMedia): string {
     `<dc:title>${escapeXml(media.title)}</dc:title>` +
     `<upnp:class>object.item.videoItem</upnp:class>` +
     poster +
-    captions +
     `<res protocolInfo="http-get:*:${escapeXml(media.mimeType)}:DLNA.ORG_OP=01;DLNA.ORG_FLAGS=01700000000000000000000000000000"${duration}>` +
     `${escapeXml(media.url)}</res>` +
+    // A caption is an auxiliary resource, never the item the renderer should open first. LG webOS
+    // treats the first compatible <res> as its AVTransport target, so putting SRT ahead of video
+    // leaves it with no playable media and it answers Play with "Transition not available".
+    captions +
     `</item></DIDL-Lite>`
   );
 }
@@ -193,14 +200,33 @@ export async function soap(
 const INSTANCE = "<InstanceID>0</InstanceID>";
 
 export async function dlnaLoad(request: SoapFetch, service: DlnaService, media: DlnaMedia): Promise<void> {
-  await soap(
-    request,
-    service,
-    "SetAVTransportURI",
-    `${INSTANCE}<CurrentURI>${escapeXml(media.url)}</CurrentURI>` +
-      `<CurrentURIMetaData>${escapeXml(didlMetadata(media))}</CurrentURIMetaData>`,
-  );
-  await soap(request, service, "Play", `${INSTANCE}<Speed>1</Speed>`);
+  const waitForRenderer = () => new Promise<void>((resolve) => setTimeout(resolve, 350));
+  const setAndPlay = async () => {
+    await soap(
+      request,
+      service,
+      "SetAVTransportURI",
+      `${INSTANCE}<CurrentURI>${escapeXml(media.url)}</CurrentURI>` +
+        `<CurrentURIMetaData>${escapeXml(didlMetadata(media))}</CurrentURIMetaData>`,
+    );
+    // webOS accepts SetAVTransportURI before its player has opened the resource. Sending Play in
+    // the same turn can therefore race it into a 701 "Transition not available" fault.
+    await waitForRenderer();
+    await soap(request, service, "Play", `${INSTANCE}<Speed>1</Speed>`);
+  };
+
+  // An LG can retain the previous item's AVTransport state even after its player looks idle.
+  // Stop is deliberately best-effort: some receivers reject it while idle, but do reset when it
+  // applies. A transient 701 is then retried once from that clean state.
+  await soap(request, service, "Stop", INSTANCE).catch(() => undefined);
+  try {
+    await setAndPlay();
+  } catch (error) {
+    if (!(error instanceof Error) || !/transition not available/i.test(error.message)) throw error;
+    await soap(request, service, "Stop", INSTANCE).catch(() => undefined);
+    await waitForRenderer();
+    await setAndPlay();
+  }
 }
 
 export const dlnaPlay = (request: SoapFetch, service: DlnaService) =>

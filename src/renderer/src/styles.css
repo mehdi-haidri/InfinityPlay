@@ -2427,12 +2427,42 @@ html[data-device="phone"] .cast-modal {
 .cast-bar-error { font-size: 11px; color: var(--text); }
 .cast-skip { font-size: 10px; font-weight: 700; }
 
+/* This stays above the app while browsing rather than squeezing into a title's action row. */
+.cast-bar-floating {
+  position: fixed;
+  z-index: 110;
+  right: max(20px, calc(var(--safe-right) + 12px));
+  bottom: max(20px, calc(var(--safe-bottom) + 12px));
+  max-width: min(calc(100vw - 40px), 520px);
+  padding: 6px 8px 6px 12px;
+  background: color-mix(in srgb, var(--bg-elevated) 92%, var(--accent-soft));
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.48);
+  backdrop-filter: blur(18px);
+  animation: cast-float-in 180ms var(--ease);
+}
+
+@keyframes cast-float-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
 .cast-spin { animation: spin 900ms linear infinite; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 
 html[data-device="phone"] .cast-bar-name { max-width: 84px; }
 html[data-device="phone"] .cast-menu { min-width: 0; }
+html[data-device="phone"] .cast-bar-floating {
+  right: 10px;
+  bottom: calc(76px + var(--safe-bottom));
+  left: 10px;
+  max-width: none;
+  min-height: 48px;
+  justify-content: space-between;
+  border-radius: 18px;
+}
+html[data-device="phone"] .cast-bar-floating .cast-bar-name { max-width: min(28vw, 132px); }
 
 .mobile-cast-root {
   display: grid;

@@ -1,12 +1,18 @@
 package com.infinityplay.app;
 
 import android.content.Context;
+import android.net.ConnectivityManager;
+import android.net.LinkAddress;
+import android.net.LinkProperties;
+import android.net.Network;
+import android.net.NetworkCapabilities;
 import android.net.wifi.WifiManager;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.net.NetworkInterface;
@@ -62,6 +68,8 @@ final class CastProxy {
     private ExecutorService workers;
     private WifiManager.MulticastLock wifiLock;
     private String origin;
+    /** Base token for the current video, so DLNA renderers can associate its sidecar subtitle. */
+    private String lastMediaToken;
 
     CastProxy(Context context) {
         this.context = context.getApplicationContext();
@@ -79,7 +87,8 @@ final class CastProxy {
     /** Returns a LAN URL the TV can fetch, serving the given URL behind an unguessable token. */
     synchronized String publish(String url) throws IOException {
         start();
-        String token = UUID.randomUUID().toString() + extensionOf(url);
+        lastMediaToken = UUID.randomUUID().toString();
+        String token = lastMediaToken + extensionOf(url);
         published.put(token, url);
         return origin + "/" + token;
     }
@@ -87,7 +96,9 @@ final class CastProxy {
     synchronized String publishText(String text, String extension, String contentType) throws IOException {
         start();
         String safeExtension = extension != null && extension.matches("\\.[A-Za-z0-9]+") ? extension : ".txt";
-        String token = UUID.randomUUID().toString() + safeExtension;
+        // LG's DLNA renderer recognises an external .srt only when it shares the video's base
+        // name. A random fallback still works for a caption published without a proxied video.
+        String token = (lastMediaToken == null ? UUID.randomUUID().toString() : lastMediaToken) + safeExtension;
         publishedText.put(token, new PublishedText(text.getBytes(StandardCharsets.UTF_8), contentType));
         return origin + "/" + token;
     }
@@ -113,12 +124,13 @@ final class CastProxy {
             wifiLock = null;
         }
         origin = null;
+        lastMediaToken = null;
     }
 
     private void start() throws IOException {
         if (server != null && origin != null) return;
 
-        String address = lanAddress();
+        String address = lanAddress(context);
         if (address == null) throw new IOException("No network connection was found to share this stream over.");
 
         // Port 0 lets the system pick a free one; the TV is told the full URL anyway.
@@ -358,21 +370,51 @@ final class CastProxy {
         return ".mp4";
     }
 
-    /** The address a TV on the same network can reach. */
-    private static String lanAddress() {
+    /**
+     * The address a television on the active Wi-Fi network can reach.
+     *
+     * NetworkInterface iteration is not routing-aware: on Android it commonly returns a VPN,
+     * emulator, or cellular adapter before Wi-Fi. Binding the relay to that address gives a valid
+     * local HTTP URL which the TV can never reach. A VPN can be the active network while Wi-Fi is
+     * still carrying the LAN traffic, so inspect every Android network for Wi-Fi rather than only
+     * asking for the active one. Fall back to interface enumeration for older/unusual devices.
+     */
+    private static String lanAddress(Context context) {
+        try {
+            ConnectivityManager connectivity = (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
+            if (connectivity != null) {
+                for (Network network : connectivity.getAllNetworks()) {
+                    NetworkCapabilities capabilities = connectivity.getNetworkCapabilities(network);
+                    LinkProperties properties = connectivity.getLinkProperties(network);
+                    if (capabilities == null || !capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) || properties == null) {
+                        continue;
+                    }
+                    for (LinkAddress link : properties.getLinkAddresses()) {
+                        InetAddress address = link.getAddress();
+                        if (address instanceof Inet4Address && !address.isLoopbackAddress() && !address.isLinkLocalAddress()) {
+                            return address.getHostAddress();
+                        }
+                    }
+                }
+            }
+        } catch (Exception unavailable) {
+            // Fall back to the interface scan below.
+        }
+
+        String fallback = null;
         try {
             List<NetworkInterface> interfaces = Collections.list(NetworkInterface.getNetworkInterfaces());
             for (NetworkInterface item : interfaces) {
                 if (!item.isUp() || item.isLoopback()) continue;
                 for (InetAddress address : Collections.list(item.getInetAddresses())) {
-                    if (address.isLoopbackAddress() || address.getHostAddress() == null) continue;
-                    if (address.getHostAddress().indexOf(':') >= 0) continue;
-                    return address.getHostAddress();
+                    if (!(address instanceof Inet4Address) || address.isLoopbackAddress() || address.isLinkLocalAddress()) continue;
+                    if (address.isSiteLocalAddress()) return address.getHostAddress();
+                    if (fallback == null) fallback = address.getHostAddress();
                 }
             }
         } catch (Exception unavailable) {
-            return null;
+            // No usable interface was exposed.
         }
-        return null;
+        return fallback;
     }
 }

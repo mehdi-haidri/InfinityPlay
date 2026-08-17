@@ -5,6 +5,7 @@ import { Sidebar } from "./components/Sidebar";
 import { TopBar } from "./components/TopBar";
 import { Splash } from "./components/Splash";
 import { UpdatePrompts } from "./components/UpdatePrompts";
+import { CastControl } from "./components/CastControl";
 import { HomePage } from "./pages/HomePage";
 import { SearchPage } from "./pages/SearchPage";
 import { DetailsPage } from "./pages/DetailsPage";
@@ -300,6 +301,7 @@ export function App() {
           <Player />
         </Suspense>
       )}
+      <CastControl media={null} controllerOnly />
       <Toasts />
       <UpdatePrompts />
       <LiveAnnouncements />
