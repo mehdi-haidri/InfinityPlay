@@ -619,7 +619,23 @@ export interface CastDevice {
   detail?: string;
 }
 
-export type CastPlaybackState = "idle" | "loading" | "playing" | "paused" | "buffering" | "error";
+export type CastPlaybackState = "idle" | "loading" | "playing" | "paused" | "buffering" | "ended" | "error";
+
+/**
+ * The small piece of a series needed to continue a cast without keeping its detail page mounted.
+ * Episode releases are signed on demand, so URLs deliberately do not live here.
+ */
+export interface EpisodeNavigationContext {
+  subjectId: string;
+  season: number;
+  episode: number;
+  /** Ordered across every available season, not just the season currently on screen. */
+  episodes: Pick<Episode, "season" | "number">[];
+  /** Keep the cast at the quality the viewer chose when the next source offers it. */
+  resolution?: number;
+  /** Caption intent is carried forward; the next episode gets its own caption file. */
+  subtitle?: { off: boolean; name?: string; language?: string };
+}
 
 export interface CastSession {
   device: CastDevice;
@@ -632,6 +648,8 @@ export interface CastSession {
   volume: number;
   muted: boolean;
   message?: string;
+  /** Present for series, allowing the persistent floating controller to change episode. */
+  episodeContext?: EpisodeNavigationContext;
 }
 
 /** What the player hands over when starting a cast. */
@@ -652,6 +670,8 @@ export interface CastRequest {
   durationSeconds?: number;
   /** Live streams are told apart so the receiver is not asked to seek in them. */
   live?: boolean;
+  /** Series metadata used for previous/next episode controls and auto-advance. */
+  episodeContext?: EpisodeNavigationContext;
 }
 
 /** Result of pause/resume. `reason` is present only when the UI should explain the refusal. */

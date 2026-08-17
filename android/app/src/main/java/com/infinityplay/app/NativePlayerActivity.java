@@ -48,6 +48,7 @@ import androidx.mediarouter.app.MediaRouteButton;
 import com.google.android.gms.cast.MediaInfo;
 import com.google.android.gms.cast.MediaLoadRequestData;
 import com.google.android.gms.cast.MediaMetadata;
+import com.google.android.gms.cast.MediaStatus;
 import com.google.android.gms.cast.MediaTrack;
 import com.google.android.gms.cast.framework.CastButtonFactory;
 import com.google.android.gms.cast.framework.CastContext;
@@ -82,6 +83,9 @@ public class NativePlayerActivity extends AppCompatActivity {
     public static final String EXTRA_HEADERS_JSON = "headersJson";
     public static final String EXTRA_PREFERRED_AUDIO = "preferredAudioLanguage";
     public static final String EXTRA_PREFERRED_SUBTITLE = "preferredSubtitleLanguage";
+    public static final String EXTRA_HAS_PREVIOUS_EPISODE = "hasPreviousEpisode";
+    public static final String EXTRA_HAS_NEXT_EPISODE = "hasNextEpisode";
+    public static final String EXTRA_AUTOPLAY_NEXT = "autoplayNext";
     public static final String EXTRA_LIVE = "live";
     public static final String RESULT_POSITION_MS = "positionMs";
     public static final String RESULT_DURATION_MS = "durationMs";
@@ -91,11 +95,14 @@ public class NativePlayerActivity extends AppCompatActivity {
     public static final String RESULT_SUBTITLE_URL = "subtitleUrl";
     public static final String RESULT_SUBTITLE_NAME = "subtitleName";
     public static final String RESULT_SUBTITLE_LANGUAGE = "subtitleLanguage";
+    public static final String RESULT_EPISODE_STEP = "episodeStep";
 
     private PlayerView playerView;
     /** Quality keeps its label — which one is playing is information, not an icon. */
     private TextView qualityButton;
     private ImageView audioButton;
+    private ImageView previousEpisodeButton;
+    private ImageView nextEpisodeButton;
     private ImageView pipButton;
     private ImageView optionsButton;
     private LinearLayout quickActions;
@@ -115,6 +122,13 @@ public class NativePlayerActivity extends AppCompatActivity {
     private String signedHost = "";
     private String signedDirectory = "";
     private int resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT;
+    /** A non-zero value is returned to the shared layer, which resolves the next signed source. */
+    private int episodeStep;
+    private boolean episodeNavigationRequested;
+    private RemoteMediaClient remoteMediaClient;
+    private RemoteMediaClient.Callback remoteMediaCallback;
+    /** Avoid treating the old Chromecast item's FINISHED status as the newly loaded item's end. */
+    private boolean remotePlaybackStarted;
 
     /** English is the fallback; only these languages are exposed in the mobile player. */
     private static final String[] SUPPORTED_AUDIO_TAGS = {"en", "ar", "fr"};
@@ -199,6 +213,22 @@ public class NativePlayerActivity extends AppCompatActivity {
         qualityButton = createActionButton("AUTO", view -> showQualityPicker());
         audioButton = createIconButton(R.drawable.ic_player_audio, "Audio language", view -> showAudioPicker());
         optionsButton = createIconButton(R.drawable.ic_player_more, "More options", view -> showPlaybackOptions());
+        if (hasPreviousEpisode()) {
+            previousEpisodeButton = createIconButton(
+                R.drawable.ic_player_previous,
+                "Previous episode",
+                view -> requestEpisodeStep(-1)
+            );
+            quickActions.addView(previousEpisodeButton);
+        }
+        if (hasNextEpisode()) {
+            nextEpisodeButton = createIconButton(
+                R.drawable.ic_player_next,
+                "Next episode",
+                view -> requestEpisodeStep(1)
+            );
+            quickActions.addView(nextEpisodeButton);
+        }
         quickActions.addView(qualityButton);
         quickActions.addView(audioButton);
         addChromecastButton();
@@ -244,6 +274,7 @@ public class NativePlayerActivity extends AppCompatActivity {
                 }
                 @Override public void onSessionEnding(CastSession session) {}
                 @Override public void onSessionEnded(CastSession session, int error) {
+                    clearRemotePlaybackObserver();
                     if (castProxy != null) castProxy.stop();
                     castProxy = null;
                 }
@@ -257,6 +288,67 @@ public class NativePlayerActivity extends AppCompatActivity {
             castContext = null;
             castSessionListener = null;
         }
+    }
+
+    private boolean hasPreviousEpisode() {
+        return !live && getIntent().getBooleanExtra(EXTRA_HAS_PREVIOUS_EPISODE, false);
+    }
+
+    private boolean hasNextEpisode() {
+        return !live && getIntent().getBooleanExtra(EXTRA_HAS_NEXT_EPISODE, false);
+    }
+
+    private boolean shouldAutoplayNext() {
+        return hasNextEpisode() && getIntent().getBooleanExtra(EXTRA_AUTOPLAY_NEXT, false);
+    }
+
+    /**
+     * Release this activity so the shared TypeScript player can fetch the next episode's fresh,
+     * signed URL. Keeping that resolution in one place means native playback, Chromecast and
+     * DLNA all move through the exact same episode order.
+     */
+    private void requestEpisodeStep(int step) {
+        if (episodeNavigationRequested || (step < 0 && !hasPreviousEpisode()) || (step > 0 && !hasNextEpisode())) return;
+        episodeNavigationRequested = true;
+        episodeStep = step < 0 ? -1 : 1;
+        if (player != null) player.pause();
+        finishWithResult(true);
+        finish();
+    }
+
+    /** Watches a Chromecast item after it has started, then returns for the next signed episode. */
+    private void observeRemotePlayback(RemoteMediaClient client) {
+        if (remoteMediaClient == client && remoteMediaCallback != null) return;
+        clearRemotePlaybackObserver();
+        remoteMediaClient = client;
+        remotePlaybackStarted = false;
+        remoteMediaCallback = new RemoteMediaClient.Callback() {
+            @Override
+            public void onStatusUpdated() {
+                if (remoteMediaClient == null || episodeNavigationRequested) return;
+                int state = remoteMediaClient.getPlayerState();
+                if (state == MediaStatus.PLAYER_STATE_PLAYING) {
+                    remotePlaybackStarted = true;
+                    return;
+                }
+                if (remotePlaybackStarted
+                    && state == MediaStatus.PLAYER_STATE_IDLE
+                    && remoteMediaClient.getIdleReason() == MediaStatus.IDLE_REASON_FINISHED
+                    && shouldAutoplayNext()) {
+                    requestEpisodeStep(1);
+                }
+            }
+        };
+        client.registerCallback(remoteMediaCallback);
+    }
+
+    private void clearRemotePlaybackObserver() {
+        if (remoteMediaClient != null && remoteMediaCallback != null) {
+            remoteMediaClient.unregisterCallback(remoteMediaCallback);
+        }
+        remoteMediaClient = null;
+        remoteMediaCallback = null;
+        remotePlaybackStarted = false;
     }
 
     @Nullable
@@ -407,6 +499,7 @@ public class NativePlayerActivity extends AppCompatActivity {
                     .setAutoplay(true)
                     .setCurrentTime(live ? 0L : position);
                 if (activeTracks != null) load.setActiveTrackIds(activeTracks);
+                observeRemotePlayback(client);
                 client.load(load.build());
                 if (player != null) player.pause();
                 Toast.makeText(NativePlayerActivity.this, "Playing on Chromecast", Toast.LENGTH_SHORT).show();
@@ -682,6 +775,7 @@ public class NativePlayerActivity extends AppCompatActivity {
             @Override
             public void onPlaybackStateChanged(int state) {
                 ended = state == Player.STATE_ENDED;
+                if (ended && shouldAutoplayNext()) requestEpisodeStep(1);
             }
 
             @Override
@@ -935,6 +1029,7 @@ public class NativePlayerActivity extends AppCompatActivity {
         result.putExtra(RESULT_SUBTITLE_URL, selectedSubtitle == null ? "" : selectedSubtitle.optString("url", ""));
         result.putExtra(RESULT_SUBTITLE_NAME, selectedSubtitle == null ? "" : selectedSubtitle.optString("name", ""));
         result.putExtra(RESULT_SUBTITLE_LANGUAGE, selectedSubtitle == null ? "" : selectedSubtitle.optString("lang", ""));
+        result.putExtra(RESULT_EPISODE_STEP, episodeStep);
         setResult(completedNormally ? Activity.RESULT_OK : Activity.RESULT_CANCELED, result);
     }
 
@@ -978,6 +1073,7 @@ public class NativePlayerActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         releasePlayer();
+        clearRemotePlaybackObserver();
         CastSession active = castContext == null ? null : castContext.getSessionManager().getCurrentCastSession();
         if (active == null && castProxy != null) castProxy.stop();
         super.onDestroy();
@@ -1013,6 +1109,10 @@ public class NativePlayerActivity extends AppCompatActivity {
                     if (!live) player.seekTo(player.getCurrentPosition() + 10_000); return true;
                 case KeyEvent.KEYCODE_MEDIA_REWIND:
                     if (!live) player.seekTo(Math.max(0, player.getCurrentPosition() - 10_000)); return true;
+                case KeyEvent.KEYCODE_MEDIA_NEXT:
+                    requestEpisodeStep(1); return true;
+                case KeyEvent.KEYCODE_MEDIA_PREVIOUS:
+                    requestEpisodeStep(-1); return true;
             }
         }
         return super.dispatchKeyEvent(event);

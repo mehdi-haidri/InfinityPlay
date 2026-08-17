@@ -238,6 +238,7 @@ export async function androidStartCast(request: CastRequest): Promise<CastSessio
     duration: request.durationSeconds ?? 0,
     volume: 1,
     muted: false,
+    episodeContext: request.episodeContext,
   });
 
   stopPolling();
@@ -249,10 +250,21 @@ export async function androidStartCast(request: CastRequest): Promise<CastSessio
           dlnaPosition(soapFetch, transport),
           dlnaTransportState(soapFetch, transport),
         ]);
+        const ended = state === "STOPPED"
+          && duration > 0
+          && Math.max(position, session?.position ?? 0) >= duration - 3;
         patch({
           position,
           duration: duration || session?.duration || 0,
-          state: state === "PLAYING" ? "playing" : state === "PAUSED_PLAYBACK" ? "paused" : session?.state ?? "playing",
+          state: ended
+            ? "ended"
+            : state === "PLAYING"
+              ? "playing"
+              : state === "PAUSED_PLAYBACK"
+                ? "paused"
+                : state === "TRANSITIONING"
+                  ? "buffering"
+                  : session?.state ?? "playing",
         });
       } catch {
         // A dropped poll recovers on the next tick.
