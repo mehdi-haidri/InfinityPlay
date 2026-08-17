@@ -26,7 +26,7 @@ interface CastDiscoveryPlugin {
   discover: () => Promise<{ locations: string[] }>;
   /** Returns a URL the TV can fetch, republishing it locally when the host would refuse the TV. */
   publish: (options: { url: string }) => Promise<{ url: string }>;
-  publishText: (options: { text: string }) => Promise<{ url: string }>;
+  publishText: (options: { text: string; extension?: string; contentType?: string }) => Promise<{ url: string }>;
   /** HTTP against a device on the local network, issued natively to avoid CORS and preflights. */
   httpRequest: (options: {
     url: string;
@@ -86,6 +86,32 @@ const known = new Map<string, DlnaDescription>();
 let session: CastSession | null = null;
 let listeners: ((session: CastSession | null) => void)[] = [];
 let poll: number | undefined;
+
+/** DLNA renderers, including LG webOS, expect external captions as SRT rather than WebVTT. */
+function vttToSrt(vtt: string): string {
+  const blocks = vtt
+    .replace(/\r/g, "")
+    .replace(/^\uFEFF?WEBVTT[^\n]*\n+/i, "")
+    .split(/\n{2,}/);
+  const cues: string[] = [];
+
+  for (const block of blocks) {
+    const lines = block.split("\n").filter((line) => line.trim().length > 0);
+    if (lines.length === 0 || /^(NOTE|STYLE|REGION)\b/i.test(lines[0])) continue;
+    const timing = lines.findIndex((line) => line.includes("-->"));
+    if (timing < 0 || timing === lines.length - 1) continue;
+    const [start, endWithSettings] = lines[timing].split(/\s+-->\s+/, 2);
+    const end = endWithSettings?.trim().split(/\s+/, 1)[0];
+    if (!start || !end) continue;
+    const srtTime = (time: string) => {
+      const normalized = time.trim().replace(".", ",");
+      return normalized.split(":").length === 2 ? `00:${normalized}` : normalized;
+    };
+    cues.push(`${cues.length + 1}\n${srtTime(start)} --> ${srtTime(end)}\n${lines.slice(timing + 1).join("\n")}`);
+  }
+
+  return cues.join("\n\n");
+}
 
 function publish(next: CastSession | null): void {
   session = next;
@@ -160,8 +186,13 @@ export async function androidStartCast(request: CastRequest): Promise<CastSessio
   // rather than handed to the TV. Everything else is returned unchanged.
   const { url } = await step("Sharing the video", () => discovery.publish({ url: request.url }));
 
-  const subtitleUrl = request.subtitleVtt
-    ? (await step("Sharing the subtitles", () => discovery.publishText({ text: request.subtitleVtt! }))).url
+  const srt = request.subtitleVtt ? vttToSrt(request.subtitleVtt) : "";
+  const subtitleUrl = srt
+    ? (await step("Sharing the subtitles", () => discovery.publishText({
+        text: srt,
+        extension: ".srt",
+        contentType: "application/x-subrip; charset=utf-8",
+      }))).url
     : request.subtitleUrl;
 
   try {
@@ -171,6 +202,7 @@ export async function androidStartCast(request: CastRequest): Promise<CastSessio
         title: request.title,
         mimeType: request.mimeType ?? "video/mp4",
         subtitleUrl,
+        subtitleMimeType: srt ? "application/x-subrip" : undefined,
         posterUrl: request.posterUrl,
         durationSeconds: request.durationSeconds,
       }),

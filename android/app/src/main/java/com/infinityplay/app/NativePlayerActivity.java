@@ -334,7 +334,15 @@ public class NativePlayerActivity extends AppCompatActivity {
     private void loadRemoteMedia(CastSession session) {
         if (session == null) return;
         final long position = player == null ? startPositionMs : Math.max(0L, player.getCurrentPosition());
-        final JSONObject release = activeRelease();
+        final JSONObject release = castRelease();
+        if (release == null) {
+            Toast.makeText(
+                this,
+                "This title has no direct stream that a Chromecast can play.",
+                Toast.LENGTH_LONG
+            ).show();
+            return;
+        }
         final String originalUrl = release.optString("url", getIntent().getStringExtra(EXTRA_URL));
         final JSONObject subtitle = selectedSubtitle();
 
@@ -518,6 +526,29 @@ public class NativePlayerActivity extends AppCompatActivity {
     private JSONObject activeRelease() {
         JSONObject release = releases.optJSONObject(activeReleaseIndex);
         return release == null ? new JSONObject() : release;
+    }
+
+    /**
+     * A Cast receiver cannot play the catalog's adaptive source. Its manifest has relative media
+     * segments, and those segments are protected by the app's signed-request hook; handing the
+     * manifest to a TV therefore leaves it on a loading screen. Choose the same direct source the
+     * shared React cast path selects: the matching height when it exists, otherwise the best direct
+     * release. The local player can continue using the selected adaptive release independently.
+     */
+    @Nullable
+    private JSONObject castRelease() {
+        JSONObject current = activeRelease();
+        int wantedResolution = current.optInt("resolution", 0);
+        JSONObject fallback = null;
+
+        for (int index = 0; index < releases.length(); index++) {
+            JSONObject candidate = releases.optJSONObject(index);
+            if (candidate == null || "dash".equalsIgnoreCase(candidate.optString("kind", "mp4"))) continue;
+            if (wantedResolution > 0 && candidate.optInt("resolution", 0) == wantedResolution) return candidate;
+            if (fallback == null) fallback = candidate;
+        }
+
+        return fallback;
     }
 
     private Map<String, String> requestHeaders(JSONObject release) {
@@ -914,6 +945,12 @@ public class NativePlayerActivity extends AppCompatActivity {
             castContext.getSessionManager().addSessionManagerListener(castSessionListener, CastSession.class);
         }
         initializePlayer();
+
+        // A session can already be connected from the system Cast picker before this activity is
+        // opened. Session callbacks only describe future transitions, so without this explicit
+        // handoff the TV stays on its previous item even though the player shows as connected.
+        CastSession active = castContext == null ? null : castContext.getSessionManager().getCurrentCastSession();
+        if (active != null && active.isConnected()) loadRemoteMedia(active);
     }
 
     @Override

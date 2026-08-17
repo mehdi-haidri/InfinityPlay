@@ -33,6 +33,7 @@ export function CastControl({
   onCastingChange,
   autoOpen = false,
   triggerClassName = "icon-button",
+  controllerOnly = false,
   subtitles = [],
 }: {
   /** Everything the receiver needs; null while nothing is playable yet. */
@@ -46,8 +47,10 @@ export function CastControl({
    * Class for the button that opens the picker. The player's controls are bare icon buttons, while
    * the details page sits this beside bordered pills — the trigger takes whichever shape its
    * neighbours have so it does not read as a stray control.
-   */
+  */
   triggerClassName?: string;
+  /** Keeps a single transport controller mounted at the app level while routes change. */
+  controllerOnly?: boolean;
 }) {
   const notify = useApp((state) => state.notify);
   const [open, setOpen] = useState(false);
@@ -163,8 +166,12 @@ export function CastControl({
     const playing = session.state === "playing";
     const busy = session.state === "loading" || session.state === "buffering";
 
-    return (
-      <div className="cast-bar" role="group" aria-label={`Casting to ${session.device.name}`}>
+    const controls = (
+      <div
+        className={controllerOnly ? "cast-bar cast-bar-floating" : "cast-bar"}
+        role="group"
+        aria-label={`Casting to ${session.device.name}`}
+      >
         <span className="cast-bar-target">
           <Tv size={16} />
           <span className="cast-bar-name">{session.device.name}</span>
@@ -212,7 +219,13 @@ export function CastControl({
         )}
       </div>
     );
+
+    // The picker that started casting can unmount when the user navigates away. The app-level
+    // instance is the only one that keeps the transport controls visible across routes.
+    return controllerOnly ? createPortal(controls, document.body) : null;
   }
+
+  if (controllerOnly) return null;
 
   return (
     <div className="cast-wrap" ref={panelRef}>

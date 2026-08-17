@@ -77,7 +77,7 @@ public class CastPlugin extends Plugin {
         }
     }
 
-    /** Publishes a generated WebVTT sidecar that a TV on the LAN can fetch. */
+    /** Publishes a generated subtitle sidecar that a TV on the LAN can fetch. */
     @PluginMethod
     public void publishText(PluginCall call) {
         String text = call.getString("text");
@@ -85,10 +85,12 @@ public class CastPlugin extends Plugin {
             call.reject("Subtitle text is required.");
             return;
         }
+        String extension = call.getString("extension", ".vtt");
+        String contentType = call.getString("contentType", "text/vtt; charset=utf-8");
         try {
             if (proxy == null) proxy = new CastProxy(getContext());
             JSObject result = new JSObject();
-            result.put("url", proxy.publishText(text, ".vtt", "text/vtt; charset=utf-8"));
+            result.put("url", proxy.publishText(text, extension, contentType));
             call.resolve(result);
         } catch (Exception error) {
             call.reject("The subtitles could not be shared: " + error.getMessage());

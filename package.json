@@ -1,6 +1,6 @@
 {
   "name": "infinityplay",
-  "version": "0.3.4",
+  "version": "0.3.9",
   "description": "Desktop app for finding and streaming movies, TV shows, anime and live TV.",
   "desktopName": "InfinityPlay.desktop",
   "main": "./out/main/index.js",
