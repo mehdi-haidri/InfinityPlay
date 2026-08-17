@@ -84,6 +84,8 @@ export interface NativePlayerResult {
   subtitleUrl: string;
   subtitleName: string;
   subtitleLanguage: string;
+  /** -1/1 when the native player asks the shared layer to change episode. */
+  episodeStep: number;
 }
 
 interface InfinityPlayerPlugin {
@@ -97,6 +99,9 @@ interface InfinityPlayerPlugin {
     headersJson: string;
     preferredAudioLanguage: string;
     preferredSubtitleLanguage: string;
+    hasPreviousEpisode: boolean;
+    hasNextEpisode: boolean;
+    autoplayNext: boolean;
     live: boolean;
   }): Promise<NativePlayerResult>;
 }

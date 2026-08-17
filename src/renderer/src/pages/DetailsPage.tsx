@@ -237,6 +237,11 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
   const isQueued = watchLater.some((entry) => entry.id === media.id);
   const activeSeason = media.seasons.find((entry) => entry.number === season) ?? media.seasons[0];
   const resume = findProgress(watchHistory, id, isSeries ? season : 0, isSeries ? episode : 0);
+  // Keep the complete order with the player, rather than only the visible season. This lets
+  // next episode cross from a season finale into the next season on every platform.
+  const episodeSequence = media.seasons.flatMap((entry) =>
+    entry.episodes.map(({ season: episodeSeason, number }) => ({ season: episodeSeason, number })),
+  );
 
   /*
    * Long-running shows are drawn a block at a time.
@@ -264,6 +269,20 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
         startSeconds: resume?.position ?? 0,
         durationSeconds: resume?.duration ?? 0,
         live: false,
+        episodeContext: isSeries
+          ? {
+              subjectId: media.id,
+              season,
+              episode,
+              episodes: episodeSequence,
+              resolution: castRelease.resolution,
+              subtitle: {
+                off: preferredSubtitle === SUBTITLE_OFF,
+                name: castSubtitle?.name,
+                language: castSubtitle?.lang,
+              },
+            }
+          : undefined,
       }
     : null;
 
@@ -328,7 +347,7 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
       resolution: release.resolution,
       releases: releases.data ?? [],
       subtitles,
-      episodeCount: activeSeason?.episodes.length ?? 0,
+      episodeSequence: isSeries ? episodeSequence : undefined,
       initialSubtitle: subtitleChoice,
     });
   };

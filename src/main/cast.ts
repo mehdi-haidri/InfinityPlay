@@ -254,13 +254,15 @@ async function refreshSession(): Promise<void> {
         dlnaTransportState(soapFetch, dlnaTransport),
       ]);
       const state: CastPlaybackState =
-        transport === "PLAYING"
-          ? "playing"
-          : transport === "PAUSED_PLAYBACK"
-            ? "paused"
-            : transport === "TRANSITIONING"
-              ? "buffering"
-              : session.state;
+        transport === "STOPPED" && duration > 0 && Math.max(position, session.position) >= duration - 3
+          ? "ended"
+          : transport === "PLAYING"
+            ? "playing"
+            : transport === "PAUSED_PLAYBACK"
+              ? "paused"
+              : transport === "TRANSITIONING"
+                ? "buffering"
+                : session.state;
       emit({ position, duration: duration || session.duration, state });
       return;
     }
@@ -278,6 +280,8 @@ async function refreshSession(): Promise<void> {
                 ? "paused"
                 : status.playerState === "BUFFERING"
                   ? "buffering"
+                  : status.playerState === "IDLE" && status.idleReason === "FINISHED"
+                    ? "ended"
                   : session?.state ?? "idle",
         });
       });
@@ -405,7 +409,9 @@ async function castToChromecast(device: KnownDevice, request: CastRequest, url: 
               emit({
                 position: status.currentTime ?? 0,
                 state:
-                  status.playerState === "PAUSED"
+                  status.playerState === "IDLE" && status.idleReason === "FINISHED"
+                    ? "ended"
+                    : status.playerState === "PAUSED"
                     ? "paused"
                     : status.playerState === "BUFFERING"
                       ? "buffering"
@@ -477,6 +483,7 @@ async function castOnce(request: CastRequest, deviceId: string): Promise<CastSes
     duration: request.durationSeconds ?? 0,
     volume: 1,
     muted: false,
+    episodeContext: request.episodeContext,
   };
   broadcastSession(session);
 
