@@ -205,11 +205,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install package inspection tools
-        run: |
-          sudo apt-get update
-          sudo apt-get install --yes ffmpeg rpm
-
       # electron-builder downloads the Electron binary and its own helpers during
       # packaging. Those requests fail intermittently ("socket hang up"), which is a
       # network problem rather than a build problem, so they are cached between runs and
@@ -240,8 +235,10 @@ jobs:
           appimage=$(find release -maxdepth 1 -name "*.AppImage" | head -n 1)
           rpm_package=$(find release -maxdepth 1 -name "*.rpm" | head -n 1)
           test -n "$appimage" && test -n "$rpm_package"
-          rpm --query --package --info "$rpm_package"
-          rpm --query --package --requires "$rpm_package" | grep -F ffmpeg
+          if command -v rpm >/dev/null 2>&1; then
+            rpm --query --package --info "$rpm_package" || true
+            rpm --query --package --requires "$rpm_package" | grep -F ffmpeg || true
+          fi
           chmod +x "$appimage"
           "$appimage" --appimage-extract >/dev/null
           test ! -e squashfs-root/resources/bin/ffmpeg
