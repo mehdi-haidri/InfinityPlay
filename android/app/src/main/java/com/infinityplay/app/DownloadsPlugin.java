@@ -4,6 +4,7 @@ import android.Manifest;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
+import android.os.Environment;
 
 import androidx.core.content.FileProvider;
 
@@ -16,6 +17,8 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import com.getcapacitor.annotation.Permission;
 import com.getcapacitor.annotation.PermissionCallback;
 import com.getcapacitor.PermissionState;
+
+import java.io.File;
 
 /**
  * Offline downloads for Android.
@@ -246,6 +249,40 @@ public class DownloadsPlugin extends Plugin {
         if (id == null) { call.reject("Missing download id."); return; }
         downloader().cancel(id);
         call.resolve();
+    }
+
+    @PluginMethod
+    public void remove(PluginCall call) {
+        String id = call.getString("id");
+        if (id == null) { call.reject("Missing download id."); return; }
+        boolean deleteFile = Boolean.TRUE.equals(call.getBoolean("deleteFile"));
+        boolean handledBySeasonQueue = DownloadService.removeSeasonDownload(id, deleteFile);
+        if (!handledBySeasonQueue) downloader().remove(id, deleteFile);
+        if (deleteFile) deleteManagedFile(call.getString("fileUrl"));
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void clearFinished(PluginCall call) {
+        DownloadService.clearFinishedSeasonDownloads();
+        call.resolve();
+    }
+
+    /** Only accept a file inside this app's download folder, never an arbitrary renderer path. */
+    private void deleteManagedFile(String fileUrl) {
+        if (fileUrl == null || fileUrl.isEmpty()) return;
+        try {
+            Uri uri = Uri.parse(fileUrl);
+            if (!"file".equals(uri.getScheme()) || uri.getPath() == null) return;
+            File downloads = getContext().getExternalFilesDir(Environment.DIRECTORY_MOVIES);
+            if (downloads == null) return;
+            File root = downloads.getCanonicalFile();
+            File target = new File(uri.getPath()).getCanonicalFile();
+            if (!target.getPath().startsWith(root.getPath() + File.separator)) return;
+            if (target.exists() && !target.delete()) target.deleteOnExit();
+        } catch (Exception ignored) {
+            // The record is still removed even when Android has already removed its file.
+        }
     }
 
     @PluginMethod

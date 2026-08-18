@@ -97,6 +97,8 @@ interface InfinityDownloadsPlugin {
   pause(options: { id: string }): Promise<{ ok: boolean }>;
   resume(options: { id: string }): Promise<{ ok: boolean }>;
   cancel(options: { id: string }): Promise<void>;
+  remove(options: { id: string; deleteFile: boolean; fileUrl?: string }): Promise<void>;
+  clearFinished(): Promise<void>;
   open(options: { id: string }): Promise<void>;
 }
 
@@ -970,16 +972,21 @@ export const createCapacitorApi = (): InfinityPlayApi => {
           await saveStoredDownloads(remaining);
           return true;
         }),
-      remove: (id: string) =>
+      remove: (id: string, deleteFile: boolean) =>
         wrapResult(async () => {
-          await nativeDownloads.cancel({ id }).catch(() => undefined);
           const downloads = await getStoredDownloads();
+          const record = downloads.find((entry) => entry.id === id);
+          await nativeDownloads.remove({ id, deleteFile, fileUrl: record?.fileUrl ?? "" }).catch(() => undefined);
           const remaining = downloads.filter((d) => d.id !== id);
           return saveStoredDownloads(remaining);
         }),
       clearFinished: () =>
         wrapResult(async () => {
-          return saveStoredDownloads([]);
+          await nativeDownloads.clearFinished().catch(() => undefined);
+          const downloads = await getStoredDownloads();
+          return saveStoredDownloads(
+            downloads.filter((record) => record.state === "progressing" || record.state === "paused"),
+          );
         }),
       open: (id: string) =>
         wrapResult(async () => {

@@ -544,11 +544,19 @@ button {
 }
 
 .home-media-filter .chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 8px 18px;
   font-size: 13.5px;
   font-weight: 600;
   gap: 8px;
+  line-height: 1;
   border-radius: 999px;
+}
+
+.home-media-filter .chip svg {
+  flex: none;
 }
 
 .search-filter-toolbar {

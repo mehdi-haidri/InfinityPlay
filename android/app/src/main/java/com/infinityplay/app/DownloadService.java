@@ -158,6 +158,61 @@ public final class DownloadService extends Service {
         }
     }
 
+    /**
+     * Removes an episode that the native season worker owns.  The web layer also stores a copy of
+     * each record, but removing only that copy made terminal entries reappear on the next native
+     * status refresh.
+     */
+    static boolean removeSeasonDownload(String id, boolean deleteFile) {
+        List<String> downloadIds = new ArrayList<>();
+        Context context;
+        boolean removed = false;
+
+        synchronized (SEASON_QUEUE_LOCK) {
+            for (int index = seasonHistory.size() - 1; index >= 0; index--) {
+                SeasonEntry entry = seasonHistory.get(index);
+                if (!entry.hasId(id)) continue;
+                seasonHistory.remove(index);
+                if (entry.downloadId != null) downloadIds.add(entry.downloadId);
+                removed = true;
+            }
+
+            for (int index = seasonQueue.size() - 1; index >= 0; index--) {
+                if (seasonQueue.get(index).hasId(id)) {
+                    seasonQueue.remove(index);
+                    removed = true;
+                }
+            }
+
+            if (activeSeasonEntry != null && activeSeasonEntry.hasId(id)) {
+                activeSeasonEntry.dismissed = true;
+                activeSeasonEntry.deleteFileOnDismiss = deleteFile;
+                if (activeSeasonEntry.downloadId != null) downloadIds.add(activeSeasonEntry.downloadId);
+                removed = true;
+            }
+
+            if (seasonQueue.isEmpty()) seasonQueuePaused = false;
+            SEASON_QUEUE_LOCK.notifyAll();
+            context = seasonContext;
+        }
+
+        if (context != null) {
+            for (String downloadId : downloadIds) downloader(context).remove(downloadId, deleteFile);
+        }
+        if (removed) onDownloadsChanged();
+        return removed;
+    }
+
+    /** Clears terminal season entries without touching an in-progress episode or queued work. */
+    static int clearFinishedSeasonDownloads() {
+        synchronized (SEASON_QUEUE_LOCK) {
+            int cleared = seasonHistory.size();
+            seasonHistory.clear();
+            if (cleared > 0) onDownloadsChanged();
+            return cleared;
+        }
+    }
+
     static QueueStatus seasonQueueStatus() {
         synchronized (SEASON_QUEUE_LOCK) {
             List<QueueItem> items = new ArrayList<>();
@@ -171,7 +226,9 @@ public final class DownloadService extends Service {
             List<SeasonEntry> entries = new ArrayList<>(seasonHistory);
             if (activeSeasonEntry != null) entries.add(activeSeasonEntry);
             List<SeasonDownloadSnapshot> snapshots = new ArrayList<>();
-            for (SeasonEntry entry : entries) snapshots.add(snapshot(entry));
+            for (SeasonEntry entry : entries) {
+                if (!entry.dismissed) snapshots.add(snapshot(entry));
+            }
             return snapshots;
         }
     }
@@ -219,10 +276,18 @@ public final class DownloadService extends Service {
                 entry.url = release.url;
                 entry.resourceId = release.resourceId;
                 entry.resolution = release.resolution;
-                entry.downloadId = downloader(context).start(release.url, entry.filename(), entry.id);
-                entry.startedAt = System.currentTimeMillis();
-                onDownloadsChanged();
-                waitForSeasonDownload(context, entry);
+                if (entry.dismissed) {
+                    entry.state = "cancelled";
+                    entry.completedAt = System.currentTimeMillis();
+                } else {
+                    entry.downloadId = downloader(context).start(release.url, entry.filename(), entry.id);
+                    entry.startedAt = System.currentTimeMillis();
+                    if (entry.dismissed) {
+                        downloader(context).remove(entry.downloadId, entry.deleteFileOnDismiss);
+                    }
+                    onDownloadsChanged();
+                    waitForSeasonDownload(context, entry);
+                }
             } catch (Exception error) {
                 entry.state = "interrupted";
                 entry.failureReason = error.getMessage() == null
@@ -232,7 +297,7 @@ public final class DownloadService extends Service {
             }
 
             synchronized (SEASON_QUEUE_LOCK) {
-                seasonHistory.add(entry);
+                if (!entry.dismissed) seasonHistory.add(entry);
                 activeSeasonEntry = null;
             }
             onDownloadsChanged();
@@ -368,6 +433,8 @@ public final class DownloadService extends Service {
         volatile String failureReason = "";
         volatile long startedAt = System.currentTimeMillis();
         volatile long completedAt;
+        volatile boolean dismissed;
+        volatile boolean deleteFileOnDismiss;
 
         SeasonEntry(
             String id,
@@ -394,6 +461,10 @@ public final class DownloadService extends Service {
             return title + "-S" + String.format(java.util.Locale.US, "%02d", season)
                 + "E" + String.format(java.util.Locale.US, "%02d", episode)
                 + "-" + quality + "p.mp4";
+        }
+
+        boolean hasId(String value) {
+            return id.equals(value) || (downloadId != null && downloadId.equals(value));
         }
     }
 

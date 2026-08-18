@@ -120,12 +120,16 @@ final class FileDownloader {
     }
 
     void cancel(String id) {
+        remove(id, true);
+    }
+
+    /** Drops a job from the downloader and optionally leaves its partial file for a retry. */
+    void remove(String id, boolean deleteFile) {
         Job job = jobs.remove(id);
         if (job == null) return;
         job.cancelRequested = true;
         if (job.worker != null) job.worker.interrupt();
-        // The partial file is of no use once the user has given up on it.
-        if (job.file.exists() && !job.file.delete()) job.file.deleteOnExit();
+        if (deleteFile && job.file.exists() && !job.file.delete()) job.file.deleteOnExit();
         changed();
     }
 
