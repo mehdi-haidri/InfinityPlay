@@ -114,6 +114,9 @@ interface InfinityPlayerPlugin {
   open(options: {
     url: string;
     title: string;
+    subtitleLine?: string;
+    season?: number;
+    episode?: number;
     posterUrl: string;
     positionMs: number;
     subtitlesJson: string;

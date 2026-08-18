@@ -420,7 +420,10 @@ export function Player() {
 
     void nativePlayer.open({
       url: request.url,
-      title: request.subtitleLine ? `${request.title} · ${request.subtitleLine}` : request.title,
+      title: request.title,
+      subtitleLine: request.subtitleLine || "",
+      season: request.season,
+      episode: request.episode,
       posterUrl: request.posterUrl ?? "",
       positionMs: Math.round(savedPosition * 1000),
       subtitlesJson: JSON.stringify(

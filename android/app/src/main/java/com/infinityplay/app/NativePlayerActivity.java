@@ -64,6 +64,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
@@ -81,6 +82,9 @@ public class NativePlayerActivity extends AppCompatActivity {
     public static final String EXTRA_SUBTITLES_JSON = "subtitlesJson";
     public static final String EXTRA_RELEASES_JSON = "releasesJson";
     public static final String EXTRA_HEADERS_JSON = "headersJson";
+    public static final String EXTRA_SUBTITLE_LINE = "subtitleLine";
+    public static final String EXTRA_SEASON = "season";
+    public static final String EXTRA_EPISODE = "episode";
     public static final String EXTRA_PREFERRED_AUDIO = "preferredAudioLanguage";
     public static final String EXTRA_PREFERRED_SUBTITLE = "preferredSubtitleLanguage";
     public static final String EXTRA_HAS_PREVIOUS_EPISODE = "hasPreviousEpisode";
@@ -97,6 +101,14 @@ public class NativePlayerActivity extends AppCompatActivity {
     public static final String RESULT_SUBTITLE_LANGUAGE = "subtitleLanguage";
     public static final String RESULT_SUBTITLE_CHANGED = "subtitleChanged";
     public static final String RESULT_EPISODE_STEP = "episodeStep";
+
+    private View topBarContainer;
+    private TextView seasonEpisodeView;
+    private TextView titleView;
+    private TextView timerView;
+    private android.os.Handler timerHandler;
+    private Runnable timerRunnable;
+    private int timerDisplayMode = 0; // 0: Clock Time, 1: Remaining Time, 2: Elapsed / Total
 
     private PlayerView playerView;
     /** Quality keeps its label — which one is playing is information, not an icon. */
@@ -207,25 +219,117 @@ public class NativePlayerActivity extends AppCompatActivity {
             FrameLayout.LayoutParams.MATCH_PARENT,
             FrameLayout.LayoutParams.MATCH_PARENT
         ));
+        topBarContainer = new LinearLayout(this);
+        ((LinearLayout) topBarContainer).setOrientation(LinearLayout.HORIZONTAL);
+        ((LinearLayout) topBarContainer).setGravity(Gravity.CENTER_VERTICAL);
+        topBarContainer.setPadding(dp(14), dp(12), dp(14), dp(6));
+
+        // Subtle gradient background across top for maximum readability over bright video
+        GradientDrawable topGradient = new GradientDrawable(
+            GradientDrawable.Orientation.TOP_BOTTOM,
+            new int[]{0xCC08090D, 0x6608090D, 0x00000000}
+        );
+        topBarContainer.setBackground(topGradient);
+
+        // Left section: Back button + Title & Season/Episode text stack
+        LinearLayout leftHeader = new LinearLayout(this);
+        leftHeader.setOrientation(LinearLayout.HORIZONTAL);
+        leftHeader.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams leftParams = new LinearLayout.LayoutParams(
+            0, LinearLayout.LayoutParams.WRAP_CONTENT, 1.0f
+        );
+        leftParams.setMarginEnd(dp(12));
+        leftHeader.setLayoutParams(leftParams);
+
+        // Back button
+        ImageView backButton = createIconButton(
+            R.drawable.ic_player_back,
+            "Close player",
+            view -> {
+                finishWithResult(true);
+                finish();
+            }
+        );
+        LinearLayout.LayoutParams backParams = new LinearLayout.LayoutParams(dp(42), dp(42));
+        backParams.setMarginEnd(dp(10));
+        backButton.setLayoutParams(backParams);
+        leftHeader.addView(backButton);
+
+        // Title text column (vertical)
+        LinearLayout titleStack = new LinearLayout(this);
+        titleStack.setOrientation(LinearLayout.VERTICAL);
+        titleStack.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams stackParams = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, LinearLayout.LayoutParams.WRAP_CONTENT
+        );
+        titleStack.setLayoutParams(stackParams);
+
+        // Season & Episode TextView (above title)
+        seasonEpisodeView = new TextView(this);
+        seasonEpisodeView.setTextColor(0xFFE5A00D);
+        seasonEpisodeView.setTextSize(12);
+        seasonEpisodeView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        seasonEpisodeView.setSingleLine(true);
+        seasonEpisodeView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+
+        String rawTitle = getIntent().getStringExtra(EXTRA_TITLE);
+        if (rawTitle == null || rawTitle.trim().isEmpty()) rawTitle = "InfinityPlay";
+        String subtitleLine = getIntent().getStringExtra(EXTRA_SUBTITLE_LINE);
+        int season = getIntent().getIntExtra(EXTRA_SEASON, 0);
+        int episode = getIntent().getIntExtra(EXTRA_EPISODE, 0);
+
+        String seasonEpText = "";
+        if (season > 0 && episode > 0) {
+            seasonEpText = "SEASON " + season + " · EPISODE " + episode;
+            if (subtitleLine != null && !subtitleLine.trim().isEmpty() && subtitleLine.contains("·")) {
+                String[] parts = subtitleLine.split("·");
+                if (parts.length >= 3) {
+                    seasonEpText = "SEASON " + season + " · EPISODE " + episode + " · " + parts[2].trim().toUpperCase(Locale.ROOT);
+                }
+            }
+        } else if (subtitleLine != null && !subtitleLine.trim().isEmpty()) {
+            seasonEpText = subtitleLine.trim().toUpperCase(Locale.ROOT);
+        } else if (live) {
+            seasonEpText = "LIVE TV";
+        }
+
+        if (!seasonEpText.isEmpty()) {
+            seasonEpisodeView.setText(seasonEpText);
+            seasonEpisodeView.setVisibility(View.VISIBLE);
+        } else {
+            seasonEpisodeView.setVisibility(View.GONE);
+        }
+        titleStack.addView(seasonEpisodeView);
+
+        // Main Title TextView
+        titleView = new TextView(this);
+        titleView.setText(rawTitle);
+        titleView.setTextColor(Color.WHITE);
+        titleView.setTextSize(16);
+        titleView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        titleView.setSingleLine(true);
+        titleView.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        titleStack.addView(titleView);
+
+        leftHeader.addView(titleStack);
+        ((LinearLayout) topBarContainer).addView(leftHeader);
+
+        // Right section: quickActions
         quickActions = new LinearLayout(this);
         quickActions.setOrientation(LinearLayout.HORIZONTAL);
         quickActions.setGravity(Gravity.CENTER_VERTICAL);
+
         playerView.setControllerVisibilityListener(new PlayerView.ControllerVisibilityListener() {
             @Override
             public void onVisibilityChanged(int visibility) {
-                if (quickActions == null || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode())) return;
-                quickActions.setVisibility(visibility == View.VISIBLE ? View.VISIBLE : View.GONE);
+                if (topBarContainer == null || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode())) return;
+                topBarContainer.setVisibility(visibility == View.VISIBLE ? View.VISIBLE : View.GONE);
             }
         });
-        /*
-         * One control per action, drawn with the same glyphs as the desktop player.
-         *
-         * This row used to carry text labels — AUTO, Audio, More, DLNA, PiP — beside Google's cast
-         * button, which meant two separate controls for casting and a bar that looked nothing like
-         * the rest of the app. Quality still shows its label, because which quality is playing is
-         * information rather than an icon; everything else is an icon with the label kept as its
-         * accessible name. DLNA moved into the overflow menu, so casting starts in one place.
-         */
+
+        // Add Timer Widget to quickActions
+        quickActions.addView(createTimerWidget());
+
         qualityButton = createActionButton("AUTO", view -> showQualityPicker());
         audioButton = createIconButton(R.drawable.ic_player_audio, "Audio language", view -> showAudioPicker());
         optionsButton = createIconButton(R.drawable.ic_player_more, "More options", view -> showPlaybackOptions());
@@ -253,12 +357,14 @@ public class NativePlayerActivity extends AppCompatActivity {
             quickActions.addView(pipButton);
         }
         quickActions.addView(optionsButton);
-        FrameLayout.LayoutParams actionsLayout = new FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.WRAP_CONTENT, dp(48)
+
+        ((LinearLayout) topBarContainer).addView(quickActions);
+
+        FrameLayout.LayoutParams topBarParams = new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.WRAP_CONTENT
         );
-        actionsLayout.gravity = Gravity.TOP | Gravity.END;
-        actionsLayout.setMargins(dp(12), dp(12), dp(12), 0);
-        root.addView(quickActions, actionsLayout);
+        topBarParams.gravity = Gravity.TOP | Gravity.START;
+        root.addView(topBarContainer, topBarParams);
         setContentView(root);
         updateQualityButton();
 
@@ -530,6 +636,117 @@ public class NativePlayerActivity extends AppCompatActivity {
 
     private int dp(int value) {
         return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private String formatDuration(long millis) {
+        if (millis <= 0) return "00:00";
+        long totalSec = millis / 1000;
+        long sec = totalSec % 60;
+        long min = (totalSec / 60) % 60;
+        long hours = totalSec / 3600;
+        if (hours > 0) {
+            return String.format(java.util.Locale.getDefault(), "%d:%02d:%02d", hours, min, sec);
+        } else {
+            return String.format(java.util.Locale.getDefault(), "%02d:%02d", min, sec);
+        }
+    }
+
+    private void updateTimerText() {
+        if (timerView == null) return;
+        boolean is24 = android.text.format.DateFormat.is24HourFormat(this);
+        java.text.SimpleDateFormat timeFormat = new java.text.SimpleDateFormat(is24 ? "HH:mm" : "h:mm a", java.util.Locale.getDefault());
+        String clock = timeFormat.format(new java.util.Date());
+
+        if (live || player == null) {
+            timerView.setText(clock);
+            return;
+        }
+
+        long pos = Math.max(0, player.getCurrentPosition());
+        long dur = Math.max(0, player.getDuration());
+
+        switch (timerDisplayMode) {
+            case 0:
+                timerView.setText(clock);
+                break;
+            case 1:
+                if (dur > pos) {
+                    timerView.setText("-" + formatDuration(dur - pos));
+                } else {
+                    timerView.setText(clock);
+                }
+                break;
+            case 2:
+                if (dur > 0) {
+                    timerView.setText(formatDuration(pos) + " / " + formatDuration(dur));
+                } else {
+                    timerView.setText(formatDuration(pos));
+                }
+                break;
+            default:
+                timerView.setText(clock);
+                break;
+        }
+    }
+
+    private void startTimerUpdates() {
+        if (timerHandler == null) timerHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        if (timerRunnable == null) {
+            timerRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    updateTimerText();
+                    if (timerHandler != null) {
+                        timerHandler.postDelayed(this, 1000);
+                    }
+                }
+            };
+        }
+        timerHandler.removeCallbacks(timerRunnable);
+        timerHandler.post(timerRunnable);
+    }
+
+    private void stopTimerUpdates() {
+        if (timerHandler != null && timerRunnable != null) {
+            timerHandler.removeCallbacks(timerRunnable);
+        }
+    }
+
+    private LinearLayout createTimerWidget() {
+        LinearLayout timerContainer = new LinearLayout(this);
+        timerContainer.setOrientation(LinearLayout.HORIZONTAL);
+        timerContainer.setGravity(Gravity.CENTER_VERTICAL);
+        timerContainer.setPadding(dp(10), 0, dp(12), 0);
+        timerContainer.setBackground(actionBackground());
+
+        LinearLayout.LayoutParams layout = new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.WRAP_CONTENT, dp(42)
+        );
+        layout.setMarginStart(dp(6));
+        timerContainer.setLayoutParams(layout);
+
+        ImageView clockIcon = new ImageView(this);
+        clockIcon.setImageResource(R.drawable.ic_player_clock);
+        clockIcon.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
+        LinearLayout.LayoutParams iconParams = new LinearLayout.LayoutParams(dp(16), dp(16));
+        iconParams.setMarginEnd(dp(6));
+        clockIcon.setLayoutParams(iconParams);
+        timerContainer.addView(clockIcon);
+
+        timerView = new TextView(this);
+        timerView.setTextColor(Color.WHITE);
+        timerView.setTextSize(13);
+        timerView.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        timerView.setGravity(Gravity.CENTER_VERTICAL);
+        timerContainer.addView(timerView);
+
+        timerContainer.setOnClickListener(v -> {
+            timerDisplayMode = (timerDisplayMode + 1) % 3;
+            updateTimerText();
+        });
+
+        updateTimerText();
+        return timerContainer;
     }
 
     private TextView createActionButton(String label, View.OnClickListener listener) {
@@ -1085,6 +1302,7 @@ public class NativePlayerActivity extends AppCompatActivity {
     @Override
     protected void onStart() {
         super.onStart();
+        startTimerUpdates();
         if (castContext != null && castSessionListener != null) {
             castContext.getSessionManager().addSessionManagerListener(castSessionListener, CastSession.class);
         }
@@ -1099,6 +1317,7 @@ public class NativePlayerActivity extends AppCompatActivity {
 
     @Override
     protected void onStop() {
+        stopTimerUpdates();
         finishWithResult(true);
         if (castContext != null && castSessionListener != null) {
             castContext.getSessionManager().removeSessionManagerListener(castSessionListener, CastSession.class);
@@ -1121,6 +1340,7 @@ public class NativePlayerActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
+        stopTimerUpdates();
         releasePlayer();
         clearRemotePlaybackObserver();
         CastSession active = castContext == null ? null : castContext.getSessionManager().getCurrentCastSession();
@@ -1137,11 +1357,11 @@ public class NativePlayerActivity extends AppCompatActivity {
     @Override
     public void onPictureInPictureModeChanged(boolean isInPictureInPictureMode, Configuration newConfig) {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
-        if (quickActions != null) quickActions.setVisibility(isInPictureInPictureMode ? View.GONE : View.VISIBLE);
+        if (topBarContainer != null) topBarContainer.setVisibility(isInPictureInPictureMode ? View.GONE : View.VISIBLE);
         if (isInPictureInPictureMode) playerView.hideController();
         else {
             playerView.showController();
-            if (quickActions != null) quickActions.setVisibility(View.VISIBLE);
+            if (topBarContainer != null) topBarContainer.setVisibility(View.VISIBLE);
         }
     }
 

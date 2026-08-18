@@ -23,6 +23,9 @@ public class NativePlayerPlugin extends Plugin {
         Intent intent = new Intent(getContext(), NativePlayerActivity.class);
         intent.putExtra(NativePlayerActivity.EXTRA_URL, url);
         intent.putExtra(NativePlayerActivity.EXTRA_TITLE, call.getString("title", "InfinityPlay"));
+        intent.putExtra(NativePlayerActivity.EXTRA_SUBTITLE_LINE, call.getString("subtitleLine", ""));
+        intent.putExtra(NativePlayerActivity.EXTRA_SEASON, call.getInt("season", 0));
+        intent.putExtra(NativePlayerActivity.EXTRA_EPISODE, call.getInt("episode", 0));
         intent.putExtra(NativePlayerActivity.EXTRA_POSTER_URL, call.getString("posterUrl", ""));
         intent.putExtra(NativePlayerActivity.EXTRA_POSITION_MS, Math.max(0L, call.getLong("positionMs", 0L)));
         intent.putExtra(NativePlayerActivity.EXTRA_SUBTITLES_JSON, call.getString("subtitlesJson", "[]"));
