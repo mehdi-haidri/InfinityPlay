@@ -11,8 +11,8 @@
 ### Captions that carry over
 
 - Android DLNA captions are converted to SRT and published with the same base name as the video, which is the format expected by LG webOS televisions.
-- Subtitle selection is now one shared preference across the details page, player, casting, and episode changes. Selecting a subtitle in one place keeps it selected when moving to another episode.
-- The Android player has one subtitle picker—the app's own menu—rather than two conflicting controls.
+- The subtitle menu remains available after changing episodes, and the selected language is saved before the next episode starts.
+- The player and detail page use the same subtitle preference, so the chosen language is applied automatically when the next episode offers it.
 
 ### Casting controls while you browse
 

@@ -447,9 +447,10 @@ export function Player() {
       const position = Math.max(0, result.positionMs / 1000);
       const total = Math.max(0, result.durationMs / 1000);
       if (result.subtitleChanged) {
-        // The native picker is the same global preference as the detail-page chips, so choosing a
-        // language here follows the viewer into the next episode and back to the title page.
-        void patchConfig({ preferredSubtitle: result.subtitleLanguage || SUBTITLE_OFF });
+        // Persist the native choice before opening another episode. The next activity receives
+        // its subtitle preference from this store, so starting it first races it with the write
+        // and silently resets captions to the previous episode's setting.
+        await patchConfig({ preferredSubtitle: result.subtitleLanguage || SUBTITLE_OFF });
       }
       if (result.castRequested) {
         setCurrent(position);
@@ -923,8 +924,13 @@ export function Player() {
       const chosen =
         nextReleases.find((release) => release.resolution === activeRelease?.resolution) ??
         nextReleases[0];
-      const nextSubtitles = chosen.resourceId
-        ? await unwrap(api.catalog.subtitles(subjectId, chosen.resourceId)).catch(() => [])
+      // Captions belong to a direct release. The selected quality may be an adaptive manifest,
+      // whose resource id is rejected by the caption endpoint; using it made every subsequent
+      // episode look as though it had no subtitles at all.
+      const captionRelease =
+        nextReleases.find((release) => release.kind !== "dash" && release.resourceId) ?? chosen;
+      const nextSubtitles = captionRelease.resourceId
+        ? await unwrap(api.catalog.subtitles(subjectId, captionRelease.resourceId)).catch(() => [])
         : [];
 
       openPlayer({
