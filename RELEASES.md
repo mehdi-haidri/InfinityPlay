@@ -1,6 +1,33 @@
 # Release Notes
 
-## 0.3.4 (Latest update)
+## 0.3.5 (Latest update)
+
+### Reliable Android TV casting
+
+- Fixed Android DLNA casting to webOS and similar televisions: the local relay now uses the active Wi-Fi address, so the TV can reach the shared video instead of failing to fetch it.
+- LG webOS now receives the video resource before its caption resource, waits for the receiver to be ready, and retries the initial play request from a clean state when needed. This resolves the receiver's “Transition not available” failure.
+- A Chromecast session that was already connected before the native player opens now receives the selected title immediately. Casting also chooses a direct stream a receiver can actually play instead of handing it a protected adaptive manifest.
+
+### Captions that carry over
+
+- Android DLNA captions are converted to SRT and published with the same base name as the video, which is the format expected by LG webOS televisions.
+- Subtitle selection is now one shared preference across the details page, player, casting, and episode changes. Selecting a subtitle in one place keeps it selected when moving to another episode.
+- The Android player has one subtitle picker—the app's own menu—rather than two conflicting controls.
+
+### Casting controls while you browse
+
+- The active casting controller now floats above the app instead of squeezing into a title's action row.
+- It remains available while navigating to other pages, with play/pause, seeking, volume, and episode controls still connected to the TV session.
+
+### Next episode playback everywhere
+
+- Added Previous and Next episode controls to desktop playback, Android's native player, Chromecast, and DLNA casting.
+- When an episode ends, the next episode starts automatically. Navigation continues across season boundaries when a series has another season.
+- The Android player also responds to media next/previous buttons from headphones, remotes, and the system.
+
+### Cleaner mobile player controls
+
+- Android's quality, audio, episode, cast, and playback-options row now follows the normal player controls: it fades away during playback and returns when the controls are shown.
 
 ### Subtitles on the television
 
