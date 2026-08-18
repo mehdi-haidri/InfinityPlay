@@ -1,6 +1,18 @@
 # Release Notes
 
-## 0.3.4 (Latest update)
+## 0.3.5 (Latest update)
+
+### Android in-app updater and APK self-update
+
+- Android phones, tablets, and Android TV can now download and install updates directly from within the app.
+- When a new release is available on GitHub, the app detects it, displays update prompts, downloads the APK with pause/resume support, and seamlessly launches the package installer to update in place.
+- The About page provides full update status, download progress, and manual check/install controls on Android.
+
+### Version consistency
+
+- Unified version 0.3.5 across all desktop distributions and Android packages.
+
+## 0.3.4
 
 ### Subtitles on the television
 

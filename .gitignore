@@ -5,6 +5,7 @@ dist/
 *.log
 *.tsbuildinfo
 .DS_Store
+package-lock.json
 
 # FFmpeg binaries staged for packaging by build/prepare-ffmpeg.cjs.
 build/bin/
