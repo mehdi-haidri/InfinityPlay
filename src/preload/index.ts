@@ -51,8 +51,22 @@ const api = {
       invoke<AudioVariant[]>("catalog:audioVariants", title, mediaType),
     releases: (subjectId: string, season = 0, episode = 0) =>
       invoke<Release[]>("catalog:releases", subjectId, season, episode),
-    subtitles: (subjectId: string, resourceId: string) =>
-      invoke<SubtitleOption[]>("catalog:subtitles", subjectId, resourceId),
+    subtitles: (
+      subjectId: string,
+      resourceId: string,
+      title?: string,
+      year?: string,
+      season?: number,
+      episode?: number,
+    ) => invoke<SubtitleOption[]>("catalog:subtitles", subjectId, resourceId, title, year, season, episode),
+    searchOnlineSubtitles: (params: {
+      title: string;
+      year?: string;
+      imdbId?: string;
+      season?: number;
+      episode?: number;
+      languages?: string[];
+    }) => invoke<SubtitleOption[]>("catalog:searchOnlineSubtitles", params),
     clearCache: () => invoke<boolean>("catalog:clearCache"),
   },
   subtitle: {
@@ -174,7 +188,19 @@ const api = {
     openExternal: (url: string) => invoke<void>("shell:openExternal", url),
     setFullScreen: (value: boolean) => invoke<boolean>("window:toggleFullScreen", value),
     pickPlaylistFile: () => invoke<string | null>("dialog:pickPlaylistFile"),
+    pickDirectory: (title?: string) => invoke<string | null>("dialog:pickDirectory", title),
     restart: () => invoke<boolean>("app:restart"),
+  },
+  discord: {
+    setActivity: (params: {
+      details: string;
+      state?: string;
+      startTimestamp?: number;
+      endTimestamp?: number;
+      largeImageKey?: string;
+      largeImageText?: string;
+    }) => invoke<void>("discord:setActivity", params),
+    clearActivity: () => invoke<void>("discord:clearActivity"),
   },
 };
 

@@ -6,32 +6,47 @@ const CACHE_MS = 30 * 60 * 1000;
 const cache = new Map<string, { fetchedAt: number; xml: string }>();
 
 function decodeXml(value: string): string {
+  if (!value) return "";
   return value
+    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/gi, "$1")
     .replace(/<[^>]*>/g, " ")
     .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")
-    .replace(/&#(\d+);/g, (_match, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_match, hex: string) => {
+      try { return String.fromCodePoint(parseInt(hex, 16)); } catch { return ""; }
+    })
+    .replace(/&#(\d+);/g, (_match, code: string) => {
+      try { return String.fromCodePoint(Number(code)); } catch { return ""; }
+    })
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function attribute(value: string, name: string): string {
-  return value.match(new RegExp(`\\b${name}="([^"]*)"`, "i"))?.[1] ?? "";
+  if (!value) return "";
+  const match = value.match(new RegExp(`\\b${name}=(?:["']([^"']*)["']|([^\\s>]+))`, "i"));
+  return match?.[1] ?? match?.[2] ?? "";
 }
 
 function xmltvTime(value: string): number {
-  const match = value.match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\s*([+-])(\d{2})(\d{2}))?/);
+  if (!value) return 0;
+  const match = value.trim().match(/^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})(?:\s*([+-])(\d{2})(\d{2}))?/);
   if (!match) return 0;
-  const utc = Date.UTC(
-    Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]),
-    Number(match[5]), Number(match[6]),
-  );
-  if (!match[7]) return utc;
-  const offset = (Number(match[8]) * 60 + Number(match[9])) * 60_000;
-  return match[7] === "+" ? utc - offset : utc + offset;
+  try {
+    const utc = Date.UTC(
+      Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]),
+      Number(match[5]), Number(match[6]),
+    );
+    if (isNaN(utc)) return 0;
+    if (!match[7]) return utc;
+    const offset = (Number(match[8]) * 60 + Number(match[9])) * 60_000;
+    return match[7] === "+" ? utc - offset : utc + offset;
+  } catch {
+    return 0;
+  }
 }
 
 export function parseXmlTv(xml: string, requestedIds: string[]): Record<string, ChannelProgramme[]> {

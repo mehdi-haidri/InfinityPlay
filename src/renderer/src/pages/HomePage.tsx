@@ -1,5 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { ORIGINAL_AUDIO, type CatalogItem, type HomeRow } from "@shared/types";
+import { Film, LayoutGrid, Sparkles, Tv } from "lucide-react";
 import { api, unwrap } from "../lib/api";
 import { useAsync } from "../hooks/useAsync";
 import { useInView } from "../hooks/useInView";
@@ -7,6 +8,8 @@ import { Hero } from "../components/Hero";
 import { Row } from "../components/Row";
 import { ErrorState, SkeletonRow } from "../components/States";
 import { findProgress, useApp } from "../store";
+
+type MediaFilter = "all" | "movie" | "series";
 
 /**
  * One Home row, fetched only once it is nearly on screen.
@@ -18,11 +21,13 @@ function LazyRow({
   index,
   title,
   deps,
+  mediaFilter,
   progressOf,
 }: {
   index: number;
   title: string;
   deps: unknown[];
+  mediaFilter: MediaFilter;
   progressOf: (item: CatalogItem) => number;
 }) {
   const { ref, inView } = useInView<HTMLDivElement>();
@@ -30,6 +35,12 @@ function LazyRow({
     () => (inView ? unwrap(api.catalog.homeSection(index)) : Promise.resolve(null)),
     [index, inView, ...deps],
   );
+
+  const filteredItems = useMemo(() => {
+    if (!data?.items) return [];
+    if (mediaFilter === "all") return data.items;
+    return data.items.filter((item) => item.mediaType === mediaFilter);
+  }, [data?.items, mediaFilter]);
 
   // The placeholder holds a row's worth of height, so nothing below it jumps as rows land.
   if (!data || data.items.length === 0) {
@@ -41,14 +52,17 @@ function LazyRow({
     );
   }
 
+  if (filteredItems.length === 0) return null;
+
   return (
     <div ref={ref}>
-      <Row title={data.title} items={data.items} progressOf={progressOf} />
+      <Row title={data.title} items={filteredItems} progressOf={progressOf} />
     </div>
   );
 }
 
 export function HomePage() {
+  const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
   const watchHistory = useApp((state) => state.watchHistory);
   // Both settings change what the rows resolve to, so both belong in the deps.
   const preferredAudio = useApp((state) => state.config.preferredAudio);
@@ -93,6 +107,17 @@ export function HomePage() {
       }));
   }, [watchHistory]);
 
+  const filteredContinueWatching = useMemo(() => {
+    if (mediaFilter === "all") return continueWatching;
+    return continueWatching.filter((item) => item.mediaType === mediaFilter);
+  }, [continueWatching, mediaFilter]);
+
+  const filteredFirstItems = useMemo(() => {
+    const items = first.data?.items ?? [];
+    if (mediaFilter === "all") return items;
+    return items.filter((item) => item.mediaType === mediaFilter);
+  }, [first.data?.items, mediaFilter]);
+
   const progressBySubject = useMemo(() => {
     const progress = new Map<string, number>();
     for (const entry of watchHistory) {
@@ -108,9 +133,12 @@ export function HomePage() {
   // Camcorder rips are often the hottest thing in the catalog but make a poor full-bleed hero,
   // so they only headline when there is nothing else.
   const hero = useMemo(() => {
-    const items = first.data?.items ?? [];
-    return [...items.filter((item) => !item.isCam), ...items.filter((item) => item.isCam)].slice(0, 6);
-  }, [first.data]);
+    const items = (first.data?.items ?? []).filter(
+      (item) => mediaFilter === "all" || item.mediaType === mediaFilter,
+    );
+    const nonCam = items.filter((item) => !item.isCam);
+    return (nonCam.length > 0 ? nonCam : items).slice(0, 6);
+  }, [first.data, mediaFilter]);
 
   const error = sections.error ?? first.error;
   if (error) {
@@ -131,10 +159,43 @@ export function HomePage() {
     <div className="page">
       {first.loading || hero.length === 0 ? <div className="skeleton home-hero-skeleton" /> : <Hero items={hero} />}
 
-      {continueWatching.length > 0 && (
+      <div className="chip-row home-media-filter" role="tablist" aria-label="Filter content type">
+        <button
+          className="chip"
+          role="tab"
+          aria-selected={mediaFilter === "all"}
+          data-active={mediaFilter === "all"}
+          onClick={() => setMediaFilter("all")}
+        >
+          <Sparkles size={14} />
+          <span>All</span>
+        </button>
+        <button
+          className="chip"
+          role="tab"
+          aria-selected={mediaFilter === "movie"}
+          data-active={mediaFilter === "movie"}
+          onClick={() => setMediaFilter("movie")}
+        >
+          <Film size={14} />
+          <span>Movies</span>
+        </button>
+        <button
+          className="chip"
+          role="tab"
+          aria-selected={mediaFilter === "series"}
+          data-active={mediaFilter === "series"}
+          onClick={() => setMediaFilter("series")}
+        >
+          <Tv size={14} />
+          <span>TV Series</span>
+        </button>
+      </div>
+
+      {filteredContinueWatching.length > 0 && (
         <Row
           title="Continue watching"
-          items={continueWatching}
+          items={filteredContinueWatching}
           progressOf={(item) =>
             (findProgress(watchHistory, item.id, item.season, 0)?.position ?? 0) /
             Math.max(findProgress(watchHistory, item.id, item.season, 0)?.duration ?? 1, 1)
@@ -143,8 +204,8 @@ export function HomePage() {
         />
       )}
 
-      {first.data && first.data.items.length > 0 && (
-        <Row title={first.data.title} items={first.data.items} progressOf={progressOf} />
+      {first.data && filteredFirstItems.length > 0 && (
+        <Row title={first.data.title} items={filteredFirstItems} progressOf={progressOf} />
       )}
 
       {(sections.data ?? []).slice(1).map((title, offset) => (
@@ -153,6 +214,7 @@ export function HomePage() {
           index={offset + 1}
           title={title}
           deps={[preferredAudio, catalogCountry, hideAdultContent]}
+          mediaFilter={mediaFilter}
           progressOf={progressOf}
         />
       ))}

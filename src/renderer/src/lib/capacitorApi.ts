@@ -44,8 +44,8 @@ import { fetchPlaylist } from "@/../../main/providers/m3u";
 import { fetchEpg } from "@/../../main/providers/epg";
 import { fetchXtreamChannels, fetchXtreamEpg } from "@/../../main/providers/xtream";
 import { browseFreeMedia, freeMediaDetails, searchFreeMedia } from "@/../../main/providers/free-media";
-import { findWatchAvailability } from "@/../../main/providers/watch";
 import { fetchSubtitleAsVttDataUrl } from "@/../../main/providers/subtitles";
+import { searchOpenSubtitles } from "@/../../main/providers/opensubtitles";
 
 const STORAGE_KEYS = {
   CONFIG: "infinityplay_config",
@@ -682,8 +682,31 @@ export const createCapacitorApi = (): InfinityPlayApi => {
         wrapResult(() => moviebox.audioVariants(title, mediaType)),
       releases: (subjectId: string, season = 0, episode = 0) =>
         wrapResult(() => moviebox.releases(subjectId, season, episode)),
-      subtitles: (subjectId: string, resourceId: string) =>
-        wrapResult(() => moviebox.subtitles(subjectId, resourceId)),
+      subtitles: (
+        subjectId: string,
+        resourceId: string,
+        title?: string,
+        year?: string,
+        season?: number,
+        episode?: number,
+      ) =>
+        wrapResult(async () => {
+          const list = await moviebox.subtitles(subjectId, resourceId);
+          if (list.length > 0) return list;
+          if (title) {
+            const communitySubs = await searchOpenSubtitles({ title, year, season, episode });
+            if (communitySubs.length > 0) return communitySubs;
+          }
+          return list;
+        }),
+      searchOnlineSubtitles: (params: {
+        title: string;
+        year?: string;
+        imdbId?: string;
+        season?: number;
+        episode?: number;
+        languages?: string[];
+      }) => wrapResult(() => searchOpenSubtitles(params)),
       clearCache: () =>
         wrapResult(async () => {
           moviebox.clearCache();
@@ -709,10 +732,17 @@ export const createCapacitorApi = (): InfinityPlayApi => {
         wrapResult(() => freeMediaDetails(provider, id)),
     },
     availability: {
-      title: (title, mediaType) => wrapResult(async () => {
-        const config = await getStoredConfig();
-        return findWatchAvailability(title, mediaType, config.tmdbReadToken, config.watchRegion);
-      }),
+      title: () =>
+        wrapResult(async () => ({
+          configured: false,
+          region: "",
+          link: null,
+          free: [],
+          ads: [],
+          subscription: [],
+          rent: [],
+          buy: [],
+        })),
     },
     media: {
       prepareLive: (url: string, startAt = 0, resolution = 0) =>
@@ -922,11 +952,16 @@ export const createCapacitorApi = (): InfinityPlayApi => {
           return value;
         }),
       pickPlaylistFile: () => wrapResult(async () => null),
+      pickDirectory: () => wrapResult(async () => null),
       restart: () =>
         wrapResult(async () => {
           window.location.reload();
           return true;
         }),
+    },
+    discord: {
+      setActivity: () => wrapResult(async () => {}),
+      clearActivity: () => wrapResult(async () => {}),
     },
   };
 };

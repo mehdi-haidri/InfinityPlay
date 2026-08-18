@@ -19,7 +19,15 @@ export function HistoryPage() {
           title="Continue watching"
           description="Resume films and episodes from where you stopped."
         />
-        <EmptyState title="Nothing watched yet" body="Titles you start show up here with their resume point." />
+        <EmptyState
+          title="Nothing watched yet"
+          body="Titles you start show up here with their resume point."
+          action={
+            <button className="btn btn-primary btn-sm" onClick={() => navigate({ name: "home" })}>
+              Discover movies & shows
+            </button>
+          }
+        />
       </div>
     );
   }

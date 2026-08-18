@@ -6,7 +6,6 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { createRequire } from "node:module";
 import { spawnSync } from "node:child_process";
 import { app } from "electron";
 
@@ -21,30 +20,69 @@ type Tool = "ffmpeg" | "ffprobe";
  */
 const resolved = new Map<Tool, string>();
 
+function findLinuxBinary(tool: Tool): string {
+  const standardPaths = [
+    `/usr/bin/${tool}`,
+    `/usr/local/bin/${tool}`,
+    `/bin/${tool}`,
+    `/opt/homebrew/bin/${tool}`,
+  ];
+  for (const candidate of standardPaths) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
+  const envPath = process.env.PATH || "";
+  for (const dir of envPath.split(path.delimiter)) {
+    if (dir.includes("node_modules")) continue;
+    const candidate = path.join(dir, tool);
+    if (fs.existsSync(candidate)) return candidate;
+  }
+
+  return tool;
+}
+
 function locate(tool: Tool): string {
   const executable = process.platform === "win32" ? `${tool}.exe` : tool;
 
-  // Never run the obsolete Linux static binaries shipped by the npm packages. Current
-  // distribution builds receive security/codec fixes and support current kernels.
-  if (process.platform === "linux") return executable;
+  // On Linux, always use the real system binary (/usr/bin/ffmpeg), never node_modules/.bin npm stubs
+  if (process.platform === "linux") return findLinuxBinary(tool);
 
-  // Shipped with the app. `process.resourcesPath` is only meaningful once packaged.
+  // Packaged app: tools reside under resources/bin/
   if (app.isPackaged) {
     const bundled = path.join(process.resourcesPath, "bin", executable);
     if (fs.existsSync(bundled)) return bundled;
   } else {
-    // Development on Windows/macOS: resolve each tool from its own package.
+    // Development mode on Windows / macOS: check package binaries directly without triggering @rse/ffmpeg top-level throw
     try {
-      const require = createRequire(import.meta.url);
       if (tool === "ffmpeg") {
-        const FFmpeg = require("@rse/ffmpeg") as { supported: boolean; binary: string };
-        if (FFmpeg.supported && fs.existsSync(FFmpeg.binary)) return FFmpeg.binary;
+        const candidateFile =
+          process.platform === "win32"
+            ? "ffmpeg-win-x64.exe"
+            : process.arch === "arm64"
+              ? "ffmpeg-mac-a64"
+              : "ffmpeg-mac-x64";
+        const candidatePath = path.join(
+          process.cwd(),
+          "node_modules",
+          "@rse",
+          "ffmpeg",
+          "ffmpeg.d",
+          candidateFile,
+        );
+        if (fs.existsSync(candidatePath)) return candidatePath;
       } else {
-        const FFprobe = require("@ffprobe-installer/ffprobe") as { path: string };
-        if (FFprobe.path && fs.existsSync(FFprobe.path)) return FFprobe.path;
+        const candidateFile = process.platform === "win32" ? "ffprobe.exe" : "ffprobe";
+        const candidatePath = path.join(
+          process.cwd(),
+          "node_modules",
+          "@ffprobe-installer",
+          "ffprobe",
+          candidateFile,
+        );
+        if (fs.existsSync(candidatePath)) return candidatePath;
       }
     } catch {
-      // Not installed; fall through to PATH.
+      // Fall through to PATH
     }
   }
 
@@ -62,13 +100,18 @@ export function toolPath(tool: Tool): string {
 
 const availability = new Map<Tool, boolean>();
 
-/** Whether the tool can actually be executed, probed once per run. */
+/** Whether the tool can actually be executed, probed once per run with timeout safety. */
 export function toolAvailable(tool: Tool): boolean {
   const cached = availability.get(tool);
   if (cached !== undefined) return cached;
-  const available = spawnSync(toolPath(tool), ["-version"], { stdio: "ignore" }).status === 0;
-  availability.set(tool, available);
-  return available;
+  try {
+    const available = spawnSync(toolPath(tool), ["-version"], { stdio: "ignore", timeout: 3_000 }).status === 0;
+    availability.set(tool, available);
+    return available;
+  } catch {
+    availability.set(tool, false);
+    return false;
+  }
 }
 
 /**

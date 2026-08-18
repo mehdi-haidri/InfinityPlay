@@ -262,6 +262,8 @@ if (!app.requestSingleInstanceLock()) {
   });
 }
 
+import { initDiscordRpc } from "./discord";
+
 app.whenReady().then(() => {
   rewriteMediaRequestHeaders();
   installStreamSigner();
@@ -271,6 +273,7 @@ app.whenReady().then(() => {
   mainWindow = createWindow();
   initDownloads(() => mainWindow);
   initUpdater(() => mainWindow);
+  initDiscordRpc().catch(() => {});
   initCast((session) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("cast:session", session);
   });

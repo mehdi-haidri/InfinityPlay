@@ -17,16 +17,47 @@ function normalizeTimestamp(value: string): string {
   return withDot.split(":").length === 2 ? `00:${withDot}` : withDot;
 }
 
+/**
+ * Cleans dialogue cue text: strips ASS/SSA tags, converts escaped newlines
+ * (\N, \n, /n, /N, \\n, \\N) common in Arabic and machine-translated subtitles to real newlines.
+ */
+export function cleanSubtitleCueText(text: string): string {
+  if (!text) return "";
+  return text
+    // Strip ASS/SSA tags like {\an8}, {\pos(100,200)}, {\c&H0000FF&}
+    .replace(/\{[^}]*\}/g, "")
+    // Convert HTML break tags to real newlines
+    .replace(/<br\s*\/?>/gi, "\n")
+    // Remove other HTML formatting tags (<i>, <b>, <font>, etc.)
+    .replace(/<[^>]+>/g, "")
+    // Convert literal escaped newlines common in Arabic and machine-translated subs:
+    // \N (ASS hard break), \n, /n, /N, \\n, \\N, \r\n, etc.
+    .replace(/(?:\\+r\\+n|\\+n|\\+N|\/[nN])/g, "\n")
+    // Collapse multiple consecutive newlines into one
+    .replace(/[ \t]*\n(?:[ \t]*\n)+/g, "\n")
+    // Clean up spaces around newlines
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
+    .trim();
+}
+
 export function srtToVtt(source: string): string {
-  const text = source.replace(/^﻿/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  if (text.trimStart().startsWith("WEBVTT")) return text;
+  const text = source.replace(/^\uFEFF/, "").replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const isWebvtt = text.trimStart().startsWith("WEBVTT");
 
   const lines = text.split("\n");
   const output: string[] = ["WEBVTT", ""];
 
-  for (const line of lines) {
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Skip WEBVTT header line if present in source
+    if (isWebvtt && (trimmed.startsWith("WEBVTT") || trimmed.startsWith("NOTE") || trimmed.startsWith("STYLE"))) {
+      if (trimmed.startsWith("WEBVTT")) continue;
+    }
+
     // Drop the numeric cue counter; VTT does not need it and it confuses some parsers.
-    if (/^\d+$/.test(line.trim())) continue;
+    if (/^\d+$/.test(trimmed)) continue;
 
     const timing = line.match(/^(.+?)\s*-->\s*(.+?)$/);
     if (timing) {
@@ -34,14 +65,23 @@ export function srtToVtt(source: string): string {
       continue;
     }
 
-    output.push(line);
+    if (!trimmed) {
+      output.push("");
+      continue;
+    }
+
+    // Clean dialogue text line (fixes /n, \n, \N, {\...}, etc.)
+    const cleaned = cleanSubtitleCueText(line);
+    if (cleaned) {
+      output.push(cleaned);
+    }
   }
 
   return output.join("\n");
 }
 
 /** Returns a WebVTT `data:` URL that a `<track src>` can consume directly. */
-const toDataUrl = (vtt: string): string => {
+export const toDataUrl = (vtt: string): string => {
   const base64 = typeof Buffer !== "undefined"
     ? Buffer.from(vtt, "utf8").toString("base64")
     : btoa(unescape(encodeURIComponent(vtt)));

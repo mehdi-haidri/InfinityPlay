@@ -9,6 +9,7 @@ type FavoriteFilter = "all" | MediaType;
 export function FavoritesPage() {
   const favorites = useApp((state) => state.favorites);
   const toggleFavorite = useApp((state) => state.toggleFavorite);
+  const navigate = useApp((state) => state.navigate);
   const [filter, setFilter] = useState<FavoriteFilter>("all");
   const visible = useMemo(
     () => filter === "all" ? favorites : favorites.filter((item) => item.mediaType === filter),
@@ -43,6 +44,11 @@ export function FavoritesPage() {
         <EmptyState
           title={favorites.length === 0 ? "No favorites yet" : `No ${filter} favorites`}
           body="Save a title from its details page and it will appear here."
+          action={
+            <button className="btn btn-primary btn-sm" onClick={() => navigate({ name: "home" })}>
+              Browse catalog
+            </button>
+          }
         />
       )}
     </div>

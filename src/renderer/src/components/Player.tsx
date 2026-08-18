@@ -25,6 +25,9 @@ import {
   Volume2,
   VolumeX,
   X,
+  Keyboard,
+  Globe,
+  Timer,
 } from "lucide-react";
 import {
   preferredAudioLanguage,
@@ -40,7 +43,9 @@ import {
   type SubtitleEdgeStyle,
 } from "@shared/types";
 import { api, unwrap } from "../lib/api";
+import { searchOpenSubtitles } from "@/../../main/providers/opensubtitles";
 import { CastControl } from "./CastControl";
+import { ShortcutsHelpModal } from "./player/ShortcutsHelpModal";
 import { nativePlayer } from "../lib/capacitorApi";
 import { formatTime, qualityLabel } from "../lib/format";
 import { pickCastRelease } from "../lib/castMedia";
@@ -86,10 +91,29 @@ function parseVttTime(timeStr: string): number {
   return parseFloat(timeStr) || 0;
 }
 
+function cleanCueText(text: string): string {
+  if (!text) return "";
+  return text
+    // Strip ASS/SSA tags like {\an8}, {\pos(100,200)}, {\c&H0000FF&}
+    .replace(/\{[^}]*\}/g, "")
+    // Convert HTML break tags to real newlines
+    .replace(/<br\s*\/?>/gi, "\n")
+    // Remove other HTML formatting tags (<i>, <b>, <font>, etc.)
+    .replace(/<[^>]+>/g, "")
+    // Convert literal escaped newlines common in Arabic and machine-translated subtitles:
+    // \N (ASS hard break), \n, /n, /N, \\n, \\N, \r\n, etc.
+    .replace(/(?:\\+r\\+n|\\+n|\\+N|\/[nN])/g, "\n")
+    // Collapse multiple consecutive newlines into one
+    .replace(/[ \t]*\n(?:[ \t]*\n)+/g, "\n")
+    // Clean up spaces around newlines
+    .replace(/[ \t]*\n[ \t]*/g, "\n")
+    .trim();
+}
+
 function parseVttCues(vttText: string): VttCue[] {
   if (!vttText) return [];
   const cues: VttCue[] = [];
-  const blocks = vttText.replace(/^WEBVTT[^\n]*\n/i, "").split(/\n\s*\n/);
+  const blocks = vttText.replace(/^\uFEFF/, "").replace(/^WEBVTT[^\n]*\n/i, "").split(/\n\s*\n/);
   for (const block of blocks) {
     const lines = block.trim().split("\n");
     for (let i = 0; i < lines.length; i++) {
@@ -97,7 +121,8 @@ function parseVttCues(vttText: string): VttCue[] {
       if (match) {
         const start = parseVttTime(match[1]);
         const end = parseVttTime(match[2]);
-        const text = lines.slice(i + 1).join("\n").replace(/<[^>]+>/g, "").trim();
+        const rawText = lines.slice(i + 1).join("\n");
+        const text = cleanCueText(rawText);
         if (text && end > start) {
           cues.push({ start, end, text });
         }
@@ -256,9 +281,14 @@ export function Player() {
   } | null>(null);
   const subPosition = config.subtitlePosition === "top" ? 28 : config.subtitlePosition === "middle" ? 54 : 86;
   const [videoFit, setVideoFit] = useState<VideoFit>("contain");
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [sleepMinutes, setSleepMinutes] = useState(0);
   const [audioTracks, setAudioTracks] = useState<PlayerAudioTrack[]>([]);
   const [selectedAudioId, setSelectedAudioId] = useState("auto");
+  const [subtitleOffset, setSubtitleOffset] = useState(0);
+  const [searchingOnlineSubs, setSearchingOnlineSubs] = useState(false);
+  const [dismissedCountdown, setDismissedCountdown] = useState(false);
+  const [tapFeedback, setTapFeedback] = useState<{ side: "left" | "right"; id: number } | null>(null);
 
   const cues = useMemo(() => {
     if (!subtitle?.vttText) return [];
@@ -267,9 +297,10 @@ export function Player() {
 
   const activeCueText = useMemo(() => {
     if (cues.length === 0) return null;
-    const match = cues.find((cue) => current >= cue.start && current <= cue.end);
+    const adjustedTime = current + subtitleOffset;
+    const match = cues.find((cue) => adjustedTime >= cue.start && adjustedTime <= cue.end);
     return match ? match.text : null;
-  }, [cues, current]);
+  }, [cues, current, subtitleOffset]);
 
   const [trackCueText, setTrackCueText] = useState<string | null>(null);
 
@@ -285,11 +316,10 @@ export function Player() {
       for (let i = 0; i < video.textTracks.length; i++) {
         const track = video.textTracks[i];
         if (track.activeCues && track.activeCues.length > 0) {
-          activeText = Array.from(track.activeCues)
+          const raw = Array.from(track.activeCues)
             .map((c: any) => c.text)
-            .join("\n")
-            .replace(/<[^>]+>/g, "")
-            .trim();
+            .join("\n");
+          activeText = cleanCueText(raw);
           break;
         }
       }
@@ -354,25 +384,24 @@ export function Player() {
       text-shadow: none !important;
     }`;
   }, []);
-  const subtitles = useMemo(() => request?.subtitles ?? [], [request]);
+  const [extraSubtitles, setExtraSubtitles] = useState<SubtitleOption[]>([]);
+  const subtitles = useMemo(
+    () => [...(request?.subtitles ?? []), ...extraSubtitles],
+    [request?.subtitles, extraSubtitles],
+  );
 
   // Reset the player before resolving a source. A saved position is handled inside the
   // player, so the user can choose without a browser-style alert interrupting the app.
   useEffect(() => {
     if (!request) return;
+    setExtraSubtitles([]);
     setSourceUrl("");
     setSelectedSourceUrl(request.url);
     setSelectedResolution(request.resolution ?? 0);
     setPrepared(null);
     setPlaybackOffset(0);
     const saved = request.startAt ?? 0;
-    setStartPosition(
-      saved > 30 && config.resumeBehavior === "ask"
-        ? null
-        : config.resumeBehavior === "restart"
-          ? 0
-          : saved,
-    );
+    setStartPosition(saved);
     setWaiting(false);
     setPlaybackError(null);
     setActiveRelease(
@@ -1153,8 +1182,13 @@ export function Player() {
         case "f":
           void toggleFullscreen();
           break;
+        case "?":
+          event.preventDefault();
+          setShortcutsOpen((value) => !value);
+          break;
         case "Escape":
-          if (document.fullscreenElement) void document.exitFullscreen();
+          if (shortcutsOpen) setShortcutsOpen(false);
+          else if (document.fullscreenElement) void document.exitFullscreen();
           else close();
           break;
         default:
@@ -1217,6 +1251,46 @@ export function Player() {
     navigator.mediaSession.playbackState = playing ? "playing" : "paused";
   }, [playing]);
 
+  // Discord Rich Presence
+  useEffect(() => {
+    if (!request || !playing || config.discordRpc === false) {
+      if (api.discord?.clearActivity) {
+        void api.discord.clearActivity().catch(() => {});
+      }
+      return;
+    }
+
+    if (api.discord?.setActivity) {
+      const remainingMs = (duration - current) * 1000;
+      void api.discord
+        .setActivity({
+          details: request.title,
+          state:
+            request.subtitleLine ||
+            (request.mediaType === "series" ? "Watching series" : "Watching movie"),
+          startTimestamp: Date.now() - Math.round(current * 1000),
+          endTimestamp: duration > 0 ? Date.now() + Math.round(remainingMs) : undefined,
+          largeImageKey: "logo",
+          largeImageText: request.title,
+        })
+        .catch(() => {});
+    }
+
+    return () => {
+      if (api.discord?.clearActivity) {
+        void api.discord.clearActivity().catch(() => {});
+      }
+    };
+  }, [
+    request?.title,
+    request?.subtitleLine,
+    request?.mediaType,
+    playing,
+    config.discordRpc,
+    Math.floor(current / 15),
+    duration,
+  ]);
+
   // Prevent dimming during playback without forcing the screen awake after pause/close.
   useEffect(() => {
     let lock: { release: () => Promise<void>; released: boolean } | null = null;
@@ -1253,6 +1327,96 @@ export function Player() {
     document.addEventListener("fullscreenchange", onChange);
     return () => document.removeEventListener("fullscreenchange", onChange);
   }, []);
+
+  // Sleep timer
+  useEffect(() => {
+    if (sleepMinutes <= 0) return;
+    const timer = setTimeout(() => {
+      videoRef.current?.pause();
+      setPlaying(false);
+      setSleepMinutes(0);
+      notify({ kind: "info", title: "Sleep timer ended", body: "Playback paused automatically." });
+    }, sleepMinutes * 60 * 1000);
+    return () => clearTimeout(timer);
+  }, [sleepMinutes, notify]);
+
+  // Mobile orientation auto-lock
+  useEffect(() => {
+    if (
+      document.documentElement.dataset.device === "phone" &&
+      "orientation" in screen &&
+      (screen.orientation as any)?.lock
+    ) {
+      (screen.orientation as any).lock("landscape").catch(() => {});
+      return () => {
+        try {
+          (screen.orientation as any).unlock?.();
+        } catch {
+          // Ignored
+        }
+      };
+    }
+  }, []);
+
+  const handleSearchOnlineSubtitles = async () => {
+    if (!request) return;
+    setSearchingOnlineSubs(true);
+    try {
+      let extraSubs: SubtitleOption[] = [];
+      if (typeof api?.catalog?.searchOnlineSubtitles === "function") {
+        try {
+          extraSubs = await unwrap(
+            api.catalog.searchOnlineSubtitles({
+              title: request.title,
+              year: request.year,
+              season: request.season,
+              episode: request.episode,
+            }),
+          );
+        } catch {
+          extraSubs = [];
+        }
+      }
+
+      // Safe direct fallback if IPC wrapper returned empty or is not loaded yet
+      if (!extraSubs || extraSubs.length === 0) {
+        extraSubs = await searchOpenSubtitles({
+          title: request.title,
+          year: request.year,
+          season: request.season,
+          episode: request.episode,
+        });
+      }
+
+      if (extraSubs && extraSubs.length > 0) {
+        setExtraSubtitles((prev) => {
+          const existingUrls = new Set(prev.map((s) => s.url));
+          const toAdd = extraSubs.filter((s) => !existingUrls.has(s.url));
+          return [...prev, ...toAdd];
+        });
+        notify({ kind: "info", title: `Found ${extraSubs.length} online subtitle tracks` });
+      } else {
+        notify({ kind: "info", title: "No online subtitles found for this title" });
+      }
+    } catch (error) {
+      notify({
+        kind: "error",
+        title: "Could not fetch online subtitles",
+        body: error instanceof Error ? error.message : undefined,
+      });
+    } finally {
+      setSearchingOnlineSubs(false);
+    }
+  };
+
+  const triggerTouchSeek = (direction: 1 | -1) => {
+    seekBy(direction * SEEK_STEP);
+    const id = Date.now();
+    setTapFeedback({ side: direction === -1 ? "left" : "right", id });
+    setTimeout(() => {
+      setTapFeedback((prev) => (prev?.id === id ? null : prev));
+    }, 700);
+  };
 
   if (!request) return null;
 
@@ -1582,8 +1746,8 @@ export function Player() {
           }
           const rect = event.currentTarget.getBoundingClientRect();
           const ratio = (event.clientX - rect.left) / rect.width;
-          if (ratio < 0.4) seekBy(-SEEK_STEP);
-          else if (ratio > 0.6) seekBy(SEEK_STEP);
+          if (ratio < 0.4) triggerTouchSeek(-1);
+          else if (ratio > 0.6) triggerTouchSeek(1);
           else togglePlay();
         }}
       >
@@ -1616,6 +1780,39 @@ export function Player() {
           )}
         </video>
 
+        {tapFeedback && (
+          <div className={`touch-seek-feedback ${tapFeedback.side}`}>
+            <span className="touch-seek-badge">
+              {tapFeedback.side === "left" ? "◂◂ 10s" : "10s ▸▸"}
+            </span>
+          </div>
+        )}
+
+        {hasNextEpisode && !dismissedCountdown && duration > 60 && duration - current <= 16 && duration - current > 0 && (
+          <div className="next-episode-countdown-card">
+            <div className="next-episode-info">
+              <span className="next-episode-eyebrow">
+                Next episode in {Math.max(1, Math.round(duration - current))}s
+              </span>
+              <span className="next-episode-title">Autoplay next episode</span>
+            </div>
+            <div className="next-episode-actions">
+              <button
+                className="btn btn-sm btn-primary"
+                onClick={() => void playAdjacentEpisode(1)}
+              >
+                <Play size={13} fill="currentColor" /> Play Now
+              </button>
+              <button
+                className="btn btn-sm btn-ghost"
+                onClick={() => setDismissedCountdown(true)}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* A fixed overlay avoids pointer movement changing a chosen subtitle position. */}
         {displayCueText && (
           <div
@@ -1629,8 +1826,10 @@ export function Player() {
               pointerEvents: "none",
             }}
             aria-live="off"
+            dir="auto"
           >
             <div
+              dir="auto"
               style={{
                 fontSize: `clamp(${Math.round(16 * subtitleScale)}px, ${2.25 * subtitleScale}vmin, ${Math.round(40 * subtitleScale)}px)`,
                 color: config.subtitleColor ?? "#ffffff",
@@ -1673,24 +1872,6 @@ export function Player() {
               }}
             >
               {displayCueText}
-            </div>
-          </div>
-        )}
-
-        {startPosition === null && !request.live && (
-          <div className="resume-prompt" role="dialog" aria-modal="true" aria-label="Resume playback">
-            <div className="resume-prompt-card">
-              <span className="resume-eyebrow">Continue watching</span>
-              <h3>Pick up where you stopped?</h3>
-              <p>Resume at {formatTime(request.startAt ?? 0)}, or start this title over.</p>
-              <div className="resume-actions">
-                <button autoFocus className="btn btn-primary" onClick={() => setStartPosition(request.startAt ?? 0)}>
-                  <Play size={16} fill="currentColor" /> Continue
-                </button>
-                <button className="btn" onClick={() => setStartPosition(0)}>
-                  <RotateCcw size={16} /> Start over
-                </button>
-              </div>
             </div>
           </div>
         )}
@@ -1861,6 +2042,15 @@ export function Player() {
                     <Languages size={19} />
                   </button>
                 )}
+                <button
+                  className="icon-button"
+                  onClick={() => setShortcutsOpen((value) => !value)}
+                  aria-label="Keyboard shortcuts"
+                  title="Keyboard shortcuts (?)"
+                >
+                  <Keyboard size={19} />
+                </button>
+
                 <button
                   className="icon-button"
                   onClick={() => setMenu((value) => (value === "quality" ? null : "quality"))}
@@ -2163,7 +2353,7 @@ export function Player() {
                 {SUBTITLE_OFF}
               </button>
               {subtitles.length === 0 && (
-                <div className="player-menu-empty">No subtitle tracks for this title</div>
+                <div className="player-menu-empty">No default subtitle tracks</div>
               )}
               {subtitles.map((option) => (
                 <button
@@ -2176,7 +2366,45 @@ export function Player() {
                   {option.name}
                 </button>
               ))}
+
+              <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid rgba(255,255,255,0.08)" }}>
+                <div className="player-menu-timing" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+                  <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>Sync timing</span>
+                  <div className="cue-stepper">
+                    <button
+                      onClick={() => setSubtitleOffset((prev) => Math.max(-10, Number((prev - 0.5).toFixed(1))))}
+                      aria-label="Delay subtitles 0.5s"
+                      title="Delay subtitles -0.5s"
+                    >
+                      <Minus size={13} />
+                    </button>
+                    <b style={{ minWidth: 44, textAlign: "center", fontSize: 12 }}>
+                      {subtitleOffset > 0 ? `+${subtitleOffset}s` : `${subtitleOffset}s`}
+                    </b>
+                    <button
+                      onClick={() => setSubtitleOffset((prev) => Math.min(10, Number((prev + 0.5).toFixed(1))))}
+                      aria-label="Advance subtitles 0.5s"
+                      title="Advance subtitles +0.5s"
+                    >
+                      <Plus size={13} />
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  className="btn btn-sm btn-ghost"
+                  style={{ width: "100%", justifyContent: "center", gap: 6, fontSize: 12 }}
+                  disabled={searchingOnlineSubs}
+                  onClick={handleSearchOnlineSubtitles}
+                >
+                  <Globe size={13} />
+                  <span>{searchingOnlineSubs ? "Searching online..." : "Search Online Subtitles"}</span>
+                </button>
+              </div>
             </div>
+          )}
+          {shortcutsOpen && (
+            <ShortcutsHelpModal isOpen={shortcutsOpen} onClose={() => setShortcutsOpen(false)} />
           )}
         </div>
       </div>

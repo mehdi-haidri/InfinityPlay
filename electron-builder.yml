@@ -46,7 +46,7 @@ artifactBuildCompleted: build/repack-pacman.cjs
 win:
   target:
     - target: nsis
-      arch: [x64]
+      arch: [x64, arm64]
   artifactName: ${productName}-${version}-win-${arch}.${ext}
 
 nsis:
@@ -77,13 +77,13 @@ linux:
   syncDesktopName: true
   target:
     - target: AppImage
-      arch: [x64]
+      arch: [x64, arm64]
     - target: deb
-      arch: [x64]
+      arch: [x64, arm64]
     - target: rpm
-      arch: [x64]
+      arch: [x64, arm64]
     - target: pacman
-      arch: [x64]
+      arch: [x64, arm64]
   category: AudioVideo
   synopsis: Stream movies, series, anime and live TV
   description: Desktop app for finding and streaming movies, TV shows, anime and live TV.
@@ -127,10 +127,10 @@ pacman:
 # Use one architecture label in user-facing filenames even though package managers call
 # x64 `amd64` or `x86_64` internally.
 appImage:
-  artifactName: ${productName}-${version}-linux-x64.${ext}
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
 
 deb:
-  artifactName: ${productName}-${version}-linux-x64.${ext}
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
   depends:
     - libgtk-3-0
     - libnotify4
@@ -144,7 +144,7 @@ deb:
     - ffmpeg
 
 rpm:
-  artifactName: ${productName}-${version}-linux-x64.${ext}
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
   depends:
     - gtk3
     - libnotify

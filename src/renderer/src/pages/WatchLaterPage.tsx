@@ -78,6 +78,13 @@ export function WatchLaterPage() {
               ? "Use the clock button on any poster to put a title aside for later."
               : "Switch back to All to see the rest of the queue."
           }
+          action={
+            watchLater.length === 0 ? (
+              <button className="btn btn-primary btn-sm" onClick={() => useApp.getState().navigate({ name: "home" })}>
+                Explore trending titles
+              </button>
+            ) : undefined
+          }
         />
       )}
 

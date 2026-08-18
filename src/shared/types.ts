@@ -530,10 +530,10 @@ export interface AppConfig {
   playlists: PlaylistSource[];
   /** User-owned IPTV subscriptions. Credentials stay in the local app configuration. */
   xtreamSources: XtreamSource[];
-  /** Optional TMDB v4 read token used only for legal watch-provider discovery. */
-  tmdbReadToken: string;
   /** ISO 3166-1 region used for legal streaming availability. */
   watchRegion: string;
+  /** Whether Discord Rich Presence activity is broadcast during playback. */
+  discordRpc: boolean;
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
@@ -557,8 +557,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   volume: 1,
   playlists: [...DEFAULT_PLAYLISTS],
   xtreamSources: [],
-  tmdbReadToken: "",
   watchRegion: "MA",
+  discordRpc: true,
 };
 
 /** Uniform IPC envelope so renderer code never has to catch across the bridge. */
@@ -790,7 +790,8 @@ export interface InfinityPlayApi {
     person: (staffId: string, name: string, avatarUrl: string | null) => Promise<Result<PersonDetails>>;
     audioVariants: (title: string, mediaType: MediaType) => Promise<Result<AudioVariant[]>>;
     releases: (subjectId: string, season?: number, episode?: number) => Promise<Result<Release[]>>;
-    subtitles: (subjectId: string, resourceId: string) => Promise<Result<SubtitleOption[]>>;
+    subtitles: (subjectId: string, resourceId: string, title?: string, year?: string, season?: number, episode?: number) => Promise<Result<SubtitleOption[]>>;
+    searchOnlineSubtitles: (params: { title: string; year?: string; imdbId?: string; season?: number; episode?: number; languages?: string[] }) => Promise<Result<SubtitleOption[]>>;
     clearCache: () => Promise<Result<boolean>>;
   };
   subtitle: {
@@ -880,6 +881,18 @@ export interface InfinityPlayApi {
     openExternal: (url: string) => Promise<Result<void>>;
     setFullScreen: (value: boolean) => Promise<Result<boolean>>;
     pickPlaylistFile: () => Promise<Result<string | null>>;
+    pickDirectory: (title?: string) => Promise<Result<string | null>>;
     restart: () => Promise<Result<boolean>>;
+  };
+  discord?: {
+    setActivity: (params: {
+      details: string;
+      state?: string;
+      startTimestamp?: number;
+      endTimestamp?: number;
+      largeImageKey?: string;
+      largeImageText?: string;
+    }) => Promise<Result<void>>;
+    clearActivity: () => Promise<Result<void>>;
   };
 }

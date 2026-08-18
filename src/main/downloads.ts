@@ -16,11 +16,13 @@ import type {
   DownloadRequest,
   Release,
   SeasonDownloadRequest,
+  SubtitleOption,
 } from "@shared/types";
 import { resumeProcess, suspendProcess } from "./process-control";
 import { getConfig, getDownloadRecords, saveDownloadRecords } from "./store";
 import { MovieBoxService } from "./providers/moviebox";
 import { saveSubtitleFile } from "./providers/subtitles";
+import { searchOpenSubtitles } from "./providers/opensubtitles";
 import { toolAvailable, toolPath } from "./media-tools";
 
 const catalog = new MovieBoxService();
@@ -285,7 +287,12 @@ export function startDownload(request: DownloadRequest): DownloadRecord {
   };
 
   upsert(record);
-  if (request.sourceKind === "dash" || /\.mpd(?:$|\?)/i.test(request.url)) {
+  const isDirectFile =
+    /\.(mp4|mkv|webm|avi|mov)(?:$|\?)/i.test(request.url) &&
+    request.sourceKind !== "dash" &&
+    !/\.mpd(?:$|\?)/i.test(request.url);
+
+  if (!isDirectFile || request.sourceKind === "dash" || /\.mpd(?:$|\?)/i.test(request.url)) {
     void prepareAdaptiveDownload(record);
   } else {
     awaitingItem.set(request.url, record);
@@ -448,39 +455,51 @@ async function prepareAdaptiveDownload(
 ): Promise<void> {
   const manifestPath = `${record.savePath}.mpd.part`;
   try {
-    const response = await fetch(record.url, {
+    let activeUrl = record.url;
+    let response = await fetch(activeUrl, {
       signal: AbortSignal.timeout(15_000),
     });
+    if (!response.ok && (response.status === 403 || response.status === 401) && record.subjectId) {
+      try {
+        const freshReleases = await catalog.releases(record.subjectId, record.season || 0, record.episode || 0);
+        const fresh = chooseRelease(freshReleases, record.resolution);
+        if (fresh && fresh.url) {
+          activeUrl = fresh.url;
+          record.url = fresh.url;
+          record.resourceId = fresh.resourceId;
+          response = await fetch(activeUrl, { signal: AbortSignal.timeout(15_000) });
+        }
+      } catch {
+        // Fall back to status check below
+      }
+    }
     if (!response.ok) throw new Error(`Manifest request failed with HTTP ${response.status}.`);
     const original = await response.text();
-    const representationPattern = /<Representation\b[\s\S]*?<\/Representation>/g;
-    let found = false;
-    const filtered = original.replace(representationPattern, (block) => {
-      const height = Number(block.match(/\bheight="(\d+)"/)?.[1] ?? 0);
-      if (height === 0) return block; // audio
-      if (height === record.resolution) {
-        found = true;
-        return block;
-      }
-      return "";
-    });
-    if (!found) throw new Error(`The manifest does not contain a ${record.resolution}p video stream.`);
 
-    const sourceUrl = new URL(record.url);
-    const baseUrl = `${sourceUrl.origin}${sourceUrl.pathname.replace(/[^/]+$/, "")}`;
-    // Resolving a relative DASH segment drops the manifest query, so put the CloudFront
-    // signature directly on every segment template just as the browser signer does.
-    const signedQuery = sourceUrl.search.slice(1).replace(/&/g, "&amp;");
-    const signedManifest = signedQuery
-      ? filtered.replace(
-          /\b(initialization|media)="([^"]+)"/g,
-          (_match, name: string, value: string) => `${name}="${value}?${signedQuery}"`,
-        )
-      : filtered;
-    const localManifest = signedManifest.replace(
-      /(<Period\b[^>]*>)/,
-      `$1\n<BaseURL>${baseUrl}</BaseURL>`,
-    );
+    const sourceUrl = new URL(activeUrl);
+    const basePath = sourceUrl.pathname.substring(0, sourceUrl.pathname.lastIndexOf("/") + 1);
+    const baseUrl = `${sourceUrl.origin}${basePath}`;
+    const signedQuery = sourceUrl.search.startsWith("?")
+      ? sourceUrl.search.slice(1).replace(/&/g, "&amp;")
+      : sourceUrl.search.replace(/&/g, "&amp;");
+
+    // Sign every segment template so CloudFront accepts segment chunks
+    let signedManifest = original;
+    if (signedQuery) {
+      signedManifest = signedManifest.replace(
+        /\b(initialization|media)="([^"]+)"/g,
+        (_match, name: string, value: string) => {
+          if (value.includes("?")) return `${name}="${value}"`;
+          return `${name}="${value}?${signedQuery}"`;
+        },
+      );
+    }
+
+    let localManifest = signedManifest;
+    if (!localManifest.includes("<BaseURL>")) {
+      localManifest = localManifest.replace(/(<Period\b[^>]*>)/, `$1\n<BaseURL>${baseUrl}</BaseURL>`);
+    }
+
     fs.writeFileSync(manifestPath, localManifest, "utf8");
     startAdaptiveDownload(record, manifestPath);
   } catch (error) {
@@ -499,8 +518,12 @@ function startAdaptiveDownload(
   manifestPath: string,
 ): void {
   const partPath = `${record.savePath}.part`;
-  const args = ["-hide_banner", "-loglevel", "error", "-progress", "pipe:2", "-nostats", "-y"];
-  args.push(
+  const args = [
+    "-hide_banner",
+    "-loglevel", "warning",
+    "-progress", "pipe:2",
+    "-nostats",
+    "-y",
     "-protocol_whitelist", "file,http,https,tcp,tls,crypto",
     "-i", manifestPath,
     "-map", "0:v:0",
@@ -509,13 +532,14 @@ function startAdaptiveDownload(
     "-movflags", "+faststart",
     "-f", "mp4",
     partPath,
-  );
+  ];
 
   const child = spawn(toolPath("ffmpeg"), args, { stdio: ["ignore", "ignore", "pipe"] });
   activeAdaptive.set(record.id, child);
-  const errors: Buffer[] = [];
+  const errorLines: string[] = [];
   let settled = false;
   let lastActivity = Date.now();
+
   const stallTimer = setInterval(() => {
     const current = findRecord(record.id);
     if (current?.state === "paused") {
@@ -535,10 +559,29 @@ function startAdaptiveDownload(
       "Download stalled because no data arrived for 60 seconds.",
     );
   }, 10_000);
+
   child.stderr?.on("data", (chunk: Buffer) => {
     lastActivity = Date.now();
-    errors.push(chunk);
-    if (errors.length > 20) errors.shift();
+    const text = chunk.toString("utf8");
+    for (const line of text.split("\n")) {
+      const trimmed = line.trim();
+      if (
+        trimmed &&
+        !trimmed.startsWith("frame=") &&
+        !trimmed.startsWith("fps=") &&
+        !trimmed.startsWith("stream_") &&
+        !trimmed.startsWith("bitrate=") &&
+        !trimmed.startsWith("total_size=") &&
+        !trimmed.startsWith("out_time") &&
+        !trimmed.startsWith("dup_frames=") &&
+        !trimmed.startsWith("drop_frames=") &&
+        !trimmed.startsWith("speed=") &&
+        !trimmed.startsWith("progress=")
+      ) {
+        errorLines.push(trimmed);
+        if (errorLines.length > 30) errorLines.shift();
+      }
+    }
     try {
       const size = fs.statSync(partPath).size;
       const current = findRecord(record.id);
@@ -547,19 +590,31 @@ function startAdaptiveDownload(
       // The muxer has not created the file yet.
     }
   });
+
   child.once("error", (error) => {
     if (settled) return;
     settled = true;
     clearInterval(stallTimer);
     finishAdaptiveDownload(record, partPath, manifestPath, false, error.message);
   });
+
   child.once("close", (code, signal) => {
     if (settled) return;
     settled = true;
     clearInterval(stallTimer);
     activeAdaptive.delete(record.id);
     if (signal) return;
-    const message = Buffer.concat(errors).toString("utf8").trim().split("\n").at(-1);
+    let message: string | undefined = undefined;
+    if (code !== 0) {
+      const meaningful = errorLines.filter(
+        (l) =>
+          !l.toLowerCase().includes("node.js") &&
+          !l.toLowerCase().includes("module._compile") &&
+          !/^v\d+\.\d+/i.test(l) &&
+          !l.startsWith("at "),
+      );
+      message = meaningful.at(-1) || "Download process interrupted.";
+    }
     finishAdaptiveDownload(record, partPath, manifestPath, code === 0, message);
   });
 }
@@ -606,34 +661,102 @@ function finishAdaptiveDownload(
   }));
 }
 
+function matchSubtitleOptions(
+  options: SubtitleOption[],
+  policy: "preferred" | "all" | "none",
+  preferredSubtitle: string,
+): SubtitleOption[] {
+  if (policy === "all") return options;
+  if (policy === "none") return [];
+
+  if (!preferredSubtitle || preferredSubtitle.toLowerCase() === "off") {
+    const defaultEn = options.find(
+      (opt) => opt.lang.toLowerCase() === "en" || opt.name.toLowerCase().includes("english"),
+    );
+    return defaultEn ? [defaultEn] : options.slice(0, 1);
+  }
+
+  const target = preferredSubtitle.toLowerCase().trim();
+  // 1. Exact match by name, lang, or nativeName
+  const exact = options.find(
+    (opt) =>
+      opt.name.toLowerCase() === target ||
+      opt.lang.toLowerCase() === target ||
+      (opt.nativeName && opt.nativeName.toLowerCase() === target),
+  );
+  if (exact) return [exact];
+
+  // 2. Fuzzy match (e.g. "French" matches "fr" or "Français", "Arabic" matches "ar" or "العربية")
+  const fuzzy = options.find(
+    (opt) =>
+      opt.name.toLowerCase().includes(target) ||
+      target.includes(opt.name.toLowerCase()) ||
+      (opt.nativeName &&
+        (opt.nativeName.toLowerCase().includes(target) ||
+          target.includes(opt.nativeName.toLowerCase()))) ||
+      (opt.lang &&
+        (target.startsWith(opt.lang.toLowerCase()) ||
+          opt.lang.toLowerCase().startsWith(target.slice(0, 2)))),
+  );
+  if (fuzzy) return [fuzzy];
+
+  // 3. Fallback to English, or first available track
+  const fallback =
+    options.find(
+      (opt) => opt.lang.toLowerCase() === "en" || opt.name.toLowerCase().includes("english"),
+    ) ?? options[0];
+  return fallback ? [fallback] : [];
+}
+
 /**
  * Stores the title's captions as WebVTT next to the video so offline playback keeps
  * subtitles. Best-effort: a caption failure must never affect the video download.
  */
 async function saveSubtitlesFor(record: DownloadRecord): Promise<void> {
-  if (!record.resourceId) return;
-
   const { downloadSubtitles, preferredSubtitle } = getConfig();
   if (downloadSubtitles === "none") return;
 
   try {
-    const options = await catalog.subtitles(record.subjectId, record.resourceId);
+    let resourceId = record.resourceId;
+    if (!resourceId && record.subjectId) {
+      try {
+        const releases = await catalog.releases(record.subjectId, record.season || 0, record.episode || 0);
+        if (releases.length > 0) resourceId = releases[0].resourceId;
+      } catch {
+        // Continue
+      }
+    }
+
+    let options: SubtitleOption[] = [];
+    if (record.subjectId && resourceId) {
+      try {
+        options = await catalog.subtitles(record.subjectId, resourceId);
+      } catch {
+        // Fallback to open subtitles below
+      }
+    }
+
+    // If MovieBox returned no subtitles, attempt OpenSubtitles community search
+    if (options.length === 0 && record.title) {
+      try {
+        const community = await searchOpenSubtitles({
+          title: record.title,
+          season: record.season,
+          episode: record.episode,
+          languages: preferredSubtitle !== "Off" ? [preferredSubtitle] : undefined,
+        });
+        if (community.length > 0) {
+          options = community;
+        }
+      } catch {
+        // Ignore
+      }
+    }
+
     if (options.length === 0) return;
 
-    // `preferred` keeps a single language: the configured one, else English, else the
-    // first on offer — saving all sixteen is a lot of files nobody asked for.
-    let wanted = options;
-    if (downloadSubtitles === "preferred") {
-      const target = preferredSubtitle.toLowerCase();
-      const chosen =
-        options.find(
-          (option) =>
-            option.lang.toLowerCase() === target || option.name.toLowerCase() === target,
-        ) ??
-        options.find((option) => option.lang.toLowerCase() === "en") ??
-        options[0];
-      wanted = chosen ? [chosen] : [];
-    }
+    const wanted = matchSubtitleOptions(options, downloadSubtitles, preferredSubtitle);
+    if (wanted.length === 0) return;
 
     const stem = path.join(
       path.dirname(record.savePath),
@@ -644,7 +767,8 @@ async function saveSubtitlesFor(record: DownloadRecord): Promise<void> {
     for (const [index, option] of wanted.entries()) {
       // The first track takes the video's exact basename, which is the filename external
       // players look for when auto-loading subtitles. The rest are language-suffixed.
-      const destination = index === 0 ? `${stem}.srt` : `${stem}.${option.lang || option.name}.srt`;
+      const destination =
+        index === 0 ? `${stem}.srt` : `${stem}.${option.lang || option.name}.srt`;
       try {
         await saveSubtitleFile(option.url, destination);
         saved.push({
@@ -659,7 +783,7 @@ async function saveSubtitlesFor(record: DownloadRecord): Promise<void> {
     }
 
     const current = findRecord(record.id);
-    if (current) broadcast(upsert({ ...current, subtitles: saved }));
+    if (current && saved.length > 0) broadcast(upsert({ ...current, subtitles: saved }));
   } catch {
     // No captions available, or the API is unreachable; the video still downloads.
   }
