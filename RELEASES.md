@@ -9,6 +9,13 @@
 - Android's notification center now shows live download progress and provides Pause, Resume, and Cancel controls.
 - The Downloads page lists every waiting episode, supports removing a single episode, and lets you pause, resume, or stop the remaining queue without affecting the current transfer.
 - Returning to the app synchronizes native download progress, completed episodes, and failures back into the offline library.
+- Downloaded movies and episodes now open correctly in Android's in-app player instead of stopping with a source error.
+
+### Download management and Home controls
+
+- Deleting a downloaded, cancelled, or interrupted season episode now removes it from Android's native download history as well, so it stays deleted instead of returning to the Downloads page.
+- "Clear finished" clears only completed, cancelled, and interrupted entries while active downloads continue uninterrupted.
+- The Home page's All, Movies, and TV Series filters now keep their icons and labels properly centered.
 
 ## 0.3.7 (Latest update)
 
