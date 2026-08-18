@@ -23,6 +23,7 @@ import type {
   WatchLaterItem,
   FreeMediaProvider,
   Channel,
+  DownloadQueueStatus,
   DownloadRecord,
   DownloadRequest,
   HomePage,
@@ -31,7 +32,6 @@ import type {
   MediaType,
   PersonDetails,
   PreparedLiveStream,
-  Release,
   Result,
   SeasonDownloadRequest,
   SubtitleOption,
@@ -63,8 +63,36 @@ interface NativeDownloadStatus {
   failureReason: string;
 }
 
+interface NativeSeasonDownload {
+  id: string;
+  url: string;
+  resourceId: string;
+  title: string;
+  year: string;
+  posterUrl: string | null;
+  subjectId: string;
+  season: number;
+  episode: number;
+  resolution: number;
+  state: DownloadRecord["state"];
+  receivedBytes: number;
+  totalBytes: number;
+  fileUrl: string;
+  failureReason: string;
+  startedAt: number;
+  completedAt: number;
+  filename: string;
+}
+
 interface InfinityDownloadsPlugin {
   start(options: { url: string; title: string }): Promise<{ id: string }>;
+  startSeason(options: SeasonDownloadRequest): Promise<{ queued: number }>;
+  clearQueue(): Promise<{ dropped: number }>;
+  queueStatus(): Promise<DownloadQueueStatus>;
+  pauseQueue(): Promise<{ ok: boolean }>;
+  resumeQueue(): Promise<{ ok: boolean }>;
+  removeQueued(options: { id: string }): Promise<{ ok: boolean }>;
+  seasonDownloads(): Promise<{ downloads: NativeSeasonDownload[] }>;
   status(options: { id: string }): Promise<NativeDownloadStatus>;
   pause(options: { id: string }): Promise<{ ok: boolean }>;
   resume(options: { id: string }): Promise<{ ok: boolean }>;
@@ -590,10 +618,54 @@ function notifyDownloadProgress(record: DownloadRecord) {
   }
 }
 
+function fromNativeSeasonDownload(
+  native: NativeSeasonDownload,
+  previous?: DownloadRecord,
+): DownloadRecord {
+  return {
+    url: native.url,
+    resourceId: native.resourceId,
+    title: native.title,
+    year: native.year,
+    posterUrl: native.posterUrl || null,
+    subjectId: native.subjectId,
+    mediaType: "series",
+    season: native.season,
+    episode: native.episode,
+    resolution: native.resolution,
+    sourceKind: "mp4",
+    id: native.id,
+    filename: native.filename,
+    savePath: "Android/InfinityPlay/Movies",
+    fileUrl: native.fileUrl,
+    receivedBytes: native.receivedBytes,
+    totalBytes: native.totalBytes,
+    state: native.state,
+    startedAt: native.startedAt || previous?.startedAt || Date.now(),
+    completedAt: native.completedAt || (native.state === "completed" ? Date.now() : null),
+    fileExists: native.state === "completed",
+    failureReason: native.failureReason || undefined,
+    subtitles: previous?.subtitles ?? [],
+  };
+}
+
 async function refreshNativeDownloads(): Promise<DownloadRecord[]> {
   const records = await getStoredDownloads();
+  const nativeSeason = await nativeDownloads.seasonDownloads()
+    .then((result) => result.downloads)
+    .catch(() => [] as NativeSeasonDownload[]);
+  const nativeSeasonById = new Map(nativeSeason.map((item) => [item.id, item]));
   let anyChanged = false;
   const updated = await Promise.all(records.map(async (record) => {
+    const seasonSnapshot = nativeSeasonById.get(record.id);
+    if (seasonSnapshot) {
+      const next = fromNativeSeasonDownload(seasonSnapshot, record);
+      if (JSON.stringify(next) !== JSON.stringify(record)) {
+        anyChanged = true;
+        notifyDownloadProgress(next);
+      }
+      return next;
+    }
     if (!["progressing", "paused"].includes(record.state)) return record;
     try {
       const status = await nativeDownloads.status({ id: record.id });
@@ -625,8 +697,24 @@ async function refreshNativeDownloads(): Promise<DownloadRecord[]> {
       return orphaned;
     }
   }));
-  if (anyChanged) await saveStoredDownloads(updated);
-  return updated;
+  const merged = [...updated];
+  for (const native of nativeSeason) {
+    const index = merged.findIndex((record) => record.id === native.id);
+    const next = fromNativeSeasonDownload(native, index >= 0 ? merged[index] : undefined);
+    if (index >= 0) {
+      if (JSON.stringify(merged[index]) !== JSON.stringify(next)) {
+        merged[index] = next;
+        anyChanged = true;
+        notifyDownloadProgress(next);
+      }
+    } else {
+      merged.unshift(next);
+      anyChanged = true;
+      notifyDownloadProgress(next);
+    }
+  }
+  if (anyChanged) await saveStoredDownloads(merged);
+  return merged;
 }
 
 /** Reflects a pause or resume immediately, rather than waiting for the next poll to notice. */
@@ -646,6 +734,42 @@ function syncDownloadPoll() {
     window.clearInterval(downloadPoll);
     downloadPoll = undefined;
   }
+}
+
+/** Starts one Android transfer and immediately records it for the Downloads page. */
+async function startNativeDownload(request: DownloadRequest): Promise<DownloadRecord> {
+  const downloads = await getStoredDownloads();
+  const episodeSuffix = request.season > 0
+    ? `-S${String(request.season).padStart(2, "0")}E${String(request.episode).padStart(2, "0")}`
+    : "";
+  const filename = `${request.title}${episodeSuffix}-${request.resolution || "auto"}p.mp4`;
+  const url = await downloadableUrl(request);
+  const { id } = await nativeDownloads.start({ url, title: filename });
+  const record: DownloadRecord = {
+    ...request,
+    url,
+    id,
+    filename,
+    savePath: "Android/InfinityPlay/Movies",
+    fileUrl: "",
+    receivedBytes: 0,
+    totalBytes: 0,
+    state: "progressing",
+    startedAt: Date.now(),
+    completedAt: null,
+    fileExists: false,
+    subtitles: [],
+  };
+  downloads.unshift(record);
+  await saveStoredDownloads(downloads);
+  notifyDownloadProgress(record);
+  return record;
+}
+
+/** The native foreground service owns season queues so Android can progress them off-screen. */
+async function startAndroidSeasonDownload(request: SeasonDownloadRequest): Promise<number> {
+  const { queued } = await nativeDownloads.startSeason(request);
+  return queued;
 }
 
 const wrapResult = async <T>(fn: () => Promise<T>): Promise<Result<T>> => {
@@ -807,38 +931,20 @@ export const createCapacitorApi = (): InfinityPlayApi => {
       clear: () => wrapResult(() => saveStoredWatchLater([])),
     },
     downloads: {
-      start: (request: DownloadRequest) =>
-        wrapResult(async () => {
-          const downloads = await getStoredDownloads();
-          const episodeSuffix = request.season > 0
-            ? `-S${String(request.season).padStart(2, "0")}E${String(request.episode).padStart(2, "0")}`
-            : "";
-          const filename = `${request.title}${episodeSuffix}-${request.resolution || "auto"}p.mp4`;
-          const url = await downloadableUrl(request);
-          const { id } = await nativeDownloads.start({ url, title: filename });
-          const record: DownloadRecord = {
-            ...request,
-            url,
-            id,
-            filename,
-            savePath: "Android/InfinityPlay/Movies",
-            fileUrl: "",
-            receivedBytes: 0,
-            totalBytes: 0,
-            state: "progressing",
-            startedAt: Date.now(),
-            completedAt: null,
-            fileExists: false,
-            subtitles: [],
-          };
-          downloads.unshift(record);
-          await saveStoredDownloads(downloads);
-          notifyDownloadProgress(record);
-          return record;
-        }),
-      startSeason: () => wrapResult(async () => 0),
-      clearQueue: () => wrapResult(async () => 0),
-      queueSize: () => wrapResult(async () => 0),
+      start: (request: DownloadRequest) => wrapResult(() => startNativeDownload(request)),
+      startSeason: (request: SeasonDownloadRequest) => wrapResult(() => startAndroidSeasonDownload(request)),
+      clearQueue: () => wrapResult(async () => (await nativeDownloads.clearQueue()).dropped),
+      queueSize: () => wrapResult(async () => (await nativeDownloads.queueStatus()).items.length),
+      queueStatus: () => wrapResult(async () => {
+        const status = await nativeDownloads.queueStatus();
+        return {
+          paused: status.paused,
+          items: status.items.map((item) => ({ ...item, posterUrl: item.posterUrl || null })),
+        };
+      }),
+      pauseQueue: () => wrapResult(async () => (await nativeDownloads.pauseQueue()).ok),
+      resumeQueue: () => wrapResult(async () => (await nativeDownloads.resumeQueue()).ok),
+      removeQueued: (id: string) => wrapResult(async () => (await nativeDownloads.removeQueued({ id })).ok),
       list: () => wrapResult(() => refreshNativeDownloads()),
       pause: (id: string) =>
         wrapResult(async () => {

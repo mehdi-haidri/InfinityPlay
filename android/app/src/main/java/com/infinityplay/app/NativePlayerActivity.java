@@ -36,6 +36,7 @@ import androidx.media3.common.TrackSelectionOverride;
 import androidx.media3.common.Tracks;
 import androidx.media3.common.util.UnstableApi;
 import androidx.media3.datasource.DataSpec;
+import androidx.media3.datasource.DefaultDataSource;
 import androidx.media3.datasource.DefaultHttpDataSource;
 import androidx.media3.datasource.ResolvingDataSource;
 import androidx.media3.exoplayer.ExoPlayer;
@@ -986,6 +987,10 @@ public class NativePlayerActivity extends AppCompatActivity {
             httpFactory,
             this::resolveSignedSegment
         );
+        // ResolvingDataSource over DefaultHttpDataSource only understands http(s). Offline episodes
+        // are app-owned file:// URLs, so route through DefaultDataSource to select FileDataSource
+        // for local media while retaining signed-request handling for network streams.
+        DefaultDataSource.Factory dataSourceFactory = new DefaultDataSource.Factory(this, resolvingFactory);
         trackSelector = new DefaultTrackSelector(this);
         DefaultTrackSelector.Parameters.Builder initialTracks = trackSelector.buildUponParameters();
         String preferredAudio = getIntent().getStringExtra(EXTRA_PREFERRED_AUDIO);
@@ -1000,7 +1005,7 @@ public class NativePlayerActivity extends AppCompatActivity {
         trackSelector.setParameters(initialTracks);
         player = new ExoPlayer.Builder(this)
             .setTrackSelector(trackSelector)
-            .setMediaSourceFactory(new DefaultMediaSourceFactory(resolvingFactory))
+            .setMediaSourceFactory(new DefaultMediaSourceFactory(dataSourceFactory))
             .build();
         player.setAudioAttributes(
             new AudioAttributes.Builder()

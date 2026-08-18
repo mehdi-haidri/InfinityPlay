@@ -1,5 +1,15 @@
 # Release Notes
 
+## 0.3.8 (Latest update)
+
+### Reliable background season downloads on Android
+
+- Season downloads now run in Android's native foreground service, so the next episode starts even when InfinityPlay is in the background.
+- Each episode resolves a fresh download source immediately before it begins, preventing expired stream links from interrupting a long season queue.
+- Android's notification center now shows live download progress and provides Pause, Resume, and Cancel controls.
+- The Downloads page lists every waiting episode, supports removing a single episode, and lets you pause, resume, or stop the remaining queue without affecting the current transfer.
+- Returning to the app synchronizes native download progress, completed episodes, and failures back into the offline library.
+
 ## 0.3.7 (Latest update)
 
 ### Search Pagination & Advanced Filtering Engine

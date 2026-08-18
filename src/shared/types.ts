@@ -605,6 +605,23 @@ export interface SeasonDownloadRequest {
   resolution: number;
 }
 
+/** A season episode that has not started downloading yet. */
+export interface DownloadQueueItem {
+  id: string;
+  title: string;
+  posterUrl: string | null;
+  season: number;
+  episode: number;
+  resolution: number;
+}
+
+/** The visible state of the serial season-download queue. */
+export interface DownloadQueueStatus {
+  items: DownloadQueueItem[];
+  /** Pausing the queue leaves any download already in progress alone. */
+  paused: boolean;
+}
+
 /**
  * Chromecast reaches Google's own receivers; DLNA reaches most smart TVs and media renderers.
  * Neither alone covers every device, so both are discovered and shown in one list.
@@ -773,6 +790,13 @@ export const AUTHORS = [
     githubHandle: "Scorpiontaj",
     role: "Co-Author & Core Developer",
   },
+  {
+    name: "Elmahdi Haidri",
+    email: "mehdihaidri3@gmail.com",
+    github: "https://github.com/mehdi-haidri",
+    githubHandle: "mehdi-haidri",
+    role: "Android & Platform Contributor",
+  },
 ] as const;
 
 export const AUTHOR = AUTHORS[0];
@@ -841,6 +865,10 @@ export interface InfinityPlayApi {
     startSeason: (request: SeasonDownloadRequest) => Promise<Result<number>>;
     clearQueue: () => Promise<Result<number>>;
     queueSize: () => Promise<Result<number>>;
+    queueStatus: () => Promise<Result<DownloadQueueStatus>>;
+    pauseQueue: () => Promise<Result<boolean>>;
+    resumeQueue: () => Promise<Result<boolean>>;
+    removeQueued: (id: string) => Promise<Result<boolean>>;
     list: () => Promise<Result<DownloadRecord[]>>;
     /** Refusals carry a reason, so a control that cannot act says why instead of doing nothing. */
     pause: (id: string) => Promise<Result<DownloadControlResult>>;

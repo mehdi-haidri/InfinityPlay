@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import {
   ExternalLink,
   FolderOpen,
@@ -16,7 +16,7 @@ import {
   RotateCcw,
   AlertTriangle,
 } from "lucide-react";
-import type { DownloadRecord } from "@shared/types";
+import type { DownloadQueueStatus, DownloadRecord } from "@shared/types";
 import { api, unwrap } from "../lib/api";
 import { formatBytes, qualityLabel, relativeTime } from "../lib/format";
 import { EmptyState } from "../components/States";
@@ -78,31 +78,25 @@ export function DownloadsPage() {
   const notify = useApp((state) => state.notify);
   const navigate = useApp((state) => state.navigate);
 
-  const [queued, setQueued] = useState(0);
+  const [queue, setQueue] = useState<DownloadQueueStatus | null>(null);
   const [expandedSeries, setExpandedSeries] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     void loadDownloads();
   }, [loadDownloads]);
 
+  const refreshQueue = useCallback(async () => {
+    const status = await unwrap(api.downloads.queueStatus()).catch(() => null);
+    if (status) setQueue(status);
+  }, []);
+
   useEffect(() => {
-    let cancelled = false;
-    const read = () => {
-      unwrap(api.downloads.queueSize())
-        .then((size) => {
-          if (!cancelled) setQueued(size);
-        })
-        .catch(() => {
-          if (!cancelled) setQueued(0);
-        });
-    };
-    read();
-    const timer = window.setInterval(read, 4000);
+    void refreshQueue();
+    const timer = window.setInterval(() => void refreshQueue(), 2000);
     return () => {
-      cancelled = true;
       window.clearInterval(timer);
     };
-  }, [downloads]);
+  }, [refreshQueue]);
 
   const running = useMemo(() => downloads.filter(isRunning), [downloads]);
 
@@ -276,7 +270,9 @@ export function DownloadsPage() {
     notify({ kind: "info", title: `Deleted ${group.title} downloads` });
   };
 
-  if (downloads.length === 0) {
+  const queuedItems = queue?.items ?? [];
+
+  if (downloads.length === 0 && queuedItems.length === 0) {
     return (
       <div className="page">
         <PageHeader
@@ -305,21 +301,44 @@ export function DownloadsPage() {
         description="Your downloaded movies and series ready for instant offline playback."
         action={
           <div className="inline-actions">
-            {queued > 0 && (
-              <button
-                className="btn btn-sm btn-ghost"
-                onClick={async () => {
-                  const dropped = await unwrap(api.downloads.clearQueue());
-                  setQueued(0);
-                  notify({
-                    kind: "info",
-                    title: `Stopped ${dropped} queued episode${dropped === 1 ? "" : "s"}`,
-                    body: "The episode already downloading continues; cancel it separately.",
-                  });
-                }}
-              >
-                <ListX size={14} /> Stop queue ({queued})
-              </button>
+            {queuedItems.length > 0 && (
+              <>
+                <button
+                  className="btn btn-sm btn-ghost"
+                  onClick={async () => {
+                    const changed = await unwrap(
+                      queue?.paused ? api.downloads.resumeQueue() : api.downloads.pauseQueue(),
+                    );
+                    await refreshQueue();
+                    if (changed) {
+                      notify({
+                        kind: "info",
+                        title: queue?.paused ? "Queue resumed" : "Queue paused",
+                        body: queue?.paused
+                          ? "The next waiting episode will download when it is ready."
+                          : "The current download is unchanged; future episodes will wait.",
+                      });
+                    }
+                  }}
+                >
+                  {queue?.paused ? <Play size={14} /> : <Pause size={14} />}
+                  {queue?.paused ? "Resume queue" : "Pause queue"}
+                </button>
+                <button
+                  className="btn btn-sm btn-ghost"
+                  onClick={async () => {
+                    const dropped = await unwrap(api.downloads.clearQueue());
+                    await refreshQueue();
+                    notify({
+                      kind: "info",
+                      title: `Stopped ${dropped} queued episode${dropped === 1 ? "" : "s"}`,
+                      body: "The episode already downloading continues; cancel it separately.",
+                    });
+                  }}
+                >
+                  <ListX size={14} /> Stop all ({queuedItems.length})
+                </button>
+              </>
             )}
             {grouped.length > 0 && (
               <button
@@ -353,6 +372,55 @@ export function DownloadsPage() {
             <CheckCircle2 size={14} /> Ready Offline
           </div>
         </div>
+      )}
+
+      {/* Waiting season episodes can be managed before they begin downloading. */}
+      {queuedItems.length > 0 && (
+        <section className="section">
+          <h2 className="section-title">
+            {queue?.paused ? "Queue paused" : "Up next"} ({queuedItems.length})
+          </h2>
+          <div className="netflix-downloads-list">
+            {queuedItems.map((item) => (
+              <div className="download-row netflix-download-row" key={item.id}>
+                <div className="download-art">
+                  <MediaImage src={item.posterUrl} label={item.title} alt="" />
+                </div>
+                <div className="download-body">
+                  <div className="download-title">
+                    {item.title}
+                    <span className="download-tag">
+                      S{String(item.season).padStart(2, "0")}E{String(item.episode).padStart(2, "0")}
+                    </span>
+                    <span className="download-tag">{qualityLabel(item.resolution)}</span>
+                  </div>
+                  <div className="download-meta">
+                    {queue?.paused ? "Waiting for the queue to resume" : "Waiting for the current download"}
+                  </div>
+                </div>
+                <div className="download-actions">
+                  <button
+                    className="icon-button"
+                    onClick={async () => {
+                      const removed = await unwrap(api.downloads.removeQueued(item.id));
+                      await refreshQueue();
+                      if (removed) {
+                        notify({
+                          kind: "info",
+                          title: `Removed S${String(item.season).padStart(2, "0")}E${String(item.episode).padStart(2, "0")} from the queue`,
+                        });
+                      }
+                    }}
+                    aria-label={`Remove episode ${item.episode} from queue`}
+                    title="Remove from queue"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
       )}
 
       {/* Active transfers section */}

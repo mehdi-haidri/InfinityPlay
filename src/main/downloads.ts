@@ -12,6 +12,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { app, shell, type BrowserWindow, type DownloadItem } from "electron";
 import type {
   DownloadControlResult,
+  DownloadQueueStatus,
   DownloadRecord,
   DownloadRequest,
   Release,
@@ -314,21 +315,35 @@ export function startDownload(request: DownloadRequest): DownloadRecord {
  * the time a long season reached them.
  */
 export async function startSeasonDownload(request: SeasonDownloadRequest): Promise<number> {
-  const episodes = [...request.episodes].sort((a, b) => a - b);
+  const episodes = [...new Set(request.episodes)]
+    .filter((episode) => Number.isInteger(episode) && episode > 0)
+    .sort((a, b) => a - b);
   for (const episode of episodes) {
-    seasonQueue.push({ request, episode });
+    seasonQueue.push({
+      id: `season-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      request,
+      episode,
+    });
   }
   void runSeasonQueue();
   return episodes.length;
 }
 
 interface SeasonQueueEntry {
+  id: string;
   request: SeasonDownloadRequest;
   episode: number;
 }
 
 const seasonQueue: SeasonQueueEntry[] = [];
 let seasonQueueRunning = false;
+let seasonQueuePaused = false;
+const seasonQueueResumeWaiters = new Set<() => void>();
+
+function releaseSeasonQueueWaiters(): void {
+  for (const resolve of seasonQueueResumeWaiters) resolve();
+  seasonQueueResumeWaiters.clear();
+}
 
 /**
  * Drops everything still waiting. The episode already downloading is left alone — its own
@@ -338,6 +353,8 @@ let seasonQueueRunning = false;
 export function clearSeasonQueue(): number {
   const dropped = seasonQueue.length;
   seasonQueue.length = 0;
+  seasonQueuePaused = false;
+  releaseSeasonQueueWaiters();
   return dropped;
 }
 
@@ -346,11 +363,61 @@ export function pendingSeasonCount(): number {
   return seasonQueue.length;
 }
 
+/** Supplies the waiting episodes for the Downloads page without exposing signed URLs. */
+export function seasonQueueStatus(): DownloadQueueStatus {
+  return {
+    paused: seasonQueuePaused,
+    items: seasonQueue.map((entry) => ({
+      id: entry.id,
+      title: entry.request.title,
+      posterUrl: entry.request.posterUrl,
+      season: entry.request.season,
+      episode: entry.episode,
+      resolution: entry.request.resolution,
+    })),
+  };
+}
+
+/** Stops the queue after its active transfer, leaving its waiting episodes intact. */
+export function pauseSeasonQueue(): boolean {
+  if (seasonQueuePaused || seasonQueue.length === 0) return false;
+  seasonQueuePaused = true;
+  return true;
+}
+
+/** Lets a paused queue continue with its next waiting episode. */
+export function resumeSeasonQueue(): boolean {
+  if (!seasonQueuePaused) return false;
+  seasonQueuePaused = false;
+  releaseSeasonQueueWaiters();
+  void runSeasonQueue();
+  return true;
+}
+
+/** Removes one waiting episode without affecting the episode currently downloading. */
+export function removeSeasonQueueItem(id: string): boolean {
+  const index = seasonQueue.findIndex((entry) => entry.id === id);
+  if (index < 0) return false;
+  seasonQueue.splice(index, 1);
+  if (seasonQueue.length === 0) {
+    seasonQueuePaused = false;
+    releaseSeasonQueueWaiters();
+  }
+  return true;
+}
+
+async function waitForSeasonQueueResume(): Promise<void> {
+  while (seasonQueuePaused) {
+    await new Promise<void>((resolve) => seasonQueueResumeWaiters.add(resolve));
+  }
+}
+
 async function runSeasonQueue(): Promise<void> {
   if (seasonQueueRunning) return;
   seasonQueueRunning = true;
   try {
     while (seasonQueue.length > 0) {
+      await waitForSeasonQueueResume();
       const next = seasonQueue.shift();
       if (next) await downloadSeasonEpisode(next.request, next.episode);
     }

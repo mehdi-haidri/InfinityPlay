@@ -6,10 +6,14 @@ import {
   listDownloads,
   openDownload,
   pauseDownload,
+  pauseSeasonQueue,
   pendingSeasonCount,
   removeDownload,
+  removeSeasonQueueItem,
   resumeDownload,
+  resumeSeasonQueue,
   revealDownload,
+  seasonQueueStatus,
   startDownload,
   startSeasonDownload,
 } from "../downloads";
@@ -22,6 +26,10 @@ export function registerDownloadsIpc(): void {
   );
   handle("download:clearQueue", () => clearSeasonQueue());
   handle("download:queueSize", () => pendingSeasonCount());
+  handle("download:queueStatus", () => seasonQueueStatus());
+  handle("download:pauseQueue", () => pauseSeasonQueue());
+  handle("download:resumeQueue", () => resumeSeasonQueue());
+  handle("download:removeQueued", (id: string) => removeSeasonQueueItem(id));
   handle("download:list", () => listDownloads());
   handle("download:pause", (id: string) => pauseDownload(id));
   handle("download:resume", (id: string) => resumeDownload(id));

@@ -7,6 +7,7 @@ import type {
   CastRequest,
   CastSession,
   DownloadControlResult,
+  DownloadQueueStatus,
   DownloadRecord,
   DownloadRequest,
   FavoriteItem,
@@ -130,6 +131,10 @@ const api = {
     /** Drops queued season episodes; the one in flight keeps going. */
     clearQueue: () => invoke<number>("download:clearQueue"),
     queueSize: () => invoke<number>("download:queueSize"),
+    queueStatus: () => invoke<DownloadQueueStatus>("download:queueStatus"),
+    pauseQueue: () => invoke<boolean>("download:pauseQueue"),
+    resumeQueue: () => invoke<boolean>("download:resumeQueue"),
+    removeQueued: (id: string) => invoke<boolean>("download:removeQueued", id),
     list: () => invoke<DownloadRecord[]>("download:list"),
     pause: (id: string) => invoke<DownloadControlResult>("download:pause", id),
     resume: (id: string) => invoke<DownloadControlResult>("download:resume", id),
