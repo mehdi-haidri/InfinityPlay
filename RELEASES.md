@@ -2,17 +2,32 @@
 
 ## 0.3.5 (Latest update)
 
-### Android in-app updater and APK self-update
+### Reliable Android TV casting
 
-- Android phones, tablets, and Android TV can now download and install updates directly from within the app.
-- When a new release is available on GitHub, the app detects it, displays update prompts, downloads the APK with pause/resume support, and seamlessly launches the package installer to update in place.
-- The About page provides full update status, download progress, and manual check/install controls on Android.
+- Fixed Android DLNA casting to webOS and similar televisions: the local relay now uses the active Wi-Fi address, so the TV can reach the shared video instead of failing to fetch it.
+- LG webOS now receives the video resource before its caption resource, waits for the receiver to be ready, and retries the initial play request from a clean state when needed. This resolves the receiver's “Transition not available” failure.
+- A Chromecast session that was already connected before the native player opens now receives the selected title immediately. Casting also chooses a direct stream a receiver can actually play instead of handing it a protected adaptive manifest.
 
-### Version consistency
+### Captions that carry over
 
-- Unified version 0.3.5 across all desktop distributions and Android packages.
+- Android DLNA captions are converted to SRT and published with the same base name as the video, which is the format expected by LG webOS televisions.
+- The subtitle menu remains available after changing episodes, and the selected language is saved before the next episode starts.
+- The player and detail page use the same subtitle preference, so the chosen language is applied automatically when the next episode offers it.
 
-## 0.3.4
+### Casting controls while you browse
+
+- The active casting controller now floats above the app instead of squeezing into a title's action row.
+- It remains available while navigating to other pages, with play/pause, seeking, volume, and episode controls still connected to the TV session.
+
+### Next episode playback everywhere
+
+- Added Previous and Next episode controls to desktop playback, Android's native player, Chromecast, and DLNA casting.
+- When an episode ends, the next episode starts automatically. Navigation continues across season boundaries when a series has another season.
+- The Android player also responds to media next/previous buttons from headphones, remotes, and the system.
+
+### Cleaner mobile player controls
+
+- Android's quality, audio, episode, cast, and playback-options row now follows the normal player controls: it fades away during playback and returns when the controls are shown.
 
 ### Subtitles on the television
 

@@ -104,6 +104,8 @@ export interface NativePlayerResult {
   subtitleUrl: string;
   subtitleName: string;
   subtitleLanguage: string;
+  /** True only when the viewer explicitly changed the native subtitle picker. */
+  subtitleChanged: boolean;
   /** -1/1 when the native player asks the shared layer to change episode. */
   episodeStep: number;
 }

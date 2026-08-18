@@ -48,13 +48,15 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
   const toggleFavorite = useApp((state) => state.toggleFavorite);
   const toggleWatchLater = useApp((state) => state.toggleWatchLater);
   const watchLater = useApp((state) => state.watchLater);
-
+  const patchConfig = useApp((state) => state.patchConfig);
   const preferredSubtitle = useApp((state) => state.config.preferredSubtitle);
 
   const [season, setSeason] = useState(initialSeason ?? 1);
   const [episode, setEpisode] = useState(initialEpisode ?? 1);
   const [subtitles, setSubtitles] = useState<SubtitleOption[]>([]);
-  const [subtitleChoice, setSubtitleChoice] = useState(preferredSubtitle);
+  // Subtitle choice belongs to the shared preferences, so the detail chips, player and next
+  // episode all agree instead of each keeping a separate temporary selection.
+  const subtitleChoice = preferredSubtitle;
   const [sourceSelection, setSourceSelection] = useState(() => `${initialSeason ?? 1}:${initialEpisode ?? 1}`);
   const [queueingSeason, setQueueingSeason] = useState(false);
   /** Null follows the selected episode; a number is a block the user chose. */
@@ -736,7 +738,7 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
                 <button
                   className="chip"
                   data-active={!activeSubtitle}
-                  onClick={() => setSubtitleChoice(SUBTITLE_OFF)}
+                  onClick={() => void patchConfig({ preferredSubtitle: SUBTITLE_OFF })}
                 >
                   {SUBTITLE_OFF}
                 </button>
@@ -745,7 +747,7 @@ export function DetailsPage({ id, initialSeason, initialEpisode, audioLocked }: 
                     key={option.url}
                     className="chip"
                     data-active={option.name === activeSubtitle?.name}
-                    onClick={() => setSubtitleChoice(option.name)}
+                    onClick={() => void patchConfig({ preferredSubtitle: option.lang || option.name })}
                     title={option.nativeName !== option.name ? option.nativeName : undefined}
                   >
                     {option.name}

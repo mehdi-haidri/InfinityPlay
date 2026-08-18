@@ -437,7 +437,7 @@ export function Player() {
       ),
       headersJson: JSON.stringify(request.headers ?? {}),
       preferredAudioLanguage: config.preferredAudio ?? "",
-      preferredSubtitleLanguage: request.initialSubtitle ?? config.preferredSubtitle ?? "",
+      preferredSubtitleLanguage: config.preferredSubtitle ?? "",
       hasPreviousEpisode,
       hasNextEpisode,
       autoplayNext: config.autoplayNext && hasNextEpisode,
@@ -446,6 +446,12 @@ export function Player() {
       if (cancelled) return;
       const position = Math.max(0, result.positionMs / 1000);
       const total = Math.max(0, result.durationMs / 1000);
+      if (result.subtitleChanged) {
+        // Persist the native choice before opening another episode. The next activity receives
+        // its subtitle preference from this store, so starting it first races it with the write
+        // and silently resets captions to the previous episode's setting.
+        await patchConfig({ preferredSubtitle: result.subtitleLanguage || SUBTITLE_OFF });
+      }
       if (result.castRequested) {
         setCurrent(position);
         setDuration(total);
@@ -514,7 +520,7 @@ export function Player() {
     return () => {
       cancelled = true;
     };
-  }, [request, isNativeAndroidPlayer, mobileCastMode, config.resumeBehavior, config.preferredAudio, config.preferredSubtitle, config.autoplayNext, hasPreviousEpisode, hasNextEpisode, saveProgress, notify, closePlayer]);
+  }, [request, isNativeAndroidPlayer, mobileCastMode, config.resumeBehavior, config.preferredAudio, config.preferredSubtitle, config.autoplayNext, hasPreviousEpisode, hasNextEpisode, saveProgress, patchConfig, notify, closePlayer]);
 
   // Netflix-style hover frames are generated lazily and bucketed every five seconds.
   // The debounce prevents pointer movement from starting an FFmpeg process per pixel.
@@ -614,7 +620,7 @@ export function Player() {
    */
   useEffect(() => {
     if (!request) return;
-    const wanted = request.initialSubtitle ?? config.preferredSubtitle;
+    const wanted = config.preferredSubtitle;
     if (!wanted || wanted === SUBTITLE_OFF) return;
 
     const target = wanted.toLowerCase();
@@ -648,7 +654,7 @@ export function Player() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [request?.url]);
+  }, [request?.url, config.preferredSubtitle]);
 
   /**
    * Three source shapes: HLS for live channels, DASH for the adaptive catalog stream
@@ -918,8 +924,13 @@ export function Player() {
       const chosen =
         nextReleases.find((release) => release.resolution === activeRelease?.resolution) ??
         nextReleases[0];
-      const nextSubtitles = chosen.resourceId
-        ? await unwrap(api.catalog.subtitles(subjectId, chosen.resourceId)).catch(() => [])
+      // Captions belong to a direct release. The selected quality may be an adaptive manifest,
+      // whose resource id is rejected by the caption endpoint; using it made every subsequent
+      // episode look as though it had no subtitles at all.
+      const captionRelease =
+        nextReleases.find((release) => release.kind !== "dash" && release.resourceId) ?? chosen;
+      const nextSubtitles = captionRelease.resourceId
+        ? await unwrap(api.catalog.subtitles(subjectId, captionRelease.resourceId)).catch(() => [])
         : [];
 
       openPlayer({
@@ -1389,6 +1400,7 @@ export function Player() {
     setMenu(null);
     if (!option) {
       setSubtitle(null);
+      void patchConfig({ preferredSubtitle: SUBTITLE_OFF });
       return;
     }
     try {
@@ -1402,6 +1414,7 @@ export function Player() {
         /* ignore */
       }
       setSubtitle({ name: option.name, lang: option.lang, dataUrl, vttText, sourceUrl: option.url });
+      void patchConfig({ preferredSubtitle: option.lang || option.name });
     } catch (error) {
       notify({
         kind: "error",

@@ -95,6 +95,7 @@ public class NativePlayerActivity extends AppCompatActivity {
     public static final String RESULT_SUBTITLE_URL = "subtitleUrl";
     public static final String RESULT_SUBTITLE_NAME = "subtitleName";
     public static final String RESULT_SUBTITLE_LANGUAGE = "subtitleLanguage";
+    public static final String RESULT_SUBTITLE_CHANGED = "subtitleChanged";
     public static final String RESULT_EPISODE_STEP = "episodeStep";
 
     private PlayerView playerView;
@@ -112,6 +113,10 @@ public class NativePlayerActivity extends AppCompatActivity {
     private int activeReleaseIndex;
     private long startPositionMs;
     private boolean ended;
+    /** The setting only updates globally when the viewer actually changes this picker. */
+    private boolean subtitleChanged;
+    /** The option chosen in this activity, kept even while Media3 is still loading its text tracks. */
+    private String selectedSubtitlePreference = "";
     private boolean live;
     private boolean castRequested;
     private CastContext castContext;
@@ -177,6 +182,8 @@ public class NativePlayerActivity extends AppCompatActivity {
         enterImmersiveMode();
         live = getIntent().getBooleanExtra(EXTRA_LIVE, false);
         startPositionMs = getIntent().getLongExtra(EXTRA_POSITION_MS, 0L);
+        String preferredSubtitle = getIntent().getStringExtra(EXTRA_PREFERRED_SUBTITLE);
+        selectedSubtitlePreference = preferredSubtitle == null ? "" : preferredSubtitle;
         releases = readReleases();
         activeReleaseIndex = findInitialRelease();
 
@@ -187,7 +194,9 @@ public class NativePlayerActivity extends AppCompatActivity {
         playerView.setControllerHideOnTouch(true);
         playerView.setControllerShowTimeoutMs(3500);
         playerView.setShowBuffering(PlayerView.SHOW_BUFFERING_WHEN_PLAYING);
-        playerView.setShowSubtitleButton(true);
+        // The app owns one subtitle picker in the overflow menu. Leaving Media3's built-in button
+        // on created a second, independent way to change captions with different persistence.
+        playerView.setShowSubtitleButton(false);
         playerView.setShowNextButton(false);
         playerView.setShowPreviousButton(false);
         playerView.setContentDescription(getIntent().getStringExtra(EXTRA_TITLE));
@@ -201,6 +210,13 @@ public class NativePlayerActivity extends AppCompatActivity {
         quickActions = new LinearLayout(this);
         quickActions.setOrientation(LinearLayout.HORIZONTAL);
         quickActions.setGravity(Gravity.CENTER_VERTICAL);
+        playerView.setControllerVisibilityListener(new PlayerView.ControllerVisibilityListener() {
+            @Override
+            public void onVisibilityChanged(int visibility) {
+                if (quickActions == null || (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode())) return;
+                quickActions.setVisibility(visibility == View.VISIBLE ? View.VISIBLE : View.GONE);
+            }
+        });
         /*
          * One control per action, drawn with the same glyphs as the desktop player.
          *
@@ -353,6 +369,12 @@ public class NativePlayerActivity extends AppCompatActivity {
 
     @Nullable
     private JSONObject selectedSubtitle() {
+        JSONArray options = subtitleOptions();
+        if (selectedSubtitlePreference.isEmpty() || "off".equalsIgnoreCase(selectedSubtitlePreference)) return null;
+        for (int index = 0; index < options.length(); index++) {
+            JSONObject option = options.optJSONObject(index);
+            if (matchesSubtitlePreference(option, selectedSubtitlePreference)) return option;
+        }
         if (player != null) {
             for (Tracks.Group group : player.getCurrentTracks().getGroups()) {
                 if (group.getType() != C.TRACK_TYPE_TEXT) continue;
@@ -362,7 +384,7 @@ public class NativePlayerActivity extends AppCompatActivity {
                     if (id != null && id.startsWith("infinityplay-subtitle-")) {
                         try {
                             int selected = Integer.parseInt(id.substring("infinityplay-subtitle-".length()));
-                            return new JSONArray(getIntent().getStringExtra(EXTRA_SUBTITLES_JSON)).optJSONObject(selected);
+                            return options.optJSONObject(selected);
                         } catch (Exception ignored) {
                             // Fall through to the configured-language match below.
                         }
@@ -370,21 +392,20 @@ public class NativePlayerActivity extends AppCompatActivity {
                 }
             }
         }
-        try {
-            String wanted = getIntent().getStringExtra(EXTRA_PREFERRED_SUBTITLE);
-            if (wanted == null || wanted.isEmpty() || "off".equalsIgnoreCase(wanted)) return null;
-            JSONArray options = new JSONArray(getIntent().getStringExtra(EXTRA_SUBTITLES_JSON));
-            for (int index = 0; index < options.length(); index++) {
-                JSONObject option = options.optJSONObject(index);
-                if (option == null) continue;
-                if (wanted.equalsIgnoreCase(option.optString("lang")) || wanted.equalsIgnoreCase(option.optString("name"))) {
-                    return option;
-                }
-            }
-        } catch (Exception ignored) {
-            // Casting without captions remains available.
-        }
         return null;
+    }
+
+    private JSONArray subtitleOptions() {
+        try {
+            return new JSONArray(getIntent().getStringExtra(EXTRA_SUBTITLES_JSON));
+        } catch (Exception ignored) {
+            return new JSONArray();
+        }
+    }
+
+    private boolean matchesSubtitlePreference(@Nullable JSONObject option, @Nullable String wanted) {
+        if (option == null || wanted == null || wanted.isEmpty()) return false;
+        return wanted.equalsIgnoreCase(option.optString("lang")) || wanted.equalsIgnoreCase(option.optString("name"));
     }
 
     private String castMimeType(String url) {
@@ -751,12 +772,13 @@ public class NativePlayerActivity extends AppCompatActivity {
         trackSelector = new DefaultTrackSelector(this);
         DefaultTrackSelector.Parameters.Builder initialTracks = trackSelector.buildUponParameters();
         String preferredAudio = getIntent().getStringExtra(EXTRA_PREFERRED_AUDIO);
-        String preferredSubtitle = getIntent().getStringExtra(EXTRA_PREFERRED_SUBTITLE);
         // Media3 expects BCP-47 tags, not labels such as "English". Supplying an ordered
         // list fixes manifests whose first/default track is Hindi while English is present.
         initialTracks.setPreferredAudioLanguages(audioPreferenceOrder(preferredAudio));
-        if (preferredSubtitle != null && !preferredSubtitle.isEmpty() && !"off".equalsIgnoreCase(preferredSubtitle)) {
-            initialTracks.setPreferredTextLanguage(preferredSubtitle);
+        if (!selectedSubtitlePreference.isEmpty() && !"off".equalsIgnoreCase(selectedSubtitlePreference)) {
+            initialTracks.setPreferredTextLanguage(selectedSubtitlePreference);
+        } else {
+            initialTracks.setTrackTypeDisabled(C.TRACK_TYPE_TEXT, true);
         }
         trackSelector.setParameters(initialTracks);
         player = new ExoPlayer.Builder(this)
@@ -924,33 +946,59 @@ public class NativePlayerActivity extends AppCompatActivity {
     }
 
     private void showSubtitlePicker() {
-        List<Tracks.Group> groups = trackGroups(C.TRACK_TYPE_TEXT);
+        JSONArray options = subtitleOptions();
         List<String> labels = new ArrayList<>();
-        List<TrackSelectionOverride> choices = new ArrayList<>();
         labels.add("Off");
-        choices.add(null);
         int selected = 0;
-        for (Tracks.Group group : groups) {
-            for (int index = 0; index < group.length; index++) {
-                if (!group.isTrackSupported(index)) continue;
-                labels.add(trackLabel(group.getTrackFormat(index), "Subtitle " + labels.size()));
-                choices.add(new TrackSelectionOverride(group.getMediaTrackGroup(), index));
-                if (group.isTrackSelected(index)) selected = labels.size() - 1;
-            }
+        for (int index = 0; index < options.length(); index++) {
+            JSONObject option = options.optJSONObject(index);
+            if (option == null) continue;
+            labels.add(option.optString("name", "Subtitle " + labels.size()));
+            if (matchesSubtitlePreference(option, selectedSubtitlePreference)) selected = labels.size() - 1;
         }
         if (labels.size() < 2) return;
         new AlertDialog.Builder(this)
             .setTitle("Subtitles")
             .setSingleChoiceItems(labels.toArray(new String[0]), selected, (dialog, which) -> {
+                subtitleChanged = true;
                 DefaultTrackSelector.Parameters.Builder parameters = trackSelector.buildUponParameters()
                     .clearOverridesOfType(C.TRACK_TYPE_TEXT)
                     .setTrackTypeDisabled(C.TRACK_TYPE_TEXT, which == 0);
-                if (which > 0) parameters.setOverrideForType(choices.get(which));
+                if (which > 0) {
+                    JSONObject option = options.optJSONObject(which - 1);
+                    selectedSubtitlePreference = option == null
+                        ? ""
+                        : option.optString("lang", option.optString("name", ""));
+                    if (selectedSubtitlePreference.isEmpty() && option != null) {
+                        selectedSubtitlePreference = option.optString("name", "");
+                    }
+                    if (!selectedSubtitlePreference.isEmpty()) {
+                        parameters.setPreferredTextLanguage(selectedSubtitlePreference);
+                    }
+                    TrackSelectionOverride override = subtitleOverride(which - 1);
+                    if (override != null) parameters.setOverrideForType(override);
+                } else {
+                    selectedSubtitlePreference = "Off";
+                }
                 trackSelector.setParameters(parameters);
                 dialog.dismiss();
             })
             .setNegativeButton("Cancel", null)
             .show();
+    }
+
+    /** A ready track can be selected immediately; otherwise the language preference applies once it loads. */
+    @Nullable
+    private TrackSelectionOverride subtitleOverride(int optionIndex) {
+        String wantedId = "infinityplay-subtitle-" + optionIndex;
+        for (Tracks.Group group : trackGroups(C.TRACK_TYPE_TEXT)) {
+            for (int index = 0; index < group.length; index++) {
+                if (group.isTrackSupported(index) && wantedId.equals(group.getTrackFormat(index).id)) {
+                    return new TrackSelectionOverride(group.getMediaTrackGroup(), index);
+                }
+            }
+        }
+        return null;
     }
 
     private void showSpeedPicker() {
@@ -1029,6 +1077,7 @@ public class NativePlayerActivity extends AppCompatActivity {
         result.putExtra(RESULT_SUBTITLE_URL, selectedSubtitle == null ? "" : selectedSubtitle.optString("url", ""));
         result.putExtra(RESULT_SUBTITLE_NAME, selectedSubtitle == null ? "" : selectedSubtitle.optString("name", ""));
         result.putExtra(RESULT_SUBTITLE_LANGUAGE, selectedSubtitle == null ? "" : selectedSubtitle.optString("lang", ""));
+        result.putExtra(RESULT_SUBTITLE_CHANGED, subtitleChanged);
         result.putExtra(RESULT_EPISODE_STEP, episodeStep);
         setResult(completedNormally ? Activity.RESULT_OK : Activity.RESULT_CANCELED, result);
     }
@@ -1090,7 +1139,10 @@ public class NativePlayerActivity extends AppCompatActivity {
         super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig);
         if (quickActions != null) quickActions.setVisibility(isInPictureInPictureMode ? View.GONE : View.VISIBLE);
         if (isInPictureInPictureMode) playerView.hideController();
-        else playerView.showController();
+        else {
+            playerView.showController();
+            if (quickActions != null) quickActions.setVisibility(View.VISIBLE);
+        }
     }
 
     @Override
