@@ -21,7 +21,7 @@ _"Windows protected your PC"_ on first run — choose **More info → Run anyway
 
 ### macOS
 
-Choose the `x64` DMG for Intel Macs or the `arm64` DMG for Apple Silicon (M1, M2, M3, M4). Open the DMG
+Download the `arm64` DMG for Apple Silicon Macs (M1, M2, M3, M4). Open the DMG
 and drag InfinityPlay into Applications.
 
 The first macOS releases are intentionally unsigned. On first launch, Control-click the
@@ -31,28 +31,21 @@ notarization are planned once Apple Developer credentials are available.
 
 ### Linux
 
-Linux packages are available for both `x64` (x86_64) and `arm64` (aarch64 / Raspberry Pi / ARM PCs).
+Linux x64 packages are provided via portable AppImage and Fedora RPM:
 
 ```bash
-# Portable package: no installation required (replace x64 with arm64 on ARM systems)
-chmod +x InfinityPlay-*-linux-*.AppImage
+# Portable AppImage: no installation required
+chmod +x InfinityPlay-*-linux-x64.AppImage
 # AppImage cannot install host dependencies; install FFmpeg first:
 # Fedora: sudo dnf install ffmpeg
 # Ubuntu/Debian: sudo apt install ffmpeg
-# Arch: sudo pacman -S ffmpeg
-./InfinityPlay-*-linux-*.AppImage
+./InfinityPlay-*-linux-x64.AppImage
 
-# Debian, Ubuntu, Linux Mint
-sudo apt install ./InfinityPlay-*-linux-*.deb
-
-# Fedora, RHEL, openSUSE
-sudo dnf install ./InfinityPlay-*-linux-*.rpm
-
-# Arch Linux, Manjaro, EndeavourOS
-sudo pacman -U ./InfinityPlay-*-linux-*.pkg.tar.zst
+# Fedora, RHEL, openSUSE (RPM)
+sudo dnf install ./InfinityPlay-*-linux-x64.rpm
 ```
 
-DEB, RPM, and Arch packages declare `ffmpeg` as an installation dependency; it also
+The RPM package declares `ffmpeg` as an installation dependency; it also
 provides `ffprobe`. InfinityPlay uses these maintained distribution tools on Linux and
 does not ship obsolete static Linux binaries. AppImage users install FFmpeg once because
 the portable format cannot install host packages.

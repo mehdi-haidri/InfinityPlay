@@ -2,6 +2,12 @@
 
 ## 0.3.7 (Latest update)
 
+### Search Pagination & Advanced Filtering Engine
+- **Full Search Pagination System**: Added multi-page browsing support in [`SearchPage.tsx`](file:///home/scorpiontaj/Desktop/Coding/InfinityPlay/src/renderer/src/pages/SearchPage.tsx) with direct numeric page pills, Previous / Next controls, smooth scroll restoration, and dynamic page state management.
+- **Advanced Filtering Matrix**: Expanded search filters with genre filtering (18+ genres), minimum IMDb rating thresholds (8+, 7+, 6+), release era selection (2025–2026, 2020–2024, 2010s, 2000s, 90s, Classics), audio language filters, and clean HD quality toggles.
+- **Active Filter Pills Bar**: Added interactive dismissible chips with 1-click removal for active criteria alongside a full "Reset All Filters" action.
+- **Streamlined Fast Release Builds**: Optimized GitHub Actions pipeline and [`electron-builder.yml`](file:///home/scorpiontaj/Desktop/Coding/InfinityPlay/electron-builder.yml) targeting Android Universal, macOS Apple Silicon ARM64, Linux x64 (Fedora RPM & AppImage), and Windows (ARM64 & x64), cutting Linux build times from hours to minutes.
+
 ### OpenSubtitles & Community Subtitle Fallback
 - **Community Subtitle Engine**: Integrated public OpenSubtitles REST API and community subtitle search in [`opensubtitles.ts`](file:///home/scorpiontaj/Desktop/Coding/InfinityPlay/src/main/providers/opensubtitles.ts) covering English, Arabic, French, Spanish, German, Italian, Turkish, Russian, Japanese, and Korean tracks.
 - **Automatic Fallback for Subtitle-less Movies**: Titles with no default MovieBox subtitles now automatically fallback to OpenSubtitles community files.

@@ -103,7 +103,7 @@ jobs:
             release/latest*.yml
 
   macos:
-    name: Package macOS x64 and arm64
+    name: Package macOS arm64
     needs: validate
     runs-on: macos-14
     env:
@@ -120,32 +120,6 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
-
-      # npm installs only the runner's own architecture, but this job packages x64 as well
-      # as arm64. The @rse/ffmpeg post-install downloads only the host's binary, so the
-      # x64 binary is fetched from the same GitHub release that @rse/ffmpeg uses. FFprobe
-      # still uses the per-platform @ffprobe-installer package.
-      - name: Add x64 FFmpeg and FFprobe binaries for the cross build
-        shell: bash
-        run: |
-          set -euo pipefail
-          # --- FFmpeg x64 from @rse/ffmpeg GitHub release ---
-          ffmpeg_dir="node_modules/@rse/ffmpeg/ffmpeg.d"
-          mkdir -p "$ffmpeg_dir"
-          rse_version=$(node -p "require('./node_modules/@rse/ffmpeg/package.json').version")
-          curl -fsSL -o "$ffmpeg_dir/ffmpeg-mac-x64" \
-            "https://github.com/rse/ffmpeg/releases/download/${rse_version}/ffmpeg-mac-x64"
-          chmod +x "$ffmpeg_dir/ffmpeg-mac-x64"
-          file "$ffmpeg_dir/ffmpeg-mac-x64"
-
-          # --- FFprobe x64 from @ffprobe-installer ---
-          target="node_modules/@ffprobe-installer/darwin-x64"
-          mkdir -p "$target"
-          tarball=$(npm pack @ffprobe-installer/darwin-x64 --silent | tail -1)
-          tar -xzf "$tarball" -C "$target" --strip-components=1
-          rm -f "$tarball"
-          chmod +x "$target/ffprobe"
-          file "$target/ffprobe"
 
       # electron-builder downloads the Electron binary and its own helpers during
       # packaging. Those requests fail intermittently ("socket hang up"), which is a
@@ -178,13 +152,10 @@ jobs:
           for dmg in release/*.dmg; do
             hdiutil verify "$dmg"
           done
-          for arch in x64 arm64; do
-            test -f "release/InfinityPlay-${version}-mac-${arch}.dmg"
-            test -f "release/InfinityPlay-${version}-mac-${arch}.zip"
-            grep -F "InfinityPlay-${version}-mac-${arch}.zip" release/latest-mac.yml
-          done
+          test -f "release/InfinityPlay-${version}-mac-arm64.dmg"
+          test -f "release/InfinityPlay-${version}-mac-arm64.zip"
+          grep -F "InfinityPlay-${version}-mac-arm64.zip" release/latest-mac.yml
           find release -path "*/InfinityPlay.app/Contents/MacOS/InfinityPlay" -exec file {} \;
-          # The bundled FFmpeg must match the app's architecture, or it cannot be spawned.
           for app_dir in release/mac*/InfinityPlay.app; do
             test -x "$app_dir/Contents/Resources/bin/ffmpeg"
             test -x "$app_dir/Contents/Resources/bin/ffprobe"
@@ -218,7 +189,7 @@ jobs:
             release/latest-mac.yml
 
   linux:
-    name: Package Linux x64 and arm64
+    name: Package Linux x64 (AppImage & Fedora RPM)
     needs: validate
     runs-on: ubuntu-22.04
     steps:
@@ -237,7 +208,7 @@ jobs:
       - name: Install package inspection tools
         run: |
           sudo apt-get update
-          sudo apt-get install --yes ffmpeg libarchive-tools rpm xz-utils zstd
+          sudo apt-get install --yes ffmpeg rpm
 
       # electron-builder downloads the Electron binary and its own helpers during
       # packaging. Those requests fail intermittently ("socket hang up"), which is a
@@ -250,7 +221,7 @@ jobs:
           key: ${{ runner.os }}-electron-${{ hashFiles('package-lock.json') }}
           restore-keys: ${{ runner.os }}-electron-
 
-      - name: Build AppImage, DEB, RPM, and Arch packages
+      - name: Build AppImage and RPM packages
         shell: bash
         run: |
           set -uo pipefail
@@ -267,21 +238,12 @@ jobs:
         run: |
           set -euo pipefail
           appimage=$(find release -maxdepth 1 -name "*.AppImage" | head -n 1)
-          deb=$(find release -maxdepth 1 -name "*.deb" | head -n 1)
           rpm_package=$(find release -maxdepth 1 -name "*.rpm" | head -n 1)
-          arch_package=$(find release -maxdepth 1 -name "*.pkg.tar.zst" | head -n 1)
-          test -n "$appimage" && test -n "$deb" && test -n "$rpm_package" && test -n "$arch_package"
-          dpkg-deb --info "$deb"
+          test -n "$appimage" && test -n "$rpm_package"
           rpm --query --package --info "$rpm_package"
-          dpkg-deb --field "$deb" Depends | grep -F ffmpeg
           rpm --query --package --requires "$rpm_package" | grep -F ffmpeg
-          tar --list --file "$arch_package" >/dev/null
-          tar --extract --to-stdout --file "$arch_package" .PKGINFO | grep -F "depend = ffmpeg"
-          test "$(tar --extract --to-stdout --file "$arch_package" opt/InfinityPlay/resources/package-type)" = "pacman"
-          x64_appimage=$(find release -maxdepth 1 -name "*x64*.AppImage" -o -name "*x86_64*.AppImage" | head -n 1)
-          target_appimage="${x64_appimage:-$appimage}"
-          chmod +x "$target_appimage"
-          "$target_appimage" --appimage-extract >/dev/null
+          chmod +x "$appimage"
+          "$appimage" --appimage-extract >/dev/null
           test ! -e squashfs-root/resources/bin/ffmpeg
           test ! -e squashfs-root/resources/bin/ffprobe
           test -f squashfs-root/resources/bin/SYSTEM_FFMPEG_REQUIRED.txt
@@ -294,9 +256,7 @@ jobs:
           path: |
             release/*.AppImage
             release/*.AppImage.blockmap
-            release/*.deb
             release/*.rpm
-            release/*.pkg.tar.zst
             release/latest-linux*.yml 
 
   android:

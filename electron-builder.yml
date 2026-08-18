@@ -38,11 +38,6 @@ extraResources:
   - from: build/bin
     to: bin
 
-# electron-builder 25's pacman target emits an XZ stream. Recompress that one artifact
-# to real Zstandard before electron-builder reports it as complete.
-artifactBuildStarted: build/prepare-linux-target.cjs
-artifactBuildCompleted: build/repack-pacman.cjs
-
 win:
   target:
     - target: nsis
@@ -64,10 +59,10 @@ mac:
   notarize: false
   target:
     - target: dmg
-      arch: [x64, arm64]
+      arch: [arm64]
     # Squirrel.Mac/electron-updater requires the ZIP and latest-mac.yml alongside the DMG.
     - target: zip
-      arch: [x64, arm64]
+      arch: [arm64]
   category: public.app-category.entertainment
   artifactName: ${productName}-${version}-mac-${arch}.${ext}
 
@@ -77,13 +72,9 @@ linux:
   syncDesktopName: true
   target:
     - target: AppImage
-      arch: [x64, arm64]
-    - target: deb
-      arch: [x64, arm64]
+      arch: [x64]
     - target: rpm
-      arch: [x64, arm64]
-    - target: pacman
-      arch: [x64, arm64]
+      arch: [x64]
   category: AudioVideo
   synopsis: Stream movies, series, anime and live TV
   description: Desktop app for finding and streaming movies, TV shows, anime and live TV.
@@ -91,8 +82,6 @@ linux:
   vendor: EL HADRATI Othman
   executableName: infinityplay
   icon: icon.png
-  # electron-builder 26 nests the `[Desktop Entry]` keys under `desktop.entry`; they sat
-  # directly on `desktop` in 25.
   desktop:
     entry:
       Name: InfinityPlay
@@ -104,44 +93,8 @@ linux:
       Type: Application
   artifactName: ${productName}-${version}-linux-${arch}.${ext}
 
-# electron-builder 25 otherwise uses `.pacman` as the artifact extension. Keep the
-# standard Arch Linux package suffix so `pacman -U` and release tooling recognise it.
-pacman:
-  artifactName: ${productName}-${version}-linux-${arch}.pkg.tar.zst
-  depends:
-    - c-ares
-    - ffmpeg
-    - gtk3
-    - http-parser
-    - libevent
-    - libvpx
-    - libxslt
-    - libxss
-    - minizip
-    - nss
-    - re2
-    - snappy
-    - libnotify
-    - libappindicator-gtk3
-
-# Use one architecture label in user-facing filenames even though package managers call
-# x64 `amd64` or `x86_64` internally.
 appImage:
   artifactName: ${productName}-${version}-linux-${arch}.${ext}
-
-deb:
-  artifactName: ${productName}-${version}-linux-${arch}.${ext}
-  depends:
-    - libgtk-3-0
-    - libnotify4
-    - libnss3
-    - libxss1
-    - libxtst6
-    - xdg-utils
-    - libatspi2.0-0
-    - libuuid1
-    - libsecret-1-0
-    - ffmpeg
 
 rpm:
   artifactName: ${productName}-${version}-linux-${arch}.${ext}
