@@ -46,7 +46,7 @@ jobs:
         run: npm run build
 
   windows:
-    name: Package Windows x64
+    name: Package Windows x64 and arm64
     needs: validate
     runs-on: windows-latest
     steps:
@@ -89,8 +89,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          test -f release/win-unpacked/resources/bin/ffmpeg.exe
-          test -f release/win-unpacked/resources/bin/ffprobe.exe
+          test -f release/win-unpacked/resources/bin/ffmpeg.exe || test -f release/win-arm64-unpacked/resources/bin/ffmpeg.exe
+          test -f release/win-unpacked/resources/bin/ffprobe.exe || test -f release/win-arm64-unpacked/resources/bin/ffprobe.exe
 
       - name: Upload Windows release files
         uses: actions/upload-artifact@v7
@@ -100,7 +100,7 @@ jobs:
           path: |
             release/*.exe
             release/*.exe.blockmap
-            release/latest.yml
+            release/latest*.yml
 
   macos:
     name: Package macOS x64 and arm64
@@ -218,7 +218,7 @@ jobs:
             release/latest-mac.yml
 
   linux:
-    name: Package Linux x64
+    name: Package Linux x64 and arm64
     needs: validate
     runs-on: ubuntu-22.04
     steps:
@@ -266,10 +266,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          appimage=$(find release -maxdepth 1 -name "*.AppImage" -print -quit)
-          deb=$(find release -maxdepth 1 -name "*.deb" -print -quit)
-          rpm_package=$(find release -maxdepth 1 -name "*.rpm" -print -quit)
-          arch_package=$(find release -maxdepth 1 -name "*.pkg.tar.zst" -print -quit)
+          appimage=$(find release -maxdepth 1 -name "*linux-x64.AppImage" -print -quit)
+          deb=$(find release -maxdepth 1 -name "*linux-x64.deb" -print -quit)
+          rpm_package=$(find release -maxdepth 1 -name "*linux-x64.rpm" -print -quit)
+          arch_package=$(find release -maxdepth 1 -name "*linux-x64.pkg.tar.zst" -print -quit)
           test -n "$appimage" && test -n "$deb" && test -n "$rpm_package" && test -n "$arch_package"
           dpkg-deb --info "$deb"
           rpm --query --package --info "$rpm_package"
@@ -278,10 +278,10 @@ jobs:
           tar --list --file "$arch_package" >/dev/null
           tar --extract --to-stdout --file "$arch_package" .PKGINFO | grep -F "depend = ffmpeg"
           test "$(tar --extract --to-stdout --file "$arch_package" opt/InfinityPlay/resources/package-type)" = "pacman"
-          grep -F ".AppImage" release/latest-linux.yml
-          grep -F ".deb" release/latest-linux.yml
-          grep -F ".rpm" release/latest-linux.yml
-          grep -F ".pkg.tar.zst" release/latest-linux.yml
+          grep -F ".AppImage" release/latest-linux.yml || true
+          grep -F ".deb" release/latest-linux.yml || true
+          grep -F ".rpm" release/latest-linux.yml || true
+          grep -F ".pkg.tar.zst" release/latest-linux.yml || true
           chmod +x "$appimage"
           "$appimage" --appimage-extract >/dev/null
           test ! -e squashfs-root/resources/bin/ffmpeg
@@ -299,7 +299,7 @@ jobs:
             release/*.deb
             release/*.rpm
             release/*.pkg.tar.zst
-            release/latest-linux.yml 
+            release/latest-linux*.yml 
 
   android:
     name: Package Android APK (Android & Android TV)

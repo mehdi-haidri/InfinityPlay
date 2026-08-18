@@ -24,6 +24,7 @@ const ARCH_NAMES = { 0: "ia32", 1: "x64", 2: "armv7l", 3: "arm64", 4: "universal
  */
 const RSE_FFMPEG_BINARIES = {
   "win32-x64":    "ffmpeg-win-x64.exe",
+  "win32-arm64":  "ffmpeg-win-x64.exe",
   "darwin-x64":   "ffmpeg-mac-x64",
   "darwin-arm64": "ffmpeg-mac-a64",
   "linux-x64":    "ffmpeg-lnx-x64",
@@ -51,6 +52,15 @@ function resolveFFprobe(platform, arch) {
     return path.join(path.dirname(require.resolve(pkg)), executable);
   } catch {
     // Not installed for this target.
+  }
+
+  if (platform === "win32" && arch === "arm64") {
+    try {
+      const pkg = "@ffprobe-installer/win32-x64/package.json";
+      return path.join(path.dirname(require.resolve(pkg)), executable);
+    } catch {
+      // Ignore
+    }
   }
 
   try {
