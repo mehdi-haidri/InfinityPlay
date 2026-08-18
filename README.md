@@ -16,12 +16,12 @@ Download the package for your system from the
 
 ### Windows
 
-Run the x64 `.exe` installer. Windows builds are unsigned, so SmartScreen shows
+Choose `x64` for Intel/AMD PCs or `arm64` for Windows on ARM (Snapdragon / Surface Pro). Run the `.exe` installer. Windows builds are unsigned, so SmartScreen shows
 _"Windows protected your PC"_ on first run — choose **More info → Run anyway**.
 
 ### macOS
 
-Choose the `x64` DMG for Intel Macs or the `arm64` DMG for Apple Silicon. Open the DMG
+Choose the `x64` DMG for Intel Macs or the `arm64` DMG for Apple Silicon (M1, M2, M3, M4). Open the DMG
 and drag InfinityPlay into Applications.
 
 The first macOS releases are intentionally unsigned. On first launch, Control-click the
@@ -31,25 +31,25 @@ notarization are planned once Apple Developer credentials are available.
 
 ### Linux
 
-All Linux packages currently target x64 systems.
+Linux packages are available for both `x64` (x86_64) and `arm64` (aarch64 / Raspberry Pi / ARM PCs).
 
 ```bash
-# Portable package: no installation required
-chmod +x InfinityPlay-*-linux-x64.AppImage
+# Portable package: no installation required (replace x64 with arm64 on ARM systems)
+chmod +x InfinityPlay-*-linux-*.AppImage
 # AppImage cannot install host dependencies; install FFmpeg first:
 # Fedora: sudo dnf install ffmpeg
 # Ubuntu/Debian: sudo apt install ffmpeg
 # Arch: sudo pacman -S ffmpeg
-./InfinityPlay-*-linux-x64.AppImage
+./InfinityPlay-*-linux-*.AppImage
 
 # Debian, Ubuntu, Linux Mint
-sudo apt install ./InfinityPlay-*-linux-x64.deb
+sudo apt install ./InfinityPlay-*-linux-*.deb
 
 # Fedora, RHEL, openSUSE
-sudo dnf install ./InfinityPlay-*-linux-x64.rpm
+sudo dnf install ./InfinityPlay-*-linux-*.rpm
 
 # Arch Linux, Manjaro, EndeavourOS
-sudo pacman -U ./InfinityPlay-*-linux-x64.pkg.tar.zst
+sudo pacman -U ./InfinityPlay-*-linux-*.pkg.tar.zst
 ```
 
 DEB, RPM, and Arch packages declare `ffmpeg` as an installation dependency; it also
