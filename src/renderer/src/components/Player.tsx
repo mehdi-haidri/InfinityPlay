@@ -2212,19 +2212,25 @@ export function Player() {
                 <span>Text size</span>
                 <div className="cue-stepper">
                   <button
+                    type="button"
+                    className="cue-stepper-btn"
                     onClick={() =>
                       void patchConfig({ subtitleSize: Math.max(60, config.subtitleSize - 10) })
                     }
                     aria-label="Smaller subtitles"
+                    title="Smaller subtitles"
                   >
                     <Minus size={13} />
                   </button>
                   <b>{config.subtitleSize}%</b>
                   <button
+                    type="button"
+                    className="cue-stepper-btn"
                     onClick={() =>
                       void patchConfig({ subtitleSize: Math.min(220, config.subtitleSize + 10) })
                     }
                     aria-label="Larger subtitles"
+                    title="Larger subtitles"
                   >
                     <Plus size={13} />
                   </button>
@@ -2372,6 +2378,8 @@ export function Player() {
                   <span style={{ fontSize: 11, color: "var(--text-muted)", fontWeight: 600 }}>Sync timing</span>
                   <div className="cue-stepper">
                     <button
+                      type="button"
+                      className="cue-stepper-btn"
                       onClick={() => setSubtitleOffset((prev) => Math.max(-10, Number((prev - 0.5).toFixed(1))))}
                       aria-label="Delay subtitles 0.5s"
                       title="Delay subtitles -0.5s"
@@ -2382,6 +2390,8 @@ export function Player() {
                       {subtitleOffset > 0 ? `+${subtitleOffset}s` : `${subtitleOffset}s`}
                     </b>
                     <button
+                      type="button"
+                      className="cue-stepper-btn"
                       onClick={() => setSubtitleOffset((prev) => Math.min(10, Number((prev + 0.5).toFixed(1))))}
                       aria-label="Advance subtitles 0.5s"
                       title="Advance subtitles +0.5s"
