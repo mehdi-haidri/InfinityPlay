@@ -68,7 +68,7 @@ from the TV apps row. The TV interface requires only D-pad, Select, and Back.
 Release APKs are signed. Android accepts an update over an existing installation only when
 both APKs use the same signing key; keep that key private and backed up.
 
-Installed Windows builds and AppImages can update from GitHub Releases through About.
+Installed Windows builds, AppImages, and Android APK installations can update from GitHub Releases through About or automatic in-app update prompts.
 DEB, RPM, and Arch builds are updated through their package manager.
 
 ## FFmpeg
