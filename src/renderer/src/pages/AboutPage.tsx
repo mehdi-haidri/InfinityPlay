@@ -71,7 +71,7 @@ function packageHelp(info: AppInfo | null): string {
     return "System packages are updated by your package manager, so this build does not replace itself.";
   }
   if (info.packageType.includes("Android")) {
-    return "Android installs its updates through the system package installer.";
+    return "Updates are downloaded in the app and handed to Android's package installer.";
   }
   return "Updates are downloaded here and installed when the app restarts.";
 }
@@ -185,7 +185,7 @@ export function AboutPage() {
           <div className="update-actions">
             {status.state === "downloaded" ? (
               <button className="btn btn-sm btn-primary" onClick={() => void install()}>
-                <Download size={14} /> Restart & install
+                <Download size={14} /> {isAndroid ? "Install update" : "Restart & install"}
               </button>
             ) : status.state === "unsupported" ? (
               /* This build cannot replace itself. Where releases are published somewhere the user

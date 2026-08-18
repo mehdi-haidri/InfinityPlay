@@ -45,9 +45,9 @@ export function UpdatePrompts() {
           tag: TAG,
           sticky: true,
           title: `InfinityPlay ${status.version} is ready`,
-          body: "Restart now to install it, or keep going and it installs when you close the app.",
+          body: "Install now to update to the latest version, or install later from the About page.",
           actions: [
-            { label: "Restart now", primary: true, onClick: () => void api.updates.install() },
+            { label: "Install now", primary: true, onClick: () => void api.updates.install() },
             { label: "Later", onClick: () => navigate({ name: "about" }) },
           ],
         });

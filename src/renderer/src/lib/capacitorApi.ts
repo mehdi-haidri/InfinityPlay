@@ -74,6 +74,26 @@ interface InfinityDownloadsPlugin {
 
 const nativeDownloads = registerPlugin<InfinityDownloadsPlugin>("InfinityDownloads");
 
+interface NativeUpdaterStatus {
+  state: "idle" | "progressing" | "paused" | "completed" | "interrupted";
+  receivedBytes: number;
+  totalBytes: number;
+  percent: number;
+  filePath: string;
+  failureReason: string;
+}
+
+interface InfinityUpdaterPlugin {
+  start(options: { url: string; version?: string; filename?: string }): Promise<{ id: string }>;
+  status(options?: { id?: string }): Promise<NativeUpdaterStatus>;
+  pause(options?: { id?: string }): Promise<{ ok: boolean }>;
+  resume(options?: { id?: string }): Promise<{ ok: boolean }>;
+  cancel(options?: { id?: string }): Promise<{ ok: boolean }>;
+  install(options?: { filePath?: string }): Promise<{ ok: boolean }>;
+}
+
+const nativeUpdater = registerPlugin<InfinityUpdaterPlugin>("InfinityUpdater");
+
 export interface NativePlayerResult {
   positionMs: number;
   durationMs: number;
@@ -217,7 +237,7 @@ const moviebox = new MovieBoxService(getSyncConfig);
 /** Where a newer build is published. Matches `publish.owner`/`publish.repo` in electron-builder.yml. */
 const RELEASES_URL = "https://github.com/ELhadratiOth/InfinityPlay/releases";
 
-/** `v0.3.4` and `0.3.4-beta.1` both compare as [0, 3, 4]. */
+/** `v0.3.5` and `0.3.5-beta.1` both compare as [0, 3, 5]. */
 function versionParts(value: string): number[] {
   return value
     .replace(/^v/i, "")
@@ -238,27 +258,102 @@ function isNewer(candidate: string, current: string): boolean {
   return false;
 }
 
+interface DiscoveredRelease {
+  version: string;
+  notes?: string;
+  apkUrl?: string;
+  releaseUrl: string;
+}
+
+let currentUpdateStatus: UpdateStatus = { state: "idle" };
+const updateListeners = new Set<(status: UpdateStatus) => void>();
+let latestDiscoveredRelease: DiscoveredRelease | null = null;
+let activeUpdateJobId: string | null = null;
+let updateProgressTimer: number | undefined;
+
+function publishUpdateStatus(next: UpdateStatus): void {
+  currentUpdateStatus = next;
+  for (const listener of updateListeners) {
+    try {
+      listener(next);
+    } catch {
+      // Listener error
+    }
+  }
+}
+
+function stopUpdateProgressPoll(): void {
+  if (updateProgressTimer !== undefined) {
+    window.clearInterval(updateProgressTimer);
+    updateProgressTimer = undefined;
+  }
+}
+
+function startUpdateProgressPoll(version: string, notes?: string): void {
+  stopUpdateProgressPoll();
+  updateProgressTimer = window.setInterval(async () => {
+    try {
+      const status = await nativeUpdater.status({ id: activeUpdateJobId ?? undefined });
+      if (status.state === "progressing") {
+        publishUpdateStatus({
+          state: "downloading",
+          version,
+          notes,
+          percent: status.percent,
+          transferred: status.receivedBytes,
+          total: status.totalBytes,
+        });
+      } else if (status.state === "completed") {
+        stopUpdateProgressPoll();
+        publishUpdateStatus({
+          state: "downloaded",
+          version,
+          notes,
+        });
+      } else if (status.state === "paused") {
+        stopUpdateProgressPoll();
+        publishUpdateStatus({
+          state: "paused",
+          version,
+          notes,
+          percent: status.percent,
+          transferred: status.receivedBytes,
+          total: status.totalBytes,
+        });
+      } else if (status.state === "interrupted") {
+        stopUpdateProgressPoll();
+        publishUpdateStatus({
+          state: "error",
+          message: status.failureReason || "The update download stopped unexpectedly.",
+        });
+      }
+    } catch (error) {
+      stopUpdateProgressPoll();
+      publishUpdateStatus({
+        state: "error",
+        message: error instanceof Error ? error.message : "Could not query update download status.",
+      });
+    }
+  }, 350);
+}
+
 /**
- * Asks GitHub what the newest published release is.
- *
- * Android has no in-app updater — the APK is installed by the system package installer, and nothing
- * in the app can replace itself. What it can do is tell the user whether a newer version exists and
- * hand them the page to get it from, which is otherwise something they would have to remember to
- * check by hand.
+ * Checks GitHub Releases for updates and discovers any attached APK asset.
  */
-async function latestAndroidRelease(): Promise<UpdateStatus> {
-  const unavailable = (message: string): UpdateStatus => ({
-    state: "unsupported",
-    message,
-    releaseUrl: RELEASES_URL,
-  });
+async function checkForAndroidUpdates(): Promise<UpdateStatus> {
+  publishUpdateStatus({ state: "checking" });
 
   let current = "";
   try {
     current = (await CapApp.getInfo()).version;
   } catch {
-    // Without a version to compare against, the release page is still worth offering.
-    return unavailable("Open the releases page to see whether a newer version is available.");
+    const fallback: UpdateStatus = {
+      state: "unsupported",
+      message: "Open the releases page to see whether a newer version is available.",
+      releaseUrl: RELEASES_URL,
+    };
+    publishUpdateStatus(fallback);
+    return fallback;
   }
 
   try {
@@ -268,23 +363,188 @@ async function latestAndroidRelease(): Promise<UpdateStatus> {
     });
     if (!response.ok) throw new Error(`GitHub answered ${response.status}`);
 
-    const release = (await response.json()) as { tag_name?: string; name?: string; html_url?: string };
-    const latest = (release.tag_name || release.name || "").trim();
-    if (!latest) return unavailable("The latest release could not be identified. Open the releases page to check.");
+    const release = (await response.json()) as {
+      tag_name?: string;
+      name?: string;
+      html_url?: string;
+      body?: string;
+      assets?: Array<{ name: string; browser_download_url: string; size: number }>;
+    };
+    const latestRaw = (release.tag_name || release.name || "").trim();
+    if (!latestRaw) {
+      const fallback: UpdateStatus = {
+        state: "unsupported",
+        message: "The latest release could not be identified. Open the releases page to check.",
+        releaseUrl: RELEASES_URL,
+      };
+      publishUpdateStatus(fallback);
+      return fallback;
+    }
 
-    const url = release.html_url || RELEASES_URL;
-    return isNewer(latest, current)
-      ? {
-          state: "unsupported",
-          version: latest.replace(/^v/i, ""),
-          message: `Version ${latest.replace(/^v/i, "")} is available. Open the release page to download and install it.`,
-          releaseUrl: url,
+    const latestClean = latestRaw.replace(/^v/i, "");
+    const releaseUrl = release.html_url || RELEASES_URL;
+    const notes = release.body?.trim() || undefined;
+    const apkAsset = release.assets?.find((asset) => asset.name.toLowerCase().endsWith(".apk"));
+
+    latestDiscoveredRelease = {
+      version: latestClean,
+      notes,
+      apkUrl: apkAsset?.browser_download_url,
+      releaseUrl,
+    };
+
+    if (isNewer(latestClean, current)) {
+      if (apkAsset) {
+        // Check if an existing APK was already downloaded for this version
+        try {
+          const nativeStatus = await nativeUpdater.status();
+          if (nativeStatus.state === "completed" && nativeStatus.filePath.includes(latestClean)) {
+            const downloadedStatus: UpdateStatus = {
+              state: "downloaded",
+              version: latestClean,
+              notes,
+            };
+            publishUpdateStatus(downloadedStatus);
+            return downloadedStatus;
+          }
+        } catch {
+          // Status check fallback
         }
-      : { state: "unsupported", version: current, message: `InfinityPlay ${current} is the latest version.`, releaseUrl: url };
+
+        const availableStatus: UpdateStatus = {
+          state: "available",
+          version: latestClean,
+          notes,
+        };
+        publishUpdateStatus(availableStatus);
+        return availableStatus;
+      }
+
+      const unsupportedStatus: UpdateStatus = {
+        state: "unsupported",
+        version: latestClean,
+        message: `Version ${latestClean} is available. Open the release page to download and install it.`,
+        releaseUrl,
+      };
+      publishUpdateStatus(unsupportedStatus);
+      return unsupportedStatus;
+    }
+
+    const upToDateStatus: UpdateStatus = {
+      state: "up-to-date",
+      version: current,
+    };
+    publishUpdateStatus(upToDateStatus);
+    return upToDateStatus;
   } catch (error) {
-    return unavailable(
-      `Could not reach the releases page (${error instanceof Error ? error.message : "network error"}). Open it in a browser to check.`,
-    );
+    const errorStatus: UpdateStatus = {
+      state: "error",
+      message: `Could not reach GitHub Releases (${error instanceof Error ? error.message : "network error"}).`,
+    };
+    publishUpdateStatus(errorStatus);
+    return errorStatus;
+  }
+}
+
+async function startAndroidUpdateDownload(): Promise<boolean> {
+  if (!latestDiscoveredRelease?.apkUrl) {
+    await checkForAndroidUpdates();
+    if (!latestDiscoveredRelease?.apkUrl) return false;
+  }
+
+  const { version, notes, apkUrl } = latestDiscoveredRelease;
+
+  if (currentUpdateStatus.state === "paused" && activeUpdateJobId) {
+    try {
+      const { ok } = await nativeUpdater.resume({ id: activeUpdateJobId });
+      if (ok) {
+        publishUpdateStatus({
+          state: "downloading",
+          version,
+          notes,
+          percent: ("percent" in currentUpdateStatus ? currentUpdateStatus.percent : 0),
+          transferred: ("transferred" in currentUpdateStatus ? currentUpdateStatus.transferred : 0),
+          total: ("total" in currentUpdateStatus ? currentUpdateStatus.total : 0),
+        });
+        startUpdateProgressPoll(version, notes);
+        return true;
+      }
+    } catch {
+      // Fall through to start fresh
+    }
+  }
+
+  try {
+    const { id } = await nativeUpdater.start({
+      url: apkUrl,
+      version,
+      filename: `InfinityPlay-${version}.apk`,
+    });
+    activeUpdateJobId = id;
+    publishUpdateStatus({
+      state: "downloading",
+      version,
+      notes,
+      percent: 0,
+      transferred: 0,
+      total: 0,
+    });
+    startUpdateProgressPoll(version, notes);
+    return true;
+  } catch (error) {
+    publishUpdateStatus({
+      state: "error",
+      message: error instanceof Error ? error.message : "Failed to start update download.",
+    });
+    return false;
+  }
+}
+
+async function pauseAndroidUpdateDownload(): Promise<boolean> {
+  if (currentUpdateStatus.state !== "downloading") return false;
+  stopUpdateProgressPoll();
+  try {
+    const { ok } = await nativeUpdater.pause({ id: activeUpdateJobId ?? undefined });
+    const version = latestDiscoveredRelease?.version ?? "";
+    const notes = latestDiscoveredRelease?.notes;
+    const previous = currentUpdateStatus.state === "downloading" ? currentUpdateStatus : null;
+    publishUpdateStatus({
+      state: "paused",
+      version,
+      notes,
+      percent: previous?.percent ?? 0,
+      transferred: previous?.transferred ?? 0,
+      total: previous?.total ?? 0,
+    });
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+async function declineAndroidUpdate(): Promise<boolean> {
+  if (currentUpdateStatus.state === "downloading") {
+    await pauseAndroidUpdateDownload();
+  }
+  const version =
+    latestDiscoveredRelease?.version ||
+    ("version" in currentUpdateStatus && currentUpdateStatus.version ? currentUpdateStatus.version : "");
+  const notes = latestDiscoveredRelease?.notes;
+  publishUpdateStatus({ state: "declined", version, notes });
+  return true;
+}
+
+async function installAndroidUpdate(): Promise<boolean> {
+  stopUpdateProgressPoll();
+  try {
+    const { ok } = await nativeUpdater.install();
+    return ok;
+  } catch (error) {
+    publishUpdateStatus({
+      state: "error",
+      message: error instanceof Error ? error.message : "Failed to launch package installer.",
+    });
+    return false;
   }
 }
 
@@ -396,6 +656,11 @@ const wrapResult = async <T>(fn: () => Promise<T>): Promise<Result<T>> => {
 export const createCapacitorApi = (): InfinityPlayApi => {
   // Pre-warm config
   void getStoredConfig();
+
+  // Check for updates shortly after launch, matching desktop behavior
+  setTimeout(() => {
+    void checkForAndroidUpdates().catch(() => undefined);
+  }, 8_000);
 
   return {
     catalog: {
@@ -604,7 +869,7 @@ export const createCapacitorApi = (): InfinityPlayApi => {
             node: "",
             platform: "Android",
             packageType: "Android APK / App Bundle",
-            updatable: false,
+            updatable: true,
             ffmpeg: false,
             ffmpegVersion: "",
             gpu: "",
@@ -623,20 +888,19 @@ export const createCapacitorApi = (): InfinityPlayApi => {
       onSession: androidOnCastSession,
     },
     updates: {
-      status: () => wrapResult(async (): Promise<UpdateStatus> => ({
-        state: "unsupported",
-        message: "Android installs updates through the system package installer. Check here for a newer version.",
-        releaseUrl: RELEASES_URL,
-      })),
-      check: () => wrapResult(latestAndroidRelease),
-      // The APK is installed by the system package installer, so there is nothing here to
-      // start, pause, or decline — every control resolves false and the card stays on its
-      // `unsupported` message.
-      download: () => wrapResult(async () => false),
-      pause: () => wrapResult(async () => false),
-      decline: () => wrapResult(async () => false),
-      install: () => wrapResult(async () => false),
-      onStatus: () => () => {},
+      status: () => wrapResult(async (): Promise<UpdateStatus> => currentUpdateStatus),
+      check: () => wrapResult(checkForAndroidUpdates),
+      download: () => wrapResult(startAndroidUpdateDownload),
+      pause: () => wrapResult(pauseAndroidUpdateDownload),
+      decline: () => wrapResult(declineAndroidUpdate),
+      install: () => wrapResult(installAndroidUpdate),
+      onStatus: (listener: (status: UpdateStatus) => void) => {
+        updateListeners.add(listener);
+        listener(currentUpdateStatus);
+        return () => {
+          updateListeners.delete(listener);
+        };
+      },
     },
     system: {
       openExternal: (url: string) =>
