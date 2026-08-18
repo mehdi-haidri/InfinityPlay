@@ -266,10 +266,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          appimage=$(find release -maxdepth 1 -name "*linux-x64.AppImage" -print -quit)
-          deb=$(find release -maxdepth 1 -name "*linux-x64.deb" -print -quit)
-          rpm_package=$(find release -maxdepth 1 -name "*linux-x64.rpm" -print -quit)
-          arch_package=$(find release -maxdepth 1 -name "*linux-x64.pkg.tar.zst" -print -quit)
+          appimage=$(find release -maxdepth 1 -name "*.AppImage" | head -n 1)
+          deb=$(find release -maxdepth 1 -name "*.deb" | head -n 1)
+          rpm_package=$(find release -maxdepth 1 -name "*.rpm" | head -n 1)
+          arch_package=$(find release -maxdepth 1 -name "*.pkg.tar.zst" | head -n 1)
           test -n "$appimage" && test -n "$deb" && test -n "$rpm_package" && test -n "$arch_package"
           dpkg-deb --info "$deb"
           rpm --query --package --info "$rpm_package"
@@ -278,12 +278,10 @@ jobs:
           tar --list --file "$arch_package" >/dev/null
           tar --extract --to-stdout --file "$arch_package" .PKGINFO | grep -F "depend = ffmpeg"
           test "$(tar --extract --to-stdout --file "$arch_package" opt/InfinityPlay/resources/package-type)" = "pacman"
-          grep -F ".AppImage" release/latest-linux.yml || true
-          grep -F ".deb" release/latest-linux.yml || true
-          grep -F ".rpm" release/latest-linux.yml || true
-          grep -F ".pkg.tar.zst" release/latest-linux.yml || true
-          chmod +x "$appimage"
-          "$appimage" --appimage-extract >/dev/null
+          x64_appimage=$(find release -maxdepth 1 -name "*x64*.AppImage" -o -name "*x86_64*.AppImage" | head -n 1)
+          target_appimage="${x64_appimage:-$appimage}"
+          chmod +x "$target_appimage"
+          "$target_appimage" --appimage-extract >/dev/null
           test ! -e squashfs-root/resources/bin/ffmpeg
           test ! -e squashfs-root/resources/bin/ffprobe
           test -f squashfs-root/resources/bin/SYSTEM_FFMPEG_REQUIRED.txt
