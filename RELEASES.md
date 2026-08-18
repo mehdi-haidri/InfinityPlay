@@ -29,6 +29,14 @@
 
 - Android's quality, audio, episode, cast, and playback-options row now follows the normal player controls: it fades away during playback and returns when the controls are shown.
 
+### Android in-app updater and APK self-update
+
+- Android phones, tablets, and Android TV can now download and install updates directly from within the app.
+- When a new release is available on GitHub, the app detects it, displays update prompts, downloads the APK with pause/resume support, and seamlessly launches the package installer to update in place.
+- The About page provides full update status, download progress, and manual check/install controls on Android.
+
+## 0.3.4
+
 ### Subtitles on the television
 
 - Fixed the cause of captions never appearing on a television. The subtitle button showed while the text never arrived, because a receiver fetches a side-loaded caption track under cross-origin rules the app was not answering.
